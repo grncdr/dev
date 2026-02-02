@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -19,6 +21,7 @@ type Server struct {
 	listener   net.Listener
 	store      *LeaseStore
 	auth       config.UserGatewayAuth
+	tunnels    *tunnelPool
 }
 
 type RegisterRequest struct {
@@ -50,11 +53,13 @@ func NewServer(listenAddr, dataDir string, auth config.UserGatewayAuth) (*Server
 		listener: ln,
 		store:    store,
 		auth:     auth,
+		tunnels:  newTunnelPool(),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/_agent/register", s.handleAgentRegister)
 	mux.HandleFunc("/_agent/heartbeat", s.handleAgentHeartbeat)
 	mux.HandleFunc("/_agent/unregister", s.handleAgentUnregister)
+	mux.HandleFunc("/_agent/tunnel/", s.handleAgentTunnel)
 	mux.HandleFunc("/_registry/labels", s.handleRegistryLabels)
 	mux.HandleFunc("/", s.handlePublic)
 
@@ -206,19 +211,64 @@ func (s *Server) handleRegistryLabels(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleAgentTunnel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodConnect {
+		writeMethodNotAllowed(w)
+		return
+	}
+	label := strings.TrimPrefix(r.URL.Path, "/_agent/tunnel/")
+	label = strings.TrimSpace(label)
+	if label == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"code": "missing_label", "error": "label is required"})
+		return
+	}
+	if !s.store.hasActive(label) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"code": "label_not_found", "error": "label is not registered"})
+		return
+	}
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"code": "hijack_unsupported", "error": "hijack not supported"})
+		return
+	}
+	conn, rw, err := hijacker.Hijack()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"code": "hijack_failed", "error": err.Error()})
+		return
+	}
+	if _, err := rw.WriteString("HTTP/1.1 200 OK\r\n\r\n"); err != nil {
+		_ = conn.Close()
+		return
+	}
+	if err := rw.Flush(); err != nil {
+		_ = conn.Close()
+		return
+	}
+	s.tunnels.add(label, conn)
+}
+
 func (s *Server) handlePublic(w http.ResponseWriter, r *http.Request) {
 	label := s.extractLabel(r.Host)
-	if label == "" || !s.store.hasActive(label) {
+	if label == "" || !s.store.hasActive(label) || !s.tunnels.has(label) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{
 			"code":  "gateway_label_unavailable",
 			"error": "no active agent for label",
 		})
 		return
 	}
-	writeJSON(w, http.StatusNotImplemented, map[string]string{
-		"code":  "gateway_forward_not_implemented",
-		"error": "agent forwarding is not implemented yet",
-	})
+	if isUpgradeRequest(r) {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"code":  "gateway_websocket_not_implemented",
+			"error": "websocket forwarding is not implemented yet",
+		})
+		return
+	}
+	if err := s.forwardViaTunnel(label, w, r); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"code":  "gateway_upstream_error",
+			"error": err.Error(),
+		})
+	}
 }
 
 func (s *Server) extractLabel(host string) string {
@@ -245,6 +295,70 @@ func stripPort(host string) string {
 		return h
 	}
 	return host
+}
+
+func (s *Server) forwardViaTunnel(label string, w http.ResponseWriter, r *http.Request) error {
+	tc := s.tunnels.acquire(label)
+	if tc == nil {
+		return errors.New("no tunnel connection available")
+	}
+	release := true
+	defer func() {
+		if release {
+			s.tunnels.release(label, tc)
+		}
+	}()
+
+	outReq := cloneRequestForTunnel(r)
+	if err := outReq.Write(tc.bw); err != nil {
+		release = false
+		_ = tc.conn.Close()
+		return err
+	}
+	if err := tc.bw.Flush(); err != nil {
+		release = false
+		_ = tc.conn.Close()
+		return err
+	}
+
+	resp, err := http.ReadResponse(tc.br, outReq)
+	if err != nil {
+		release = false
+		_ = tc.conn.Close()
+		return err
+	}
+	defer resp.Body.Close()
+	copyHeaders(w.Header(), resp.Header)
+	w.WriteHeader(resp.StatusCode)
+	_, err = io.Copy(w, resp.Body)
+	return err
+}
+
+func cloneRequestForTunnel(in *http.Request) *http.Request {
+	out := in.Clone(in.Context())
+	out.URL = &url.URL{
+		Path:     in.URL.Path,
+		RawPath:  in.URL.RawPath,
+		RawQuery: in.URL.RawQuery,
+	}
+	out.RequestURI = ""
+	return out
+}
+
+func copyHeaders(dst, src http.Header) {
+	for k := range dst {
+		dst.Del(k)
+	}
+	for k, vals := range src {
+		for _, v := range vals {
+			dst.Add(k, v)
+		}
+	}
+}
+
+func isUpgradeRequest(r *http.Request) bool {
+	return strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade") &&
+		r.Header.Get("Upgrade") != ""
 }
 
 func writeMethodNotAllowed(w http.ResponseWriter) {

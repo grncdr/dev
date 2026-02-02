@@ -1,0 +1,225 @@
+package gateway
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"crypto/tls"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+)
+
+type Agent struct {
+	GatewayURL  string
+	UpstreamURL string
+	Project     string
+	Slug        string
+	Label       string
+	AgentID     string
+	Name        string
+	RetryDelay  time.Duration
+	HTTPClient  *http.Client
+}
+
+func (a *Agent) Run(ctx context.Context) error {
+	if a.GatewayURL == "" || a.UpstreamURL == "" || a.Label == "" {
+		return errors.New("gateway_url, upstream_url, and label are required")
+	}
+	if a.RetryDelay <= 0 {
+		a.RetryDelay = 500 * time.Millisecond
+	}
+	for {
+		err := a.runOnce(ctx)
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err == nil {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(a.RetryDelay):
+		}
+	}
+}
+
+func (a *Agent) runOnce(ctx context.Context) error {
+	if err := a.register(ctx); err != nil {
+		return err
+	}
+	conn, br, bw, err := a.connectTunnel(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	upstreamURL, err := url.Parse(a.UpstreamURL)
+	if err != nil {
+		return err
+	}
+	client := a.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+
+	for {
+		req, err := http.ReadRequest(br)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		outReq, err := rewriteForUpstream(req, upstreamURL)
+		if err != nil {
+			_ = writeGatewayErrorResponse(bw, http.StatusBadGateway, err)
+			_ = bw.Flush()
+			return err
+		}
+		resp, err := client.Do(outReq.WithContext(ctx))
+		if err != nil {
+			_ = writeGatewayErrorResponse(bw, http.StatusBadGateway, err)
+			_ = bw.Flush()
+			continue
+		}
+		if err := resp.Write(bw); err != nil {
+			resp.Body.Close()
+			return err
+		}
+		resp.Body.Close()
+		if err := bw.Flush(); err != nil {
+			return err
+		}
+	}
+}
+
+func (a *Agent) register(ctx context.Context) error {
+	payload := RegisterRequest{
+		Project: a.Project,
+		Slug:    a.Slug,
+		Label:   a.Label,
+		AgentID: a.AgentID,
+		Name:    a.Name,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	base, err := url.Parse(a.GatewayURL)
+	if err != nil {
+		return err
+	}
+	endpoint := base.ResolveReference(&url.URL{Path: "/_agent/register"})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := a.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("register failed: %s %s", resp.Status, strings.TrimSpace(string(b)))
+	}
+	return nil
+}
+
+func (a *Agent) connectTunnel(ctx context.Context) (net.Conn, *bufio.Reader, *bufio.Writer, error) {
+	base, err := url.Parse(a.GatewayURL)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	address := base.Host
+	if !strings.Contains(address, ":") {
+		if base.Scheme == "https" {
+			address += ":443"
+		} else {
+			address += ":80"
+		}
+	}
+	var conn net.Conn
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	if base.Scheme == "https" {
+		conn, err = tls.DialWithDialer(dialer, "tcp", address, &tls.Config{
+			ServerName: strings.Split(base.Host, ":")[0],
+			MinVersion: tls.VersionTLS12,
+		})
+	} else {
+		conn, err = dialer.DialContext(ctx, "tcp", address)
+	}
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	br := bufio.NewReader(conn)
+	bw := bufio.NewWriter(conn)
+	targetPath := "/_agent/tunnel/" + a.Label
+	req := &http.Request{
+		Method: http.MethodConnect,
+		URL:    &url.URL{Path: targetPath},
+		Host:   base.Host,
+		Header: make(http.Header),
+	}
+	if err := req.Write(bw); err != nil {
+		conn.Close()
+		return nil, nil, nil, err
+	}
+	if err := bw.Flush(); err != nil {
+		conn.Close()
+		return nil, nil, nil, err
+	}
+	resp, err := http.ReadResponse(br, req)
+	if err != nil {
+		conn.Close()
+		return nil, nil, nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		conn.Close()
+		return nil, nil, nil, fmt.Errorf("connect tunnel failed: %s %s", resp.Status, strings.TrimSpace(string(b)))
+	}
+	resp.Body.Close()
+	return conn, br, bw, nil
+}
+
+func rewriteForUpstream(req *http.Request, upstream *url.URL) (*http.Request, error) {
+	out := req.Clone(req.Context())
+	out.URL.Scheme = upstream.Scheme
+	out.URL.Host = upstream.Host
+	out.RequestURI = ""
+	if req.Host == "" {
+		out.Host = upstream.Host
+	}
+	return out, nil
+}
+
+func writeGatewayErrorResponse(w io.Writer, status int, err error) error {
+	resp := &http.Response{
+		StatusCode: status,
+		Status:     fmt.Sprintf("%d %s", status, http.StatusText(status)),
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(err.Error())),
+	}
+	resp.Header.Set("Content-Type", "text/plain")
+	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(err.Error())))
+	return resp.Write(w)
+}

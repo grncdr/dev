@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -92,6 +93,65 @@ func TestServer_BasicAuthAppliesOnlyToPublicRequests(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected 200, got %d body=%s", resp.StatusCode, string(b))
+	}
+}
+
+func TestServer_ForwardsThroughAgentTunnel(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Upstream-Path", r.URL.Path)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("ok:" + r.URL.Path))
+	}))
+	defer upstream.Close()
+
+	dir := t.TempDir()
+	srv, client := startGatewayServer(t, dir, config.UserGatewayAuth{})
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	agent := &Agent{
+		GatewayURL:  "http://" + srv.Addr(),
+		UpstreamURL: upstream.URL,
+		Label:       "alpha",
+		Project:     "Foo Corp",
+		Slug:        "main",
+		AgentID:     "agent-1",
+	}
+	go func() {
+		_ = agent.Run(ctx)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		req, err := http.NewRequest(http.MethodGet, "http://"+srv.Addr()+"/ping", nil)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Host = "app.alpha.localhost"
+		resp, err := client.Do(req)
+		if err == nil && resp.StatusCode == http.StatusCreated {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if string(body) != "ok:/ping" {
+				t.Fatalf("unexpected body: %q", string(body))
+			}
+			if resp.Header.Get("X-Upstream-Path") != "/ping" {
+				t.Fatalf("missing upstream header")
+			}
+			return
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("forwarding never became ready; last error=%v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
