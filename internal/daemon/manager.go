@@ -57,6 +57,8 @@ type processInfo struct {
 	ready          bool
 	readyErr       error
 	readyWait      chan struct{}
+	exited         chan struct{} // closed when process exits
+	exitErr        error         // exit error from Wait()
 	mu             sync.Mutex
 	subs           map[int]io.Writer
 	nextID         int
@@ -162,7 +164,7 @@ func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string,
 		}
 
 		m.mu.Lock()
-		if existing := m.processes[slug][name]; existing != nil && existing.cmd != nil && existing.cmd.Process != nil && (existing.cmd.ProcessState == nil || !existing.cmd.ProcessState.Exited()) {
+		if existing := m.processes[slug][name]; existing != nil && existing.cmd != nil && existing.cmd.Process != nil && !existing.hasExited() {
 			statuses = append(statuses, ProcessStatus{Name: name, PID: existing.cmd.Process.Pid, Status: "running"})
 			m.mu.Unlock()
 			continue
@@ -230,6 +232,7 @@ func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string,
 			pty:            ptmx,
 			logFile:        logFile,
 			logSize:        logSize,
+			exited:         make(chan struct{}),
 			subs:           make(map[int]io.Writer),
 		}
 		info.startOutputPump()
@@ -248,14 +251,16 @@ func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string,
 					exitCode = 1
 				}
 			}
+			meta.mu.Lock()
+			meta.exitErr = err
+			meta.mu.Unlock()
+			close(meta.exited)
 			logProcessExit(slugName, procName, proc.Process.Pid, exitCode, err)
-			if meta != nil {
-				if meta.pty != nil {
-					_ = meta.pty.Close()
-				}
-				if meta.logFile != nil {
-					_ = meta.logFile.Close()
-				}
+			if meta.pty != nil {
+				_ = meta.pty.Close()
+			}
+			if meta.logFile != nil {
+				_ = meta.logFile.Close()
 			}
 		}(slug, name, cmd, info)
 
@@ -343,19 +348,11 @@ func (m *Manager) stopWorktreeFromDir(slug, dirHint string, processes []string, 
 		}
 		_ = info.cmd.Process.Signal(os.Interrupt)
 
-		waitCh := make(chan error, 1)
-		go func(c *exec.Cmd) { waitCh <- c.Wait() }(info.cmd)
-
 		select {
 		case <-time.After(2 * time.Second):
 			_ = info.cmd.Process.Kill()
-		case <-waitCh:
-		}
-		if info.pty != nil {
-			_ = info.pty.Close()
-		}
-		if info.logFile != nil {
-			_ = info.logFile.Close()
+			<-info.exited
+		case <-info.exited:
 		}
 		statuses = append(statuses, ProcessStatus{Name: name, PID: info.cmd.Process.Pid, Status: "stopped"})
 	}
@@ -409,7 +406,7 @@ func (m *Manager) StatusWorktreeFromDir(slug, dirHint string) (*WorktreeStatus, 
 		pid := 0
 		if info != nil && info.cmd != nil && info.cmd.Process != nil {
 			pid = info.cmd.Process.Pid
-			if info.cmd.ProcessState != nil && info.cmd.ProcessState.Exited() {
+			if info.hasExited() {
 				status = "exited"
 			} else {
 				status = "running"
@@ -451,7 +448,7 @@ func (m *Manager) EnsureProcessForTarget(slug, process string) (network string, 
 		info = procs[process]
 	}
 	m.mu.Unlock()
-	if ok && info != nil && info.address != "" && info.network != "" && info.cmd != nil && info.cmd.Process != nil && (info.cmd.ProcessState == nil || !info.cmd.ProcessState.Exited()) {
+	if ok && info != nil && info.address != "" && info.network != "" && info.cmd != nil && info.cmd.Process != nil && !info.hasExited() {
 		if err := waitForProcessReady(info); err != nil {
 			return "", "", err
 		}
@@ -665,6 +662,15 @@ func applyWrapper(wrapper string, command []string) ([]string, error) {
 		out = append(out, command...)
 	}
 	return out, nil
+}
+
+func (p *processInfo) hasExited() bool {
+	select {
+	case <-p.exited:
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *processInfo) startOutputPump() {

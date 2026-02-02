@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -81,7 +80,7 @@ func waitForProcessReady(info *processInfo) error {
 		}
 		if info.readyErr != nil {
 			// Retry readiness probing while the process is still running.
-			if info.cmd != nil && (info.cmd.ProcessState == nil || !info.cmd.ProcessState.Exited()) {
+			if !info.hasExited() {
 				info.readyErr = nil
 			} else {
 				err := info.readyErr
@@ -101,10 +100,10 @@ func waitForProcessReady(info *processInfo) error {
 		address := info.address
 		health := info.health
 		startupTimeout := info.startupTimeout
-		cmd := info.cmd
+		exitedCh := info.exited
 		info.mu.Unlock()
 
-		err := probeUntilReady(network, address, health, startupTimeout, cmd)
+		err := probeUntilReady(network, address, health, startupTimeout, exitedCh)
 
 		info.mu.Lock()
 		if err == nil {
@@ -119,7 +118,7 @@ func waitForProcessReady(info *processInfo) error {
 	}
 }
 
-func probeUntilReady(network, address string, health *processHealthCheck, startupTimeout time.Duration, cmd *exec.Cmd) error {
+func probeUntilReady(network, address string, health *processHealthCheck, startupTimeout time.Duration, exitedCh <-chan struct{}) error {
 	if network == "" || address == "" {
 		return nil
 	}
@@ -139,8 +138,10 @@ func probeUntilReady(network, address string, health *processHealthCheck, startu
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		if cmd != nil && cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+		select {
+		case <-exitedCh:
 			return errors.New("process exited before becoming healthy")
+		default:
 		}
 		if err := runHealthProbe(network, address, health); err == nil {
 			return nil
