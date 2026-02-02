@@ -25,7 +25,7 @@ func TestEnsureProcessForTargetWaitsForHTTPHealth(t *testing.T) {
 [project]
 name = "demo"
 
-[processes.web]
+[process.web]
 command = "sh -c \"sleep 1; python3 -m http.server ${PORT}\""
 port = "random"
 health = { type = "http", path = "/" }
@@ -98,12 +98,12 @@ name = "demo"
 [proxy]
 apex_zone = ".localhost"
 
-[processes.server]
+[process.server]
 command = "sh -c \"sleep 1; python3 -m http.server ${PORT}\""
 port = "random"
 health = { type = "http", path = "/" }
 
-[[processes.server.proxy]]
+[[process.server.proxy]]
 path = "/"
 `
 	if err := os.WriteFile(filepath.Join(repoDir, ".dev-mode.toml"), []byte(cfgText), 0o600); err != nil {
@@ -176,7 +176,7 @@ func TestEnsureProcessForTargetHonorsStartupTimeout(t *testing.T) {
 [project]
 name = "demo"
 
-[processes.web]
+[process.web]
 command = "sh -c \"sleep 2; python3 -m http.server ${PORT}\""
 port = "random"
 health = { type = "http", path = "/" }

@@ -26,7 +26,7 @@ func TestDaemonRestoresWorktreesAfterCleanShutdown(t *testing.T) {
 [project]
 name = "demo"
 
-[processes.sleeper]
+[process.sleeper]
 command = "sh -c \"sleep 60\""
 port = "random"
 `

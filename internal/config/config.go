@@ -18,7 +18,7 @@ const (
 type ProjectConfig struct {
 	Project   ProjectBlock              `toml:"project" json:"project"`
 	Gateway   map[string]any            `toml:"gateway" json:"gateway,omitempty"`
-	Processes map[string]map[string]any `toml:"processes" json:"processes,omitempty"`
+	Processes map[string]map[string]any `toml:"process" json:"processes,omitempty"`
 	Proxy     ProjectProxyBlock         `toml:"proxy" json:"proxy,omitempty"`
 	Hooks     HooksBlock                `toml:"hooks" json:"hooks,omitempty"`
 	Commands  CommandsBlock             `toml:"commands" json:"commands,omitempty"`
@@ -30,17 +30,23 @@ type ProjectBlock struct {
 }
 
 type UserConfig struct {
-	Worktrees map[string]WorktreeTrust `toml:"worktrees" json:"worktrees,omitempty"`
-	Gateway   UserGatewayBlock         `toml:"gateway" json:"gateway,omitempty"`
-	Proxy     UserProxyBlock           `toml:"proxy" json:"proxy,omitempty"`
+	Gateway UserGatewayBlock `toml:"gateway" json:"gateway,omitempty"`
+	Proxy   UserProxyBlock   `toml:"proxy" json:"proxy,omitempty"`
 }
 
 type UserGatewayBlock struct {
-	Enabled    bool            `toml:"enabled" json:"enabled,omitempty"`
-	DataDir    string          `toml:"data_dir" json:"data_dir,omitempty"`
-	Listen     string          `toml:"listen" json:"listen,omitempty"`
-	HTTPListen string          `toml:"http_listen" json:"http_listen,omitempty"`
-	Auth       UserGatewayAuth `toml:"auth" json:"auth,omitempty"`
+	Enabled       bool               `toml:"enabled" json:"enabled,omitempty"`
+	DataDir       string             `toml:"data_dir" json:"data_dir,omitempty"`
+	Listen        string             `toml:"listen" json:"listen,omitempty"`
+	HTTPListen    string             `toml:"http_listen" json:"http_listen,omitempty"`
+	DNSZone       string             `toml:"dns_zone" json:"dns_zone,omitempty"`
+	Hostname      string             `toml:"hostname" json:"hostname,omitempty"`
+	ACMEEmail     string             `toml:"acme_email" json:"acme_email,omitempty"`
+	ACMEDir       string             `toml:"acme_directory" json:"acme_directory,omitempty"`
+	ACMEStore     string             `toml:"acme_storage" json:"acme_storage,omitempty"`
+	ACMEResolvers []string           `toml:"acme_resolvers" json:"acme_resolvers,omitempty"`
+	Auth          UserGatewayAuth    `toml:"auth" json:"auth,omitempty"`
+	Route53       UserGatewayRoute53 `toml:"route53" json:"route53,omitempty"`
 }
 
 type UserGatewayAuth struct {
@@ -49,9 +55,10 @@ type UserGatewayAuth struct {
 	Password string `toml:"password" json:"password,omitempty"`
 }
 
-type WorktreeTrust struct {
-	Project string `toml:"project" json:"project"`
-	Trusted bool   `toml:"trusted" json:"trusted"`
+type UserGatewayRoute53 struct {
+	Enabled      bool   `toml:"enabled" json:"enabled,omitempty"`
+	HostedZoneID string `toml:"hosted_zone_id" json:"hosted_zone_id,omitempty"`
+	TTL          int64  `toml:"ttl" json:"ttl,omitempty"`
 }
 
 type HooksBlock struct {

@@ -28,8 +28,10 @@ type Agent struct {
 	HTTPClient     *http.Client
 	GatewayClient  *http.Client
 	UpstreamClient *http.Client
+	TLSConfig      *tls.Config
 	OnConnected    func()
 	OnDisconnected func(error)
+	OnRegistered   func(publicHost string)
 }
 
 func (a *Agent) Run(ctx context.Context) error {
@@ -150,6 +152,16 @@ func (a *Agent) register(ctx context.Context) error {
 		return err
 	}
 	defer resp.Body.Close()
+	var out struct {
+		PublicHost string `json:"public_host"`
+	}
+	if resp.StatusCode < 300 {
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		if a.OnRegistered != nil {
+			a.OnRegistered(strings.TrimSpace(out.PublicHost))
+		}
+		return nil
+	}
 	if resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("register failed: %s %s", resp.Status, strings.TrimSpace(string(b)))
@@ -173,9 +185,25 @@ func (a *Agent) connectTunnel(ctx context.Context) (net.Conn, *bufio.Reader, *bu
 	var conn net.Conn
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	if base.Scheme == "https" {
-		conn, err = tls.DialWithDialer(dialer, "tcp", address, &tls.Config{
+		tlsCfg := &tls.Config{
 			ServerName: strings.Split(base.Host, ":")[0],
 			MinVersion: tls.VersionTLS12,
+		}
+		if a.TLSConfig != nil {
+			tlsCfg = a.TLSConfig.Clone()
+			if tlsCfg.ServerName == "" {
+				tlsCfg.ServerName = strings.Split(base.Host, ":")[0]
+			}
+			if tlsCfg.MinVersion == 0 {
+				tlsCfg.MinVersion = tls.VersionTLS12
+			}
+		}
+		conn, err = tls.DialWithDialer(dialer, "tcp", address, &tls.Config{
+			ServerName:         tlsCfg.ServerName,
+			MinVersion:         tlsCfg.MinVersion,
+			Certificates:       tlsCfg.Certificates,
+			RootCAs:            tlsCfg.RootCAs,
+			InsecureSkipVerify: tlsCfg.InsecureSkipVerify,
 		})
 	} else {
 		conn, err = dialer.DialContext(ctx, "tcp", address)

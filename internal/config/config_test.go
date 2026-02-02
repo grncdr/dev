@@ -15,7 +15,7 @@ func TestLoadProjectConfig_OverridesAndValidation(t *testing.T) {
 [project]
 name = "Foo Corp"
 
-[processes.db]
+[process.db]
 singleton = true
 `
 	if err := os.WriteFile(basePath, []byte(base), 0o600); err != nil {
@@ -85,11 +85,22 @@ enabled = true
 data_dir = "~/gw"
 listen = ":443"
 http_listen = ":80"
+dns_zone = "tunnels.foocorp.dev"
+hostname = "gw.foocorp.dev"
+acme_email = "dev@foocorp.dev"
+acme_directory = "https://acme-v02.api.letsencrypt.org/directory"
+acme_storage = "~/gw-acme"
+acme_resolvers = ["1.1.1.1", "8.8.8.8:53"]
 
 [gateway.auth]
 enabled = true
 username = "foo"
 password = "bar"
+
+[gateway.route53]
+enabled = true
+hosted_zone_id = "Z123"
+ttl = 60
 `
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
@@ -104,6 +115,15 @@ password = "bar"
 	}
 	if !cfg.Gateway.Enabled || cfg.Gateway.DataDir != "~/gw" || !cfg.Gateway.Auth.Enabled {
 		t.Fatalf("unexpected gateway decode: %#v", cfg.Gateway)
+	}
+	if !cfg.Gateway.Route53.Enabled || cfg.Gateway.Route53.HostedZoneID != "Z123" || cfg.Gateway.DNSZone != "tunnels.foocorp.dev" || cfg.Gateway.Hostname != "gw.foocorp.dev" {
+		t.Fatalf("unexpected route53/dns_zone decode: %#v", cfg.Gateway)
+	}
+	if cfg.Gateway.ACMEEmail == "" || cfg.Gateway.ACMEDir == "" || cfg.Gateway.ACMEStore == "" {
+		t.Fatalf("expected acme fields to decode: %#v", cfg.Gateway)
+	}
+	if len(cfg.Gateway.ACMEResolvers) != 2 || cfg.Gateway.ACMEResolvers[0] != "1.1.1.1" {
+		t.Fatalf("expected acme resolvers to decode: %#v", cfg.Gateway.ACMEResolvers)
 	}
 }
 

@@ -41,6 +41,95 @@ func TestParseProxyHost_UsesUserApexZone(t *testing.T) {
 	}
 }
 
+func TestLocalProxyHostForTunnelRequest(t *testing.T) {
+	s := &Server{
+		userConfig: &config.UserConfig{Proxy: config.UserProxyBlock{ApexZone: ".localhost"}},
+		tunnels: map[string]*managedTunnel{
+			"xyzz": {
+				req: TunnelRequest{
+					Slug:  "feature-branch",
+					Label: "xyzz",
+				},
+				status: "connected",
+			},
+			"app": {
+				req: TunnelRequest{
+					Slug:  "app-slug",
+					Label: "app",
+				},
+				status: "connected",
+			},
+		},
+	}
+
+	got, ok := s.localProxyHostForTunnelRequest("xyzz.foocorp.dev")
+	if !ok || got != "feature-branch.localhost" {
+		t.Fatalf("expected base tunnel host rewrite, got %q ok=%v", got, ok)
+	}
+
+	got, ok = s.localProxyHostForTunnelRequest("app.xyzz.foocorp.dev")
+	if !ok || got != "app.feature-branch.localhost" {
+		t.Fatalf("expected subdomain tunnel host rewrite, got %q ok=%v", got, ok)
+	}
+
+	_, ok = s.localProxyHostForTunnelRequest("unknown.foocorp.dev")
+	if ok {
+		t.Fatalf("expected no rewrite for unknown label")
+	}
+}
+
+func TestLocalProxyHostForTunnelRequest_UsesMainSlugOverride(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "monorepo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(repo, "init"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	cfgBody := `
+[project]
+name = "Foo Corp"
+main_slug = "foocorp"
+`
+	cfgPath := filepath.Join(repo, ".dev-mode.toml")
+	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("demo"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(repo, "add", "."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := runGit(repo, "commit", "-m", "init"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+	cfg, _, err := config.LoadProjectConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	s := &Server{
+		mainPath:   repo,
+		config:     cfg,
+		userConfig: &config.UserConfig{Proxy: config.UserProxyBlock{ApexZone: ".localhost"}},
+		tunnels: map[string]*managedTunnel{
+			"foocorp": {
+				req: TunnelRequest{
+					Slug:  "monorepo",
+					Label: "foocorp",
+				},
+				status: "connected",
+			},
+		},
+	}
+	got, ok := s.localProxyHostForTunnelRequest("app.foocorp.foocorp.dev")
+	if !ok || got != "app.foocorp.localhost" {
+		t.Fatalf("expected main_slug host rewrite, got %q ok=%v", got, ok)
+	}
+}
+
 func TestParseProxyMatchers(t *testing.T) {
 	raw := []any{
 		map[string]any{
@@ -127,7 +216,7 @@ func TestProcessProxyMatchers_FromLoadedInlineProxyConfig(t *testing.T) {
 [project]
 name = "Foo Corp"
 
-[processes.mailpit]
+[process.mailpit]
 singleton = true
 command = "mailpit"
 proxy = { subdomain = "mailpit" }
@@ -155,7 +244,7 @@ func TestProjectConfigForSlug_UsesManagerWorktreePath(t *testing.T) {
 [project]
 name = "Foo Corp"
 
-[processes.mailpit]
+[process.mailpit]
 command = "mailpit"
 proxy = { subdomain = "mailpit" }
 `

@@ -4,7 +4,7 @@ This document is the source of truth for local proxy routing and gateway-to-agen
 
 ## Overview
 
-- Routing is defined per process via `[[processes.<name>.proxy]]` matchers.
+- Routing is defined per process via `[[process.<name>.proxy]]` matchers.
 - Gateway remains dumb: it only forwards traffic to the local agent/proxy.
 - Local proxy handles HTTP(S) routing and optional raw TCP forwarding.
 - Routed processes are auto-started on demand and health-gated before forwarding.
@@ -25,43 +25,43 @@ This document is the source of truth for local proxy routing and gateway-to-agen
 name = "Foo Corp"
 main_slug = "foocorp"
 
-[processes.rails]
+[process.rails]
 command = "puma"
 port = "random"                         # "random" | "unix" | integer
 health = { type = "http", path = "/up" } # optional
 startup_timeout = 45.0                  # optional, seconds
 
-[[processes.rails.proxy]]
+[[process.rails.proxy]]
 subdomain = null
 path = "/"
 match = "prefix"                        # prefix (default) | exact
 priority = 0
 
-[[processes.rails.proxy]]
+[[process.rails.proxy]]
 subdomains = ["app", "secure"]
 path = "/admin"
 match = "exact"
 
-[processes.webpack]
+[process.webpack]
 command = "yarn webpack serve"
 port = "random"
 
-[[processes.webpack.proxy]]
+[[process.webpack.proxy]]
 subdomains = ["app", "secure"]
 path = "/ws"
 match = "exact"
 
-[[processes.webpack.proxy]]
+[[process.webpack.proxy]]
 subdomains = ["app", "secure"]
 path = "/packs/"                        # normalized to "/packs" for prefix matching
 
-[processes.postgres]
+[process.postgres]
 singleton = true
 command = "postgres -k $PGHOST -p $PORT"
 port = "random"
 health = { type = "tcp" }
 
-[[processes.postgres.proxy]]
+[[process.postgres.proxy]]
 tcp_listen = 15432                      # raw TCP forwarder on 127.0.0.1:15432
 ```
 

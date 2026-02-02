@@ -27,7 +27,7 @@ Restarts the daemon.
 ## Projects
 
 ### `dev-mode projects list`
-Lists all trusted projects, their main worktree path, and known worktrees per project.
+Lists projects, their main worktree path, and known worktrees per project.
 
 ## Config
 
@@ -71,16 +71,12 @@ Attaches your terminal to a process PTY. Uses the current worktree when only `pr
 
 ## Tunnels
 
-### `dev-mode tunnel open [slug] [--label <label>]`
-Opens a tunnel for the worktree. Slug defaults to the current worktree when omitted; label defaults to slug.
+### `dev-mode share [slug] [--label <label>] [--gateway-url <url>]`
+Shares a worktree through the gateway. Slug defaults to the current worktree when omitted; label defaults to slug.
+Gateway URL comes from project `gateway.url` unless overridden with `--gateway-url`.
 
-Alias: `dev-mode tunnel [slug] [--label <label>]`
-
-### `dev-mode tunnel close [slug]`
-Closes the tunnel for the worktree.
-
-### `dev-mode tunnel status`
-Shows daemon-managed tunnel connection status.
+### `dev-mode unshare [slug] [--label <label>] [--gateway-url <url>]`
+Stops sharing the worktree.
 
 ## DNS
 
@@ -103,5 +99,11 @@ Installs DNS, certs, and proxy privileges (requires sudo).
 
 ## Gateway
 
-### `dev-mode gateway`
+### `dev-mode gateway run`
 Runs the gateway in the foreground.
+
+### `dev-mode gateway invite create [--ttl 5m] [--uses 1]`
+Creates an invite code for onboarding a new agent identity.
+
+### `dev-mode gateway login <invite-code> [--name <name>] [--gateway-url <url>]`
+Exchanges an invite code for client certificate credentials and stores them locally.

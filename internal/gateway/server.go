@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"crypto/subtle"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,11 +18,27 @@ import (
 )
 
 type Server struct {
-	httpServer *http.Server
-	listener   net.Listener
-	store      *LeaseStore
-	auth       config.UserGatewayAuth
-	tunnels    *tunnelPool
+	httpServer       *http.Server
+	listener         net.Listener
+	store            *LeaseStore
+	invites          *InviteStore
+	issuer           *CertIssuer
+	dnsZone          string
+	enforceAgentMTLS bool
+	auth             config.UserGatewayAuth
+	dns              DNSProvider
+	certs            CertProvisioner
+	tunnels          *tunnelPool
+}
+
+type ServerOptions struct {
+	ListenAddr string
+	DataDir    string
+	DNSZone    string
+	Auth       config.UserGatewayAuth
+	DNS        DNSProvider
+	Certs      CertProvisioner
+	TLSConfig  *tls.Config
 }
 
 type RegisterRequest struct {
@@ -36,30 +53,70 @@ type UnregisterRequest struct {
 	Label string `json:"label"`
 }
 
-func NewServer(listenAddr, dataDir string, auth config.UserGatewayAuth) (*Server, error) {
-	if listenAddr == "" {
-		listenAddr = ":8080"
+type InviteCreateRequest struct {
+	TTLSeconds int64 `json:"ttl_seconds"`
+	Uses       int   `json:"uses"`
+}
+
+type CertIssueRequest struct {
+	InviteCode string `json:"invite_code"`
+	Name       string `json:"name"`
+	CSR        string `json:"csr"`
+}
+
+func NewServer(opts ServerOptions) (*Server, error) {
+	if opts.ListenAddr == "" {
+		opts.ListenAddr = ":8080"
 	}
-	store, err := NewLeaseStore(dataDir)
+	dnsZone := normalizeHost(opts.DNSZone)
+	if dnsZone == "" {
+		return nil, errors.New("gateway dns zone is required")
+	}
+	store, err := NewLeaseStore(opts.DataDir)
 	if err != nil {
 		return nil, err
 	}
-	ln, err := net.Listen("tcp", listenAddr)
+	invites, err := NewInviteStore(opts.DataDir)
 	if err != nil {
-		return nil, fmt.Errorf("gateway listen %s: %w", listenAddr, err)
+		return nil, err
+	}
+	issuer, err := NewCertIssuer(opts.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	ln, err := net.Listen("tcp", opts.ListenAddr)
+	if err != nil {
+		return nil, fmt.Errorf("gateway listen %s: %w", opts.ListenAddr, err)
+	}
+	if opts.TLSConfig != nil {
+		pool, err := issuer.ClientCAPool()
+		if err != nil {
+			return nil, err
+		}
+		opts.TLSConfig.ClientCAs = pool
+		opts.TLSConfig.ClientAuth = tls.VerifyClientCertIfGiven
+		ln = tls.NewListener(ln, opts.TLSConfig)
 	}
 
 	s := &Server{
-		listener: ln,
-		store:    store,
-		auth:     auth,
-		tunnels:  newTunnelPool(),
+		listener:         ln,
+		store:            store,
+		invites:          invites,
+		issuer:           issuer,
+		dnsZone:          dnsZone,
+		enforceAgentMTLS: opts.TLSConfig != nil,
+		auth:             opts.Auth,
+		dns:              opts.DNS,
+		certs:            opts.Certs,
+		tunnels:          newTunnelPool(),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/_agent/register", s.handleAgentRegister)
 	mux.HandleFunc("/_agent/heartbeat", s.handleAgentHeartbeat)
 	mux.HandleFunc("/_agent/unregister", s.handleAgentUnregister)
+	mux.HandleFunc("/_agent/cert/issue", s.handleAgentCertIssue)
 	mux.HandleFunc("/_agent/tunnel/", s.handleAgentTunnel)
+	mux.HandleFunc("/_admin/invites/create", s.handleAdminInviteCreate)
 	mux.HandleFunc("/_registry/labels", s.handleRegistryLabels)
 	mux.HandleFunc("/", s.handlePublic)
 
@@ -127,6 +184,9 @@ func (s *Server) requiresBasicAuth(path string) bool {
 }
 
 func (s *Server) handleAgentRegister(w http.ResponseWriter, r *http.Request) {
+	if !s.ensureAgentAuth(w, r) {
+		return
+	}
 	if r.Method != http.MethodPost {
 		writeMethodNotAllowed(w)
 		return
@@ -152,14 +212,32 @@ func (s *Server) handleAgentRegister(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:  now,
 		LastSeenAt: now,
 	}
+	if s.dns != nil {
+		if err := s.dns.EnsureLabel(r.Context(), req.Label); err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"code": "dns_sync_failed", "error": err.Error()})
+			return
+		}
+	}
+	if s.certs != nil {
+		if err := s.certs.EnsureLabel(r.Context(), req.Label); err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"code": "acme_sync_failed", "error": err.Error()})
+			return
+		}
+	}
 	if err := s.store.upsert(lease); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"code": "persist_failed", "error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	resp := map[string]string{"status": "ok"}
+	resp["public_host"] = s.dnsZone
+	resp["public_hostname"] = req.Label + "." + s.dnsZone
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request) {
+	if !s.ensureAgentAuth(w, r) {
+		return
+	}
 	if r.Method != http.MethodPost {
 		writeMethodNotAllowed(w)
 		return
@@ -181,6 +259,9 @@ func (s *Server) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAgentUnregister(w http.ResponseWriter, r *http.Request) {
+	if !s.ensureAgentAuth(w, r) {
+		return
+	}
 	if r.Method != http.MethodPost {
 		writeMethodNotAllowed(w)
 		return
@@ -198,7 +279,79 @@ func (s *Server) handleAgentUnregister(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"code": "label_not_found", "error": err.Error()})
 		return
 	}
+	if s.dns != nil {
+		if err := s.dns.RemoveLabel(r.Context(), req.Label); err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"code": "dns_sync_failed", "error": err.Error()})
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleAdminInviteCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	var req InviteCreateRequest
+	if r.Body != nil {
+		if err := decodeJSON(r, &req); err != nil && !errors.Is(err, io.EOF) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"code": "invalid_body", "error": err.Error()})
+			return
+		}
+	}
+	ttl := 5 * time.Minute
+	if req.TTLSeconds > 0 {
+		ttl = time.Duration(req.TTLSeconds) * time.Second
+	}
+	uses := req.Uses
+	if uses <= 0 {
+		uses = 1
+	}
+	invite, err := s.invites.Create(ttl, uses)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"code": "invite_create_failed", "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"invite_code": invite.Code,
+		"expires_at":  invite.ExpiresAt,
+		"uses":        invite.UsesLeft,
+	})
+}
+
+func (s *Server) handleAgentCertIssue(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	var req CertIssueRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"code": "invalid_body", "error": err.Error()})
+		return
+	}
+	req.InviteCode = strings.TrimSpace(req.InviteCode)
+	if req.InviteCode == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"code": "missing_invite_code", "error": "invite_code is required"})
+		return
+	}
+	if req.Name == "" {
+		req.Name = "dev-mode-user"
+	}
+	if err := s.invites.Consume(req.InviteCode); err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"code": "invite_invalid", "error": err.Error()})
+		return
+	}
+	certPEM, caPEM, expiresAt, err := s.issuer.IssueClientCert([]byte(req.CSR), req.Name, 30*24*time.Hour)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"code": "cert_issue_failed", "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"cert_pem":   string(certPEM),
+		"ca_pem":     string(caPEM),
+		"expires_at": expiresAt,
+	})
 }
 
 func (s *Server) handleRegistryLabels(w http.ResponseWriter, r *http.Request) {
@@ -212,6 +365,9 @@ func (s *Server) handleRegistryLabels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAgentTunnel(w http.ResponseWriter, r *http.Request) {
+	if !s.ensureAgentAuth(w, r) {
+		return
+	}
 	if r.Method != http.MethodConnect {
 		writeMethodNotAllowed(w)
 		return
@@ -245,6 +401,20 @@ func (s *Server) handleAgentTunnel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.tunnels.add(label, conn)
+}
+
+func (s *Server) ensureAgentAuth(w http.ResponseWriter, r *http.Request) bool {
+	if !s.enforceAgentMTLS {
+		return true
+	}
+	if r == nil || r.TLS == nil || len(r.TLS.VerifiedChains) == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{
+			"code":  "agent_auth_required",
+			"error": "mTLS client certificate is required",
+		})
+		return false
+	}
+	return true
 }
 
 func (s *Server) handlePublic(w http.ResponseWriter, r *http.Request) {

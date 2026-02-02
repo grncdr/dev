@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,13 +40,19 @@ func NewServer(socketPath string) (*Server, error) {
 		return nil, err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
 		return nil, fmt.Errorf("create socket dir: %w", err)
 	}
 
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
 		return nil, fmt.Errorf("listen on %s: %w", socketPath, err)
+	}
+
+	// Restrict socket permissions to owner only
+	if err := os.Chmod(socketPath, 0o600); err != nil {
+		ln.Close()
+		return nil, fmt.Errorf("chmod socket: %w", err)
 	}
 
 	mux := http.NewServeMux()
@@ -97,11 +104,11 @@ func (s *Server) Serve() error {
 	if err := s.loadConfig(); err != nil {
 		return err
 	}
-	if err := s.restoreWorktreesFromResume(); err != nil {
-		logError(http.StatusInternalServerError, "resume_restore_failed", err)
-	}
 	if err := s.startProxy(); err != nil {
 		return err
+	}
+	if err := s.restoreFromResume(); err != nil {
+		logError(http.StatusInternalServerError, "resume_restore_failed", err)
 	}
 	defer os.Remove(s.socketPath)
 	return s.httpServer.Serve(s.listener)
@@ -237,8 +244,7 @@ func (s *Server) handleProcessConnect(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "shutting_down"})
 	go func() {
-		s.stopAllTunnels()
-		s.persistAndStopWorktrees()
+		s.persistAndStopRuntime()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = s.httpServer.Shutdown(ctx)
@@ -290,37 +296,54 @@ func (s *Server) handleTunnelsStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.tunnelsStatus())
 }
 
-func (s *Server) persistAndStopWorktrees() {
-	if s.manager == nil {
-		return
+func (s *Server) persistAndStopRuntime() {
+	state := resumeState{
+		Worktrees: s.runningWorktreesForResume(),
+		Tunnels:   s.runningTunnelsForResume(),
 	}
-	worktrees := s.manager.runningWorktrees()
-	if err := saveResumeState(worktrees); err != nil {
+	if err := saveResumeState(state); err != nil {
 		logError(http.StatusInternalServerError, "resume_save_failed", err)
 	}
-	s.manager.StopAllWorktrees()
+	s.stopAllTunnels()
+	if s.manager != nil {
+		s.manager.StopAllWorktrees()
+	}
 }
 
-func (s *Server) restoreWorktreesFromResume() error {
-	if s.manager == nil {
-		return nil
-	}
-	worktrees, err := loadResumeState()
+func (s *Server) restoreFromResume() error {
+	state, err := loadResumeState()
 	if err != nil {
 		return err
 	}
-	if len(worktrees) == 0 {
+	if state == nil || (len(state.Worktrees) == 0 && len(state.Tunnels) == 0) {
 		return nil
 	}
-	for _, wt := range worktrees {
-		if wt.Slug == "" {
-			continue
-		}
-		if _, err := s.manager.StartWorktreeFromDir(wt.Slug, wt.Path); err != nil {
-			logError(http.StatusBadRequest, "resume_start_failed", err)
+
+	for _, wt := range state.Worktrees {
+		if s.manager != nil && wt.Slug != "" {
+			if _, err := s.manager.StartWorktreeFromDir(wt.Slug, wt.Path); err != nil {
+				logError(http.StatusBadRequest, "resume_start_failed", err)
+			}
 		}
 	}
+
+	for _, req := range state.Tunnels {
+		if strings.TrimSpace(req.Label) == "" || strings.TrimSpace(req.Slug) == "" || strings.TrimSpace(req.GatewayURL) == "" {
+			continue
+		}
+		if _, err := s.openTunnel(req); err != nil {
+			logError(http.StatusBadRequest, "resume_tunnel_open_failed", err)
+		}
+	}
+
 	return clearResumeState()
+}
+
+func (s *Server) runningWorktreesForResume() []resumeWorktree {
+	if s.manager == nil {
+		return nil
+	}
+	return s.manager.runningWorktrees()
 }
 
 func (s *Server) loadConfig() error {

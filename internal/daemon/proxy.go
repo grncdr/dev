@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -19,10 +20,24 @@ import (
 	"dev-mode/internal/worktree"
 )
 
-const (
-	defaultProxyHTTPListen  = "0.0.0.0:80"
-	defaultProxyHTTPSListen = "0.0.0.0:443"
-)
+// defaultProxyListenHost returns the default listen host for the proxy.
+// On macOS, binding to 0.0.0.0 is required for privileged ports (80/443)
+// when using port forwarding from unprivileged ports. On other platforms,
+// we default to 127.0.0.1 for security.
+func defaultProxyListenHost() string {
+	if runtime.GOOS == "darwin" {
+		return "0.0.0.0"
+	}
+	return "127.0.0.1"
+}
+
+func defaultProxyHTTPListen() string {
+	return defaultProxyListenHost() + ":80"
+}
+
+func defaultProxyHTTPSListen() string {
+	return defaultProxyListenHost() + ":443"
+}
 
 func (s *Server) startProxy() error {
 	httpAddr, httpsAddr := proxyListenAddrs(s.userConfig)
@@ -154,10 +169,10 @@ func proxyListenAddrs(userCfg *config.UserConfig) (httpAddr, httpsAddr string) {
 		httpsAddr = userCfg.Proxy.ListenHTTPS
 	}
 	if httpAddr == "" && !httpDisabled {
-		httpAddr = defaultProxyHTTPListen
+		httpAddr = defaultProxyHTTPListen()
 	}
 	if httpsAddr == "" && !httpsDisabled {
-		httpsAddr = defaultProxyHTTPSListen
+		httpsAddr = defaultProxyHTTPSListen()
 	}
 	return httpAddr, httpsAddr
 }
@@ -210,8 +225,12 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 	if strings.Contains(host, ":") {
 		host, _, _ = strings.Cut(host, ":")
 	}
+	routeHost := host
+	if mappedHost, ok := s.localProxyHostForTunnelRequest(host); ok {
+		routeHost = mappedHost
+	}
 
-	network, address, err := s.resolveProxyTarget(host, r.URL.Path)
+	network, address, err := s.resolveProxyTarget(routeHost, r.URL.Path)
 	if err != nil {
 		writeErrorWithCode(w, http.StatusBadGateway, "proxy_target_error", err)
 		return
@@ -220,11 +239,12 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 	target, _ := url.Parse("http://unix")
 	reverseProxy := httputil.NewSingleHostReverseProxy(target)
 	originalDirector := reverseProxy.Director
-	reverseProxy.Director = func(req *http.Request) {
-		originalDirector(req)
-		req.Header.Set("X-Forwarded-Proto", "https")
-		req.Header.Set("X-Forwarded-Host", host)
-	}
+		reverseProxy.Director = func(req *http.Request) {
+			originalDirector(req)
+			req.Header.Set("X-Forwarded-Proto", "https")
+			req.Header.Del("X-Forwarded-Host")
+			req.Host = routeHost
+		}
 	reverseProxy.Transport = &http.Transport{
 		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
 			return net.Dial(network, address)
@@ -232,17 +252,20 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 	}
 	rewriteDomain := host
 	apex := s.projectApexZone()
-	reverseProxy.ModifyResponse = func(resp *http.Response) error {
-		if loc := resp.Header.Get("Location"); loc != "" {
-			if rewritten, ok := rewriteLocation(loc, rewriteDomain); ok {
-				resp.Header.Set("Location", rewritten)
+		reverseProxy.ModifyResponse = func(resp *http.Response) error {
+			if loc := resp.Header.Get("Location"); loc != "" {
+				if rewritten, ok := rewriteLocation(loc, rewriteDomain); ok {
+					resp.Header.Set("Location", rewritten)
+				}
 			}
+			if apex != "" {
+				rewriteSetCookieDomain(resp.Header, apex, rewriteDomain)
+			}
+			if err := rewriteResponseBody(resp, routeHost, rewriteDomain); err != nil {
+				return err
+			}
+			return nil
 		}
-		if apex != "" {
-			rewriteSetCookieDomain(resp.Header, apex, rewriteDomain)
-		}
-		return nil
-	}
 	reverseProxy.ErrorHandler = func(rw http.ResponseWriter, _ *http.Request, err error) {
 		writeErrorWithCode(rw, http.StatusBadGateway, "proxy_upstream_error", err)
 	}

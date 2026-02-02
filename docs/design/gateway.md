@@ -1,4 +1,4 @@
-# Gateway Design (Draft)
+# Gateway Design
 
 This document specifies the first implementation of the public gateway and local agent tunnel.
 
@@ -52,7 +52,7 @@ This keeps behavior identical between local direct access and public tunnel acce
 
 ## Public URL Shape
 
-- Gateway owns a configured apex, e.g. `tunnels.foocorp.dev`.
+- Gateway requires `gateway.dns_zone` and owns that configured apex, e.g. `tunnels.foocorp.dev`.
 - Client-visible URL pattern:
   - `<subdomain>.<label>.tunnels.foocorp.dev`
   - `<label>.tunnels.foocorp.dev` (base host, no subdomain)
@@ -91,7 +91,7 @@ Goal: zero browser/OIDC setup for day-to-day team onboarding.
    - `dev-mode gateway invite create`
    - Defaults: single-use, TTL 5 minutes.
 2. Teammate logs in with invite code:
-   - `dev-mode gateway login <invite-code> [--name <name>]`
+   - `dev-mode gateway login <invite-code> [--name <name>] --gateway-url <url>`
    - If `--name` is omitted, default to `$USER`.
 3. CLI generates local keypair and CSR.
 4. CLI submits `{invite_code, name, csr}` to gateway.
@@ -104,11 +104,12 @@ Goal: zero browser/OIDC setup for day-to-day team onboarding.
 - Default TTL: 5 minutes.
 - Invite can optionally be scoped (future) to project/team.
 - Consumed invites cannot be reused.
+- **Invite codes are intentionally not bound to requester identity** (IP, email, etc.). This supports flexible team workflows where an admin generates an invite and shares it via any channel (Slack, email, in-person). The short TTL and single-use defaults provide sufficient protection against abuse.
 
 ### Certificate lifecycle
 
 - Agent certs are short-lived.
-- Daemon auto-renews before expiry (using existing trusted channel/refresh endpoint).
+- Daemon auto-renews before expiry (using an authenticated refresh endpoint).
 - Gateway supports immediate revocation by:
   - cert serial
   - issued name/device
@@ -154,7 +155,7 @@ Gateway stores local state files to restore tunnel leases across restarts.
 - `state/leases.json`: durable label lease records.
 - `state/agents.json`: last-seen agent metadata (for observability/recovery hints).
 - `logs/audit.log`: append-only registration/renewal/revocation events.
-- `pki/`: gateway cert/key material and trust bundles.
+- `pki/`: gateway cert/key material and CA bundles.
 - `config/gateway.toml` (optional): gateway runtime config snapshot.
 
 ### Lease record shape
@@ -190,6 +191,7 @@ This gives "tunnels restored on startup" semantics while still requiring live ag
 - If no connected agent for label: return `502` with structured error code `gateway_label_unavailable`.
 - If stream to agent fails mid-request: return `502` with `gateway_upstream_error`.
 - If Basic Auth is enabled and credentials are missing/invalid: return `401` with `WWW-Authenticate: Basic realm="dev-mode gateway"`.
+- ACME provisioning applies backoff on failures and honors Let’s Encrypt `retry after` hints to avoid repeated failed authorizations.
 - Gateway logs include request id, host, label, selected agent id, and error code.
 
 ## Security
@@ -204,6 +206,9 @@ This gives "tunnels restored on startup" semantics while still requiring live ag
   - Preserve canonical `X-Forwarded-For`
   - Set `X-Forwarded-Proto`, `X-Forwarded-Host`
 - Label claim operations are authenticated and audited.
+- Gateway TLS certificates are provisioned via ACME (Let’s Encrypt) using DNS-01 with Route53:
+  - startup: `*.{dns_zone}`
+  - on label registration: `*.{label}.{dns_zone}`
 
 ## CLI and Config Surface
 
@@ -220,11 +225,19 @@ User config (future expansion):
 [gateway]
 enabled = true
 data_dir = "/var/lib/dev-mode-gateway"
+dns_zone = "tunnels.foocorp.dev"
+hostname = "gw.foocorp.dev"
+acme_resolvers = ["1.1.1.1"]
 
 [gateway.auth]
 enabled = false
 username = ""
 password = ""
+
+[gateway.route53]
+enabled = true
+hosted_zone_id = "Z1234567890"
+ttl = 60
 ```
 
 Notes:
@@ -232,12 +245,16 @@ Notes:
 - When enabled, every public request must pass Basic Auth before forwarding.
 - Credentials live in user/global config so they are not committed to project config.
 - `gateway.data_dir` should be mounted as persistent storage in deployed gateway environments.
+- `gateway.dns_zone` is required; the gateway refuses to start without it.
+- `gateway.hostname` is the DNS CNAME target used for Route53 label records.
+- `gateway.acme_resolvers` sets recursive resolvers for DNS-01 propagation checks (default `1.1.1.1`).
+- If `gateway.route53.enabled = true`, gateway register/unregister calls sync Route53 DNS records for labels.
 
 CLI behavior:
 
-- `dev-mode tunnel open [slug] [--label <label>]` starts/ensures agent registration.
-- `dev-mode tunnel close [slug]` unregisters label.
-- `dev-mode tunnels status` shows connection + assigned URLs.
+- `dev-mode share [slug] [--label <label>]` starts/ensures agent registration.
+- `dev-mode unshare [slug] [--label <label>]` unregisters label.
+- `dev-mode status` shows sharing connection state in the Gateway section.
 
 ## Observability
 
@@ -254,20 +271,19 @@ Daemon/agent logs:
 - reconnect backoff
 - per-request forwarding failures (sampled if needed)
 
-## Open Implementation Decisions
+## Current Status
 
-1. Stream framing choice for HTTP forwarding payloads (raw CONNECT tunnel vs framed HTTP envelope).
-2. Backoff/retry policy tuning for flaky networks.
-3. Lease expiry default and GC cadence.
+Implemented baseline:
 
-## Rollout Plan
+- Gateway run command, persistent state, invite creation, and login/cert issue flow.
+- Agent registration/heartbeat/unregistration with reconnect behavior.
+- Label registry endpoint and gateway-provided public hostname responses.
+- Optional Basic Auth on public ingress.
+- Route53 DNS record sync for label lifecycle.
+- ACME wildcard provisioning hooks with backoff-aware failure handling.
 
-1. Implement gateway skeleton with file-backed lease registry (`leases.json`) + health tracking.
-2. Implement startup restore (`pending` -> `active` on reconnect).
-3. Implement agent register/heartbeat/reconnect loop in daemon.
-4. Implement HTTP forwarding path (including websocket upgrades).
-5. Wire CLI `tunnel` commands to registration lifecycle.
-6. Add integration tests:
-   - lease persists across gateway restart
-   - reconnect promotes persisted lease to active
-   - request through gateway reaches correct local process and auto-starts if needed
+## Remaining Work
+
+1. Production hardening for retry/backoff tuning and observability depth.
+2. Expanded operational tooling (admin UX, cert revocation ergonomics, deeper metrics).
+3. Additional end-to-end coverage under adverse network and restart conditions.

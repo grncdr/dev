@@ -6,6 +6,40 @@ import (
 	"testing"
 )
 
+func TestValidateSlug(t *testing.T) {
+	valid := []string{
+		"feature-x",
+		"my_branch",
+		"v1",
+		"a",
+		"Feature123",
+		"test-branch_v2",
+	}
+	for _, slug := range valid {
+		if err := ValidateSlug(slug); err != nil {
+			t.Errorf("expected %q to be valid, got error: %v", slug, err)
+		}
+	}
+
+	invalid := []string{
+		"",
+		"-starts-with-dash",
+		"_starts-with-underscore",
+		"has space",
+		"has/slash",
+		"has..dots",
+		"../traversal",
+		"path/../attack",
+		"semi;colon",
+		"back`tick",
+	}
+	for _, slug := range invalid {
+		if err := ValidateSlug(slug); err == nil {
+			t.Errorf("expected %q to be invalid, but got no error", slug)
+		}
+	}
+}
+
 func TestParseWorktreeList(t *testing.T) {
 	base := t.TempDir()
 	mainPath := filepath.Join(base, "foocorp")

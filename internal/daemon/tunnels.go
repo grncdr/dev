@@ -3,23 +3,28 @@ package daemon
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"dev-mode/internal/config"
 	"dev-mode/internal/gateway"
 )
 
 type managedTunnel struct {
-	req       TunnelRequest
-	cancel    context.CancelFunc
-	status    string
-	lastError string
+	req        TunnelRequest
+	cancel     context.CancelFunc
+	status     string
+	publicHost string
+	lastError  string
 }
 
 func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
@@ -50,6 +55,7 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 				Slug:       running.req.Slug,
 				Label:      running.req.Label,
 				GatewayURL: running.req.GatewayURL,
+				PublicHost: running.publicHost,
 				Project:    running.req.Project,
 				Status:     running.status,
 				LastError:  running.lastError,
@@ -68,6 +74,12 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 	}
 	s.tunnels[req.Label] = mt
 
+	gatewayClient, gatewayTLS, err := gatewayMTLSClient(req.GatewayURL, s.userConfig)
+	if err != nil {
+		delete(s.tunnels, req.Label)
+		return nil, err
+	}
+
 	agent := &gateway.Agent{
 		GatewayURL:     req.GatewayURL,
 		UpstreamURL:    req.Upstream,
@@ -77,6 +89,8 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 		AgentID:        fmt.Sprintf("dev-mode-%d", time.Now().UnixNano()),
 		Name:           req.Name,
 		RetryDelay:     500 * time.Millisecond,
+		GatewayClient:  gatewayClient,
+		TLSConfig:      gatewayTLS,
 		UpstreamClient: tunnelHTTPClient(req.Upstream),
 		OnConnected: func() {
 			s.tunnelMu.Lock()
@@ -84,6 +98,13 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 			if cur, ok := s.tunnels[req.Label]; ok {
 				cur.status = "connected"
 				cur.lastError = ""
+			}
+		},
+		OnRegistered: func(publicHost string) {
+			s.tunnelMu.Lock()
+			defer s.tunnelMu.Unlock()
+			if cur, ok := s.tunnels[req.Label]; ok {
+				cur.publicHost = strings.TrimSpace(publicHost)
 			}
 		},
 		OnDisconnected: func(err error) {
@@ -117,9 +138,75 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 		Slug:       req.Slug,
 		Label:      req.Label,
 		GatewayURL: req.GatewayURL,
+		PublicHost: mt.publicHost,
 		Project:    req.Project,
 		Status:     mt.status,
 	}, nil
+}
+
+func gatewayMTLSClient(gatewayURL string, userCfg *config.UserConfig) (*http.Client, *tls.Config, error) {
+	parsed, err := url.Parse(strings.TrimSpace(gatewayURL))
+	if err != nil {
+		return nil, nil, err
+	}
+	if parsed.Scheme != "https" {
+		return nil, nil, nil
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return nil, nil, errors.New("gateway URL host is required")
+	}
+	credDir, err := gatewayCredentialDir(host, userCfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	keyPath := filepath.Join(credDir, "client-key.pem")
+	certPath := filepath.Join(credDir, "client.pem")
+	caPath := filepath.Join(credDir, "ca.pem")
+	if _, err := os.Stat(keyPath); err != nil {
+		return nil, nil, fmt.Errorf("missing gateway credentials for %s (run dev-mode gateway login --gateway-url %s)", host, gatewayURL)
+	}
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load gateway client certificate: %w", err)
+	}
+	caPEM, err := os.ReadFile(caPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read gateway CA certificate: %w", err)
+	}
+	// Start from system roots so public CA-signed gateway certs continue to verify.
+	rootCAs, err := x509.SystemCertPool()
+	if err != nil || rootCAs == nil {
+		rootCAs = x509.NewCertPool()
+	}
+	if ok := rootCAs.AppendCertsFromPEM(caPEM); !ok {
+		return nil, nil, errors.New("invalid gateway CA certificate")
+	}
+	tlsCfg := &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		Certificates: []tls.Certificate{cert},
+		RootCAs:      rootCAs,
+		ServerName:   host,
+	}
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: tlsCfg,
+		},
+	}
+	return client, tlsCfg, nil
+}
+
+func gatewayCredentialDir(host string, userCfg *config.UserConfig) (string, error) {
+	base := "~/.config/dev-mode/gateway/credentials"
+	if userCfg != nil && strings.TrimSpace(userCfg.Gateway.DataDir) != "" {
+		base = filepath.Join(userCfg.Gateway.DataDir, "agent-credentials")
+	}
+	expanded, err := config.ExpandUserPath(base)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(expanded, host), nil
 }
 
 func tunnelHTTPClient(upstream string) *http.Client {
@@ -167,6 +254,7 @@ func (s *Server) closeTunnel(req TunnelRequest) (*TunnelStatus, error) {
 		Slug:       mt.req.Slug,
 		Label:      mt.req.Label,
 		GatewayURL: mt.req.GatewayURL,
+		PublicHost: mt.publicHost,
 		Project:    mt.req.Project,
 		Status:     "stopped",
 	}, nil
@@ -181,6 +269,7 @@ func (s *Server) tunnelsStatus() *TunnelsResponse {
 			Slug:       mt.req.Slug,
 			Label:      mt.req.Label,
 			GatewayURL: mt.req.GatewayURL,
+			PublicHost: mt.publicHost,
 			Project:    mt.req.Project,
 			Status:     mt.status,
 			LastError:  mt.lastError,
@@ -196,6 +285,26 @@ func (s *Server) stopAllTunnels() {
 		mt.cancel()
 		delete(s.tunnels, label)
 	}
+}
+
+func (s *Server) runningTunnelsForResume() []TunnelRequest {
+	s.tunnelMu.Lock()
+	defer s.tunnelMu.Unlock()
+	if len(s.tunnels) == 0 {
+		return nil
+	}
+	out := make([]TunnelRequest, 0, len(s.tunnels))
+	for _, mt := range s.tunnels {
+		if mt == nil {
+			continue
+		}
+		req := mt.req
+		if strings.TrimSpace(req.Label) == "" || strings.TrimSpace(req.Slug) == "" || strings.TrimSpace(req.GatewayURL) == "" {
+			continue
+		}
+		out = append(out, req)
+	}
+	return out
 }
 
 func (s *Server) localProxyUpstreamURL() string {

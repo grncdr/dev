@@ -489,7 +489,7 @@ func printGatewaySection(cfg *config.ProjectConfig, tunnel *daemon.TunnelStatus,
 	fmt.Printf("  status: %s\n", tunnel.Status)
 	if tunnel.Label != "" {
 		fmt.Printf("  label: %s\n", tunnel.Label)
-		if public := gatewayPublicURL(url, tunnel.Label); public != "" {
+		if public := gatewayPublicURL(url, tunnel.PublicHost, tunnel.Label); public != "" {
 			fmt.Printf("  public: %s\n", public)
 		}
 	}
@@ -521,14 +521,17 @@ func gatewayProxyURLsByProcess(localByProcess map[string][]string, cfg *config.P
 		return out
 	}
 	parsedGateway, err := url.Parse(gatewayURL)
-	if err != nil || parsedGateway.Host == "" {
+	if err != nil {
 		return out
 	}
 	gatewayScheme := parsedGateway.Scheme
 	if gatewayScheme == "" {
 		gatewayScheme = "https"
 	}
-	gatewayHost := parsedGateway.Host
+	gatewayHost := strings.TrimSpace(tunnel.PublicHost)
+	if gatewayHost == "" {
+		return out
+	}
 	label := strings.TrimSpace(tunnel.Label)
 	if label == "" {
 		return out

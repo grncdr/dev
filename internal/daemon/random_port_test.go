@@ -28,7 +28,7 @@ func TestRandomPortCommandInterpolation(t *testing.T) {
 [project]
 name = "demo"
 
-[processes.http]
+[process.http]
 singleton = false
 port = "random"
 command = "sh -c \"python3 -m http.server ${PORT}\""
@@ -167,7 +167,7 @@ name = "demo"
 [proxy]
 apex_zone = ".localhost"
 
-[processes.mailpit]
+[process.mailpit]
 singleton = false
 command = "sh -c \"python3 -m http.server ${PORT}\""
 proxy = { subdomain = "mailpit" }
@@ -281,7 +281,7 @@ func TestFixedPortProcessTarget(t *testing.T) {
 [project]
 name = "demo"
 
-[processes.http]
+[process.http]
 singleton = false
 port = %d
 command = "sh -c \"python3 -m http.server ${PORT}\""

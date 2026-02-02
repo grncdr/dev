@@ -13,6 +13,7 @@ const resumeFileName = "resume.json"
 
 type resumeState struct {
 	Worktrees []resumeWorktree `json:"worktrees"`
+	Tunnels   []TunnelRequest  `json:"tunnels,omitempty"`
 }
 
 type resumeWorktree struct {
@@ -57,19 +58,19 @@ func daemonStateDir() (string, error) {
 	return config.ExpandUserPath("~/.local/state/dev-mode")
 }
 
-func saveResumeState(worktrees []resumeWorktree) error {
+func saveResumeState(state resumeState) error {
 	path, err := resumeStatePath()
 	if err != nil {
 		return err
 	}
-	if len(worktrees) == 0 {
+	if len(state.Worktrees) == 0 && len(state.Tunnels) == 0 {
 		_ = os.Remove(path)
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	payload, err := json.MarshalIndent(resumeState{Worktrees: worktrees}, "", "  ")
+	payload, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -80,14 +81,14 @@ func saveResumeState(worktrees []resumeWorktree) error {
 	return os.Rename(tmp, path)
 }
 
-func loadResumeState() ([]resumeWorktree, error) {
+func loadResumeState() (*resumeState, error) {
 	path, err := resumeStatePath()
 	if err != nil {
 		return nil, err
 	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return &resumeState{}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -96,7 +97,7 @@ func loadResumeState() ([]resumeWorktree, error) {
 	if err := json.Unmarshal(data, &state); err != nil {
 		return nil, err
 	}
-	return state.Worktrees, nil
+	return &state, nil
 }
 
 func clearResumeState() error {

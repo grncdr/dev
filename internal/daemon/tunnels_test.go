@@ -67,7 +67,12 @@ url = "http://unused.local"
 	}
 
 	gwDir := filepath.Join(baseDir, "gateway")
-	gw, err := gateway.NewServer("127.0.0.1:0", gwDir, config.UserGatewayAuth{})
+	gw, err := gateway.NewServer(gateway.ServerOptions{
+		ListenAddr: "127.0.0.1:0",
+		DataDir:    gwDir,
+		DNSZone:    "public.example.dev",
+		Auth:       config.UserGatewayAuth{},
+	})
 	if err != nil {
 		t.Fatalf("new gateway: %v", err)
 	}
@@ -118,6 +123,9 @@ url = "http://unused.local"
 	for {
 		status, err := client.TunnelsStatus(waitCtx)
 		if err == nil && len(status.Tunnels) == 1 && status.Tunnels[0].Status == "connected" {
+			if status.Tunnels[0].PublicHost != "public.example.dev" {
+				t.Fatalf("expected public host from gateway, got %+v", status.Tunnels[0])
+			}
 			break
 		}
 		select {

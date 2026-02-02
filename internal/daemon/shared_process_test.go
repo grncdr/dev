@@ -27,11 +27,11 @@ func TestSharedProcessesOnlyInMainWorktree(t *testing.T) {
 [project]
 name = "demo"
 
-[processes.shared]
+[process.shared]
 singleton = true
 command = "sh -c \"sleep 60\""
 
-[processes.worker]
+[process.worker]
 singleton = false
 command = "sh -c \"sleep 60\""
 `

@@ -35,9 +35,8 @@ main_slug = "foocorp"
 	}
 
 	user := `
-[worktrees."/abs/path"]
-project = "Foo Corp"
-trusted = true
+[proxy]
+apex_zone = ".localhost"
 `
 	if err := os.WriteFile(userPath, []byte(user), 0o600); err != nil {
 		t.Fatal(err)

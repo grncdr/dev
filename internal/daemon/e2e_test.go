@@ -28,12 +28,12 @@ func TestWorktreeStartStopEndToEnd(t *testing.T) {
 [project]
 name = "demo"
 
-[processes.sleeper]
+[process.sleeper]
 singleton = false
 command = "sh -c \"echo ${SLEEPER_FLAG}; sleep 60\""
 port = "unix"
 
-[processes.sleeper.env]
+[process.sleeper.env]
 SLEEPER_FLAG = "enabled"
 
 [hooks]
@@ -173,7 +173,8 @@ func waitForHealth(client *Client, timeout time.Duration) error {
 }
 
 func runGit(dir string, args ...string) error {
-	cmd := exec.Command("git", args...)
+	gitArgs := append([]string{"-c", "commit.gpgsign=false"}, args...)
+	cmd := exec.Command("git", gitArgs...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"GIT_AUTHOR_NAME=dev-mode",

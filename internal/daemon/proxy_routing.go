@@ -3,6 +3,7 @@ package daemon
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -60,6 +61,86 @@ func (s *Server) parseProxyHost(host string) (slug, subdomain string, err error)
 	default:
 		return "", "", errors.New("expected <slug> or <subdomain>.<slug>")
 	}
+}
+
+func normalizeProxyHost(host string) string {
+	host = strings.TrimSpace(strings.ToLower(host))
+	if strings.Contains(host, ":") {
+		host, _, _ = strings.Cut(host, ":")
+	}
+	return strings.TrimSuffix(host, ".")
+}
+
+func (s *Server) localProxyHostForTunnelRequest(host string) (string, bool) {
+	labels := strings.Split(normalizeProxyHost(host), ".")
+	if len(labels) == 0 {
+		return "", false
+	}
+
+	// Prefer "<subdomain>.<label>.<zone>" over "<label>.<zone>" when both labels happen to be active.
+	for _, idx := range []int{1, 0} {
+		if idx >= len(labels) {
+			continue
+		}
+		routeSlug, ok := s.tunnelRouteSlugForLabel(labels[idx])
+		if !ok {
+			continue
+		}
+		apex := strings.TrimPrefix(strings.ToLower(s.projectApexZone()), ".")
+		if apex == "" {
+			apex = "localhost"
+		}
+		if idx == 0 {
+			return routeSlug + "." + apex, true
+		}
+		return labels[0] + "." + routeSlug + "." + apex, true
+	}
+	return "", false
+}
+
+func (s *Server) tunnelRouteSlugForLabel(label string) (string, bool) {
+	s.tunnelMu.Lock()
+	defer s.tunnelMu.Unlock()
+	if s.tunnels == nil {
+		return "", false
+	}
+	mt, ok := s.tunnels[label]
+	if !ok || mt == nil {
+		return "", false
+	}
+	slug := strings.TrimSpace(mt.req.Slug)
+	if slug == "" {
+		return "", false
+	}
+	cfg, repoPath, err := s.projectConfigForSlug(slug)
+	if err != nil || cfg == nil || strings.TrimSpace(cfg.Project.MainSlug) == "" {
+		return slug, true
+	}
+	mainPath, err := worktree.ResolveMainPathInDir(repoPath)
+	if err != nil {
+		return slug, true
+	}
+	if sameResolvedPath(mainPath, repoPath) {
+		return strings.TrimSpace(cfg.Project.MainSlug), true
+	}
+	return slug, true
+}
+
+func sameResolvedPath(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	resolvedA, errA := filepath.EvalSymlinks(a)
+	resolvedB, errB := filepath.EvalSymlinks(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	infoA, errA := os.Stat(resolvedA)
+	infoB, errB := os.Stat(resolvedB)
+	if errA == nil && errB == nil && os.SameFile(infoA, infoB) {
+		return true
+	}
+	return filepath.Clean(resolvedA) == filepath.Clean(resolvedB)
 }
 
 func (s *Server) resolveProxyTarget(host, path string) (network string, address string, err error) {
@@ -157,7 +238,11 @@ func processProxyMatchers(cfg *config.ProjectConfig) []proxyMatcher {
 }
 
 func (s *Server) projectConfigForSlug(slug string) (*config.ProjectConfig, string, error) {
-	repoPath, ok := s.manager.WorktreePath(slug)
+	repoPath := ""
+	ok := false
+	if s.manager != nil {
+		repoPath, ok = s.manager.WorktreePath(slug)
+	}
 	if !ok || repoPath == "" {
 		var err error
 		repoPath, err = worktree.ResolvePathFromSlug(slug)

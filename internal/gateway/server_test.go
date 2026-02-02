@@ -3,15 +3,43 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
 	"dev-mode/internal/config"
 )
+
+type fakeDNSProvider struct {
+	mu      sync.Mutex
+	ensured []string
+	removed []string
+}
+
+func (f *fakeDNSProvider) EnsureLabel(_ context.Context, label string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ensured = append(f.ensured, label)
+	return nil
+}
+
+func (f *fakeDNSProvider) RemoveLabel(_ context.Context, label string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.removed = append(f.removed, label)
+	return nil
+}
 
 func TestServer_RegisterPersistsAcrossRestart(t *testing.T) {
 	dir := t.TempDir()
@@ -155,9 +183,160 @@ func TestServer_ForwardsThroughAgentTunnel(t *testing.T) {
 	}
 }
 
+func TestServer_SyncsDNSOnRegisterAndUnregister(t *testing.T) {
+	dir := t.TempDir()
+	fakeDNS := &fakeDNSProvider{}
+	srv, err := NewServer(ServerOptions{
+		ListenAddr: "127.0.0.1:0",
+		DataDir:    dir,
+		DNSZone:    "tunnels.example.test",
+		Auth:       config.UserGatewayAuth{},
+		DNS:        fakeDNS,
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	go func() { _ = srv.Serve() }()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	reqBody := bytes.NewBufferString(`{"project":"Foo Corp","slug":"main","label":"alpha","agent_id":"a1"}`)
+	resp, err := client.Post("http://"+srv.Addr()+"/_agent/register", "application/json", reqBody)
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	var registerOut map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&registerOut); err != nil {
+		resp.Body.Close()
+		t.Fatalf("decode register body: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("register status: %d", resp.StatusCode)
+	}
+	if registerOut["public_hostname"] != "alpha.tunnels.example.test" {
+		t.Fatalf("expected gateway-provided public hostname, got %+v", registerOut)
+	}
+
+	closeBody := bytes.NewBufferString(`{"label":"alpha"}`)
+	resp, err = client.Post("http://"+srv.Addr()+"/_agent/unregister", "application/json", closeBody)
+	if err != nil {
+		t.Fatalf("unregister: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unregister status: %d", resp.StatusCode)
+	}
+
+	if len(fakeDNS.ensured) != 1 || fakeDNS.ensured[0] != "alpha" {
+		t.Fatalf("expected ensure alpha, got %+v", fakeDNS.ensured)
+	}
+	if len(fakeDNS.removed) != 1 || fakeDNS.removed[0] != "alpha" {
+		t.Fatalf("expected remove alpha, got %+v", fakeDNS.removed)
+	}
+}
+
+func TestServer_IssuesCertFromInvite(t *testing.T) {
+	dir := t.TempDir()
+	srv, err := NewServer(ServerOptions{
+		ListenAddr: "127.0.0.1:0",
+		DataDir:    dir,
+		DNSZone:    "tunnels.example.test",
+		Auth:       config.UserGatewayAuth{},
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	go func() { _ = srv.Serve() }()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	inviteReq := bytes.NewBufferString(`{"ttl_seconds":300,"uses":1}`)
+	resp, err := client.Post("http://"+srv.Addr()+"/_admin/invites/create", "application/json", inviteReq)
+	if err != nil {
+		t.Fatalf("create invite: %v", err)
+	}
+	var inviteOut struct {
+		InviteCode string `json:"invite_code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&inviteOut); err != nil {
+		resp.Body.Close()
+		t.Fatalf("decode invite: %v", err)
+	}
+	resp.Body.Close()
+	if inviteOut.InviteCode == "" {
+		t.Fatalf("expected invite code")
+	}
+
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	csrDER, _ := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		Subject: pkix.Name{CommonName: "tester"},
+	}, key)
+	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
+	body, _ := json.Marshal(map[string]string{
+		"invite_code": inviteOut.InviteCode,
+		"name":        "tester",
+		"csr":         string(csrPEM),
+	})
+	resp, err = client.Post("http://"+srv.Addr()+"/_agent/cert/issue", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("cert issue: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("cert issue status %d body=%s", resp.StatusCode, string(b))
+	}
+}
+
+func TestEnsureAgentAuth_RequiresClientCertWhenEnabled(t *testing.T) {
+	s := &Server{enforceAgentMTLS: true}
+	req, err := http.NewRequest(http.MethodPost, "/_agent/register", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	if ok := s.ensureAgentAuth(rr, req); ok {
+		t.Fatalf("expected auth to fail without mTLS")
+	}
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rr.Code)
+	}
+
+	req.TLS = &tls.ConnectionState{VerifiedChains: [][]*x509.Certificate{{}}}
+	rr = httptest.NewRecorder()
+	if ok := s.ensureAgentAuth(rr, req); !ok {
+		t.Fatalf("expected auth success with verified chains")
+	}
+}
+
+func TestNewServer_RequiresDNSZone(t *testing.T) {
+	_, err := NewServer(ServerOptions{
+		ListenAddr: "127.0.0.1:0",
+		DataDir:    t.TempDir(),
+		Auth:       config.UserGatewayAuth{},
+	})
+	if err == nil {
+		t.Fatalf("expected error when dns zone is empty")
+	}
+}
+
 func startGatewayServer(t *testing.T, dataDir string, auth config.UserGatewayAuth) (*Server, *http.Client) {
 	t.Helper()
-	srv, err := NewServer("127.0.0.1:0", dataDir, auth)
+	srv, err := NewServer(ServerOptions{
+		ListenAddr: "127.0.0.1:0",
+		DataDir:    dataDir,
+		DNSZone:    "tunnels.example.test",
+		Auth:       auth,
+	})
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}

@@ -38,13 +38,13 @@ name = "demo"
 [proxy]
 apex_zone = ".localhost"
 
-[processes.db]
+[process.db]
 singleton = true
 command = "sh -c \"python3 -m http.server ${PORT}\""
 port = "random"
 health = { type = "http", path = "/" }
 
-[[processes.db.proxy]]
+[[process.db.proxy]]
 tcp_listen = %d
 `, tcpListenPort)
 	if err := os.WriteFile(filepath.Join(repoDir, ".dev-mode.toml"), []byte(configBody), 0o600); err != nil {

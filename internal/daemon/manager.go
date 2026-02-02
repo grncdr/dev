@@ -519,10 +519,12 @@ func (m *Manager) Connect(slug, process string, conn net.Conn) error {
 
 func buildVars(project, slug, worktreePath, mainPath, worktreeState string) map[string]string {
 	return map[string]string{
-		"PROJECT_NAME":  project,
-		"WORKTREE_SLUG": slug,
-		"WORKTREE_PATH": worktreePath,
-		"MAIN_WORKTREE": mainPath,
+		"PROJECT_NAME":           project,
+		"WORKTREE_SLUG":          slug,
+		"DEV_MODE_PROJECT":       project,
+		"DEV_MODE_WORKTREE_SLUG": slug,
+		"WORKTREE_PATH":          worktreePath,
+		"MAIN_WORKTREE":          mainPath,
 		"WORKTREE_STATE": func() string {
 			if worktreeState == "" {
 				return ""
