@@ -64,6 +64,30 @@ func (c *Client) Shutdown(ctx context.Context) error {
 	return c.doJSON(ctx, http.MethodPost, "/shutdown", map[string]string{"action": "shutdown"}, nil)
 }
 
+func (c *Client) TunnelOpen(ctx context.Context, req TunnelRequest) (*TunnelStatus, error) {
+	var resp TunnelStatus
+	if err := c.doJSON(ctx, http.MethodPost, "/tunnels/open", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (c *Client) TunnelClose(ctx context.Context, req TunnelRequest) (*TunnelStatus, error) {
+	var resp TunnelStatus
+	if err := c.doJSON(ctx, http.MethodPost, "/tunnels/close", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (c *Client) TunnelsStatus(ctx context.Context) (*TunnelsResponse, error) {
+	var resp TunnelsResponse
+	if err := c.doJSON(ctx, http.MethodGet, "/tunnels/status", nil, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 func (c *Client) worktreeAction(ctx context.Context, path, slug string) (*WorktreeStatus, error) {
 	var resp WorktreeStatus
 	req := WorktreeRequest{Slug: slug}

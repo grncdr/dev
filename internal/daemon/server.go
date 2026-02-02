@@ -26,6 +26,8 @@ type Server struct {
 	config     *config.ProjectConfig
 	mainPath   string
 	userConfig *config.UserConfig
+	tunnelMu   sync.Mutex
+	tunnels    map[string]*managedTunnel
 }
 
 func NewServer(socketPath string) (*Server, error) {
@@ -61,6 +63,9 @@ func NewServer(socketPath string) (*Server, error) {
 	mux.HandleFunc("/processes/start", s.handleProcessStart)
 	mux.HandleFunc("/processes/stop", s.handleProcessStop)
 	mux.HandleFunc("/processes/connect", s.handleProcessConnect)
+	mux.HandleFunc("/tunnels/open", s.handleTunnelOpen)
+	mux.HandleFunc("/tunnels/close", s.handleTunnelClose)
+	mux.HandleFunc("/tunnels/status", s.handleTunnelsStatus)
 	mux.HandleFunc("/shutdown", s.handleShutdown)
 
 	s.httpServer = &http.Server{
@@ -232,12 +237,57 @@ func (s *Server) handleProcessConnect(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "shutting_down"})
 	go func() {
+		s.stopAllTunnels()
 		s.persistAndStopWorktrees()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = s.httpServer.Shutdown(ctx)
 		s.once.Do(func() { close(s.shutdown) })
 	}()
+}
+
+func (s *Server) handleTunnelOpen(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErrorWithCode(w, http.StatusMethodNotAllowed, "method_not_allowed", errors.New("method not allowed"))
+		return
+	}
+	var req TunnelRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErrorWithCode(w, http.StatusBadRequest, "invalid_body", err)
+		return
+	}
+	resp, err := s.openTunnel(req)
+	if err != nil {
+		writeErrorWithCode(w, http.StatusBadRequest, "tunnel_open_failed", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleTunnelClose(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErrorWithCode(w, http.StatusMethodNotAllowed, "method_not_allowed", errors.New("method not allowed"))
+		return
+	}
+	var req TunnelRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErrorWithCode(w, http.StatusBadRequest, "invalid_body", err)
+		return
+	}
+	resp, err := s.closeTunnel(req)
+	if err != nil {
+		writeErrorWithCode(w, http.StatusBadRequest, "tunnel_close_failed", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleTunnelsStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErrorWithCode(w, http.StatusMethodNotAllowed, "method_not_allowed", errors.New("method not allowed"))
+		return
+	}
+	writeJSON(w, http.StatusOK, s.tunnelsStatus())
 }
 
 func (s *Server) persistAndStopWorktrees() {

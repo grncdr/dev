@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -147,8 +148,23 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 	}
 
 	client := daemon.NewClient(socketPath)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+	daemonUp, err := daemonRunning(socketPath)
+	if err != nil {
+		return err
+	}
+	tunnelBySlug := map[string]daemon.TunnelStatus{}
+	if daemonUp {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if tunnels, err := client.TunnelsStatus(ctx); err == nil {
+			for _, t := range tunnels.Tunnels {
+				existing, ok := tunnelBySlug[t.Slug]
+				if !ok || (existing.Status != "connected" && t.Status == "connected") {
+					tunnelBySlug[t.Slug] = t
+				}
+			}
+		}
+	}
 
 	for i, slug := range sortedTargetSlugs(targets) {
 		projectPath, _ := worktree.ResolvePathFromSlug(slug)
@@ -171,18 +187,27 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 		printProjectSection(slug, projectPath, cfg)
 		fmt.Println()
 
-		resp, err := client.WorktreeStatus(ctx, slug)
-		if err != nil {
-			printProcessesSection(nil, cfg, userCfg, slug, false, targets[slug])
+		if !daemonUp {
+			printProcessesSection(nil, cfg, userCfg, slug, false, targets[slug], nil)
 			fmt.Println()
-			printGatewaySection(cfg)
+			printGatewaySection(cfg, nil, false)
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		resp, err := client.WorktreeStatus(ctx, slug)
+		cancel()
+		if err != nil {
+			printProcessesSection(nil, cfg, userCfg, slug, false, targets[slug], tunnelForSlug(tunnelBySlug, slug))
+			fmt.Println()
+			printGatewaySection(cfg, tunnelForSlug(tunnelBySlug, slug), true)
 			continue
 		}
 
 		filtered := filterWorktreeStatus(resp, targets[slug])
-		printProcessesSection(filtered, cfg, userCfg, slug, true, targets[slug])
+		printProcessesSection(filtered, cfg, userCfg, slug, true, targets[slug], tunnelForSlug(tunnelBySlug, slug))
 		fmt.Println()
-		printGatewaySection(cfg)
+		printGatewaySection(cfg, tunnelForSlug(tunnelBySlug, slug), true)
 	}
 	return nil
 }
@@ -235,7 +260,7 @@ func printProjectSection(slug, path string, cfg *config.ProjectConfig) {
 	fmt.Printf("  main worktree: %s\n", mainPath)
 }
 
-func printProcessesSection(status *daemon.WorktreeStatus, cfg *config.ProjectConfig, userCfg *config.UserConfig, slug string, daemonUp bool, target *processTarget) {
+func printProcessesSection(status *daemon.WorktreeStatus, cfg *config.ProjectConfig, userCfg *config.UserConfig, slug string, daemonUp bool, target *processTarget, tunnel *daemon.TunnelStatus) {
 	fmt.Println(bold("Processes"))
 	if !daemonUp {
 		fmt.Println("  daemon not running")
@@ -246,6 +271,7 @@ func printProcessesSection(status *daemon.WorktreeStatus, cfg *config.ProjectCon
 		return
 	}
 	proxyByProcess := processProxyURLsByProcess(slug, cfg, userCfg)
+	gatewayByProcess := gatewayProxyURLsByProcess(proxyByProcess, cfg, tunnel)
 	processes := append([]daemon.ProcessStatus(nil), status.Processes...)
 	sort.Slice(processes, func(i, j int) bool { return processes[i].Name < processes[j].Name })
 	if target != nil && !target.all && len(target.processes) > 0 {
@@ -269,6 +295,9 @@ func printProcessesSection(status *daemon.WorktreeStatus, cfg *config.ProjectCon
 		}
 		for _, route := range proxyByProcess[proc.Name] {
 			fmt.Printf("    proxy %s\n", route)
+		}
+		for _, route := range gatewayByProcess[proc.Name] {
+			fmt.Printf("    gateway %s\n", route)
 		}
 	}
 }
@@ -439,7 +468,7 @@ func samePath(a, b string) bool {
 	return aa == bb
 }
 
-func printGatewaySection(cfg *config.ProjectConfig) {
+func printGatewaySection(cfg *config.ProjectConfig, tunnel *daemon.TunnelStatus, daemonUp bool) {
 	if cfg == nil {
 		return
 	}
@@ -448,10 +477,89 @@ func printGatewaySection(cfg *config.ProjectConfig) {
 		return
 	}
 	fmt.Println(bold("Gateway"))
-	if url, ok := cfg.Gateway["url"].(string); ok && url != "" {
-		fmt.Printf("  status: not connected\n")
-		fmt.Printf("  url: %s\n", url)
+	fmt.Printf("  url: %s\n", url)
+	if !daemonUp {
+		fmt.Printf("  status: daemon not running\n")
+		return
 	}
+	if tunnel == nil {
+		fmt.Printf("  status: not connected\n")
+		return
+	}
+	fmt.Printf("  status: %s\n", tunnel.Status)
+	if tunnel.Label != "" {
+		fmt.Printf("  label: %s\n", tunnel.Label)
+		if public := gatewayPublicURL(url, tunnel.Label); public != "" {
+			fmt.Printf("  public: %s\n", public)
+		}
+	}
+	if tunnel.LastError != "" {
+		fmt.Printf("  error: %s\n", tunnel.LastError)
+	}
+}
+
+func tunnelForSlug(tunnels map[string]daemon.TunnelStatus, slug string) *daemon.TunnelStatus {
+	if len(tunnels) == 0 {
+		return nil
+	}
+	t, ok := tunnels[slug]
+	if !ok {
+		return nil
+	}
+	copy := t
+	return &copy
+}
+
+func gatewayProxyURLsByProcess(localByProcess map[string][]string, cfg *config.ProjectConfig, tunnel *daemon.TunnelStatus) map[string][]string {
+	out := map[string][]string{}
+	if tunnel == nil || tunnel.Status != "connected" || cfg == nil {
+		return out
+	}
+	gatewayURL, _ := cfg.Gateway["url"].(string)
+	gatewayURL = strings.TrimSpace(gatewayURL)
+	if gatewayURL == "" {
+		return out
+	}
+	parsedGateway, err := url.Parse(gatewayURL)
+	if err != nil || parsedGateway.Host == "" {
+		return out
+	}
+	gatewayScheme := parsedGateway.Scheme
+	if gatewayScheme == "" {
+		gatewayScheme = "https"
+	}
+	gatewayHost := parsedGateway.Host
+	label := strings.TrimSpace(tunnel.Label)
+	if label == "" {
+		return out
+	}
+	for process, routes := range localByProcess {
+		for _, route := range routes {
+			if !strings.HasPrefix(route, "https://") {
+				continue
+			}
+			u, err := url.Parse(route)
+			if err != nil || u.Host == "" {
+				continue
+			}
+			host := u.Hostname()
+			parts := strings.Split(host, ".")
+			switch {
+			case len(parts) == 2:
+				u.Host = label + "." + gatewayHost
+			case len(parts) >= 3:
+				sub := strings.Join(parts[:len(parts)-2], ".")
+				u.Host = sub + "." + label + "." + gatewayHost
+			default:
+				continue
+			}
+			u.Scheme = gatewayScheme
+			out[process] = append(out[process], u.String())
+		}
+		sort.Strings(out[process])
+		out[process] = dedupeStrings(out[process])
+	}
+	return out
 }
 
 func dedupeStrings(values []string) []string {

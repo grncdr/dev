@@ -79,8 +79,8 @@ Alias: `dev-mode tunnel [slug] [--label <label>]`
 ### `dev-mode tunnel close [slug]`
 Closes the tunnel for the worktree.
 
-### `dev-mode tunnels status`
-Shows all active tunnel labels and owners from the gateway registry.
+### `dev-mode tunnel status`
+Shows daemon-managed tunnel connection status.
 
 ## DNS
 

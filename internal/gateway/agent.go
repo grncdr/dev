@@ -17,15 +17,19 @@ import (
 )
 
 type Agent struct {
-	GatewayURL  string
-	UpstreamURL string
-	Project     string
-	Slug        string
-	Label       string
-	AgentID     string
-	Name        string
-	RetryDelay  time.Duration
-	HTTPClient  *http.Client
+	GatewayURL     string
+	UpstreamURL    string
+	Project        string
+	Slug           string
+	Label          string
+	AgentID        string
+	Name           string
+	RetryDelay     time.Duration
+	HTTPClient     *http.Client
+	GatewayClient  *http.Client
+	UpstreamClient *http.Client
+	OnConnected    func()
+	OnDisconnected func(error)
 }
 
 func (a *Agent) Run(ctx context.Context) error {
@@ -51,7 +55,12 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 }
 
-func (a *Agent) runOnce(ctx context.Context) error {
+func (a *Agent) runOnce(ctx context.Context) (runErr error) {
+	defer func() {
+		if a.OnDisconnected != nil {
+			a.OnDisconnected(runErr)
+		}
+	}()
 	if err := a.register(ctx); err != nil {
 		return err
 	}
@@ -60,12 +69,18 @@ func (a *Agent) runOnce(ctx context.Context) error {
 		return err
 	}
 	defer conn.Close()
+	if a.OnConnected != nil {
+		a.OnConnected()
+	}
 
 	upstreamURL, err := url.Parse(a.UpstreamURL)
 	if err != nil {
 		return err
 	}
 	client := a.HTTPClient
+	if a.UpstreamClient != nil {
+		client = a.UpstreamClient
+	}
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
@@ -124,6 +139,9 @@ func (a *Agent) register(ctx context.Context) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	client := a.HTTPClient
+	if a.GatewayClient != nil {
+		client = a.GatewayClient
+	}
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
 	}

@@ -47,6 +47,7 @@ func Execute() error {
 	root.AddCommand(newInstallCmd())
 	root.AddCommand(newLogsCmd(opts))
 	root.AddCommand(newGatewayCmd(opts))
+	root.AddCommand(newTunnelCmd(opts))
 	root.AddCommand(newWorktreeStartCmd(opts))
 	root.AddCommand(newWorktreeStopCmd(opts))
 	root.AddCommand(newWorktreeRestartCmd(opts))
