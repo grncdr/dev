@@ -13,11 +13,10 @@ func TestLoadProjectConfig_OverridesAndValidation(t *testing.T) {
 
 	base := `
 [project]
-name = "foocorp"
-apex_zone = "example.dev"
+name = "Foo Corp"
 
-[services.db]
-shared = true
+[processes.db]
+singleton = true
 `
 	if err := os.WriteFile(basePath, []byte(base), 0o600); err != nil {
 		t.Fatal(err)
@@ -37,9 +36,6 @@ name = "override"
 	}
 	if cfg.Project.Name != "override" {
 		t.Fatalf("expected override name, got %q", cfg.Project.Name)
-	}
-	if cfg.Project.ApexZone != "example.dev" {
-		t.Fatalf("expected apex_zone from base, got %q", cfg.Project.ApexZone)
 	}
 	if !info.LocalOverrideUsed {
 		t.Fatalf("expected local override to be used")

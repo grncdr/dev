@@ -1,0 +1,96 @@
+package daemon
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestResolveWorktreePathPrefersDirHint(t *testing.T) {
+	base := t.TempDir()
+	repoA := filepath.Join(base, "repo-a")
+	repoB := filepath.Join(base, "repo-b")
+	if err := os.MkdirAll(repoA, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(repoB, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runGit(repoA, "init"); err != nil {
+		t.Fatalf("git init repoA: %v", err)
+	}
+	if err := runGit(repoB, "init"); err != nil {
+		t.Fatalf("git init repoB: %v", err)
+	}
+
+	oldCwd, _ := os.Getwd()
+	t.Cleanup(func() {
+		_ = os.Chdir(oldCwd)
+	})
+	if err := os.Chdir(repoB); err != nil {
+		t.Fatal(err)
+	}
+
+	hint := filepath.Join(repoA, "nested")
+	if err := os.MkdirAll(hint, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	slug := filepath.Base(repoA)
+	path, err := resolveWorktreePath(slug, hint)
+	if err != nil {
+		t.Fatalf("resolveWorktreePath: %v", err)
+	}
+	want, _ := filepath.EvalSymlinks(repoA)
+	got, _ := filepath.EvalSymlinks(path)
+	if got != want {
+		t.Fatalf("expected %s, got %s", want, got)
+	}
+}
+
+func TestStatusAndStopUseDirHint(t *testing.T) {
+	base := t.TempDir()
+	repoA := filepath.Join(base, "repo-a")
+	repoB := filepath.Join(base, "repo-b")
+	if err := os.MkdirAll(repoA, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(repoB, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(repoA, "init"); err != nil {
+		t.Fatalf("git init repoA: %v", err)
+	}
+	if err := runGit(repoB, "init"); err != nil {
+		t.Fatalf("git init repoB: %v", err)
+	}
+
+	cfg := `
+[project]
+name = "Foo Corp"
+`
+	if err := os.WriteFile(filepath.Join(repoA, ".dev-mode.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	oldCwd, _ := os.Getwd()
+	t.Cleanup(func() {
+		_ = os.Chdir(oldCwd)
+	})
+	if err := os.Chdir(repoB); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewManager()
+	hint := filepath.Join(repoA, "nested")
+	if err := os.MkdirAll(hint, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	slug := filepath.Base(repoA)
+	if _, err := m.StatusWorktreeFromDir(slug, hint); err != nil {
+		t.Fatalf("status with hint: %v", err)
+	}
+	if _, err := m.StopWorktreeFromDir(slug, hint); err != nil {
+		t.Fatalf("stop with hint: %v", err)
+	}
+}

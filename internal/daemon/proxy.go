@@ -1,0 +1,288 @@
+package daemon
+
+import (
+	"context"
+	"crypto/tls"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"dev-mode/internal/config"
+	"dev-mode/internal/worktree"
+)
+
+const (
+	defaultProxyHTTPListen  = "0.0.0.0:80"
+	defaultProxyHTTPSListen = "0.0.0.0:443"
+)
+
+func (s *Server) startProxy() error {
+	httpAddr, httpsAddr := proxyListenAddrs(s.userConfig)
+
+	if httpsAddr != "" {
+		cert, key, caKey, caCert, err := proxyCertPaths()
+		if err != nil {
+			return err
+		}
+		certPair, err := tls.LoadX509KeyPair(cert, key)
+		if err != nil {
+			return fmt.Errorf("load proxy cert: %w (run dev-mode cert install)", err)
+		}
+		certProvider, err := newProxyCertProvider(certPair, caKey, caCert)
+		if err != nil {
+			return fmt.Errorf("load proxy CA: %w (run dev-mode cert install)", err)
+		}
+		tlsConfig := &tls.Config{
+			Certificates:   []tls.Certificate{certPair},
+			GetCertificate: certProvider.getCertificate,
+		}
+		ln, err := tls.Listen("tcp", httpsAddr, tlsConfig)
+		if err != nil {
+			return fmt.Errorf("proxy https listen: %w", err)
+		}
+		httpsSrv := &http.Server{
+			Handler:           http.HandlerFunc(s.handleProxyHTTPS),
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+		go func() {
+			_ = httpsSrv.Serve(ln)
+		}()
+	}
+
+	if httpAddr != "" {
+		ln, err := net.Listen("tcp", httpAddr)
+		if err != nil {
+			return fmt.Errorf("proxy http listen: %w", err)
+		}
+		httpSrv := &http.Server{
+			Handler:           http.HandlerFunc(s.handleProxyHTTP),
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+		go func() {
+			_ = httpSrv.Serve(ln)
+		}()
+	}
+
+	if err := s.startTCPProxyListeners(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *Server) startTCPProxyListeners() error {
+	if s.config == nil {
+		return nil
+	}
+	routes := processProxyMatchers(s.config)
+	for _, route := range routes {
+		if route.TCPListen <= 0 {
+			continue
+		}
+		if !route.Singleton {
+			logError(http.StatusBadRequest, "tcp_proxy_requires_singleton", fmt.Errorf("process %s tcp_listen requires singleton=true", route.Process))
+			continue
+		}
+		addr := fmt.Sprintf("127.0.0.1:%d", route.TCPListen)
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("tcp proxy listen %s for %s: %w", addr, route.Process, err)
+		}
+		go s.serveTCPProxyListener(ln, route.Process)
+	}
+	return nil
+}
+
+func (s *Server) serveTCPProxyListener(ln net.Listener, process string) {
+	defer ln.Close()
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		go s.handleTCPProxyConn(conn, process)
+	}
+}
+
+func (s *Server) handleTCPProxyConn(conn net.Conn, process string) {
+	defer conn.Close()
+	mainSlug, err := worktree.ResolveMainSlugInDir(s.mainPath)
+	if err != nil {
+		logError(http.StatusBadGateway, "tcp_proxy_main_slug_error", err)
+		return
+	}
+	network, address, err := s.manager.EnsureProcessForTarget(mainSlug, process)
+	if err != nil {
+		logError(http.StatusBadGateway, "tcp_proxy_target_error", err)
+		return
+	}
+	upstream, err := net.Dial(network, address)
+	if err != nil {
+		logError(http.StatusBadGateway, "tcp_proxy_dial_error", err)
+		return
+	}
+	defer upstream.Close()
+
+	done := make(chan struct{}, 2)
+	go func() {
+		_, _ = io.Copy(upstream, conn)
+		done <- struct{}{}
+	}()
+	go func() {
+		_, _ = io.Copy(conn, upstream)
+		done <- struct{}{}
+	}()
+	<-done
+}
+
+func proxyListenAddrs(userCfg *config.UserConfig) (httpAddr, httpsAddr string) {
+	httpAddr, httpDisabled := listenFromEnv("DEV_MODE_PROXY_LISTEN_HTTP")
+	httpsAddr, httpsDisabled := listenFromEnv("DEV_MODE_PROXY_LISTEN_HTTPS")
+
+	if httpAddr == "" && !httpDisabled && userCfg != nil && userCfg.Proxy.ListenHTTP != "" {
+		httpAddr = userCfg.Proxy.ListenHTTP
+	}
+	if httpsAddr == "" && !httpsDisabled && userCfg != nil && userCfg.Proxy.ListenHTTPS != "" {
+		httpsAddr = userCfg.Proxy.ListenHTTPS
+	}
+	if httpAddr == "" && !httpDisabled {
+		httpAddr = defaultProxyHTTPListen
+	}
+	if httpsAddr == "" && !httpsDisabled {
+		httpsAddr = defaultProxyHTTPSListen
+	}
+	return httpAddr, httpsAddr
+}
+
+func listenFromEnv(name string) (string, bool) {
+	env := strings.TrimSpace(os.Getenv(name))
+	if env == "" {
+		return "", false
+	}
+	if env == "off" || env == "disabled" {
+		return "", true
+	}
+	return env, false
+}
+
+func (s *Server) handleProxyHTTP(w http.ResponseWriter, r *http.Request) {
+	if err := s.checkProxyAllow(r); err != nil {
+		writeErrorWithCode(w, http.StatusForbidden, "proxy_denied", err)
+		return
+	}
+	host := r.Host
+	if host == "" {
+		writeErrorWithCode(w, http.StatusBadRequest, "missing_host", errors.New("missing host"))
+		return
+	}
+	targetHost := host
+	if strings.Contains(targetHost, ":") {
+		targetHost, _, _ = strings.Cut(targetHost, ":")
+	}
+	_, httpsAddr := proxyListenAddrs(s.userConfig)
+	if httpsAddr != "" {
+		if _, port, err := net.SplitHostPort(httpsAddr); err == nil && port != "443" {
+			targetHost = net.JoinHostPort(targetHost, port)
+		}
+	}
+	target := fmt.Sprintf("https://%s%s", targetHost, r.URL.RequestURI())
+	http.Redirect(w, r, target, http.StatusMovedPermanently)
+}
+
+func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
+	if err := s.checkProxyAllow(r); err != nil {
+		writeErrorWithCode(w, http.StatusForbidden, "proxy_denied", err)
+		return
+	}
+	host := r.Host
+	if host == "" {
+		writeErrorWithCode(w, http.StatusBadRequest, "missing_host", errors.New("missing host"))
+		return
+	}
+	if strings.Contains(host, ":") {
+		host, _, _ = strings.Cut(host, ":")
+	}
+
+	network, address, err := s.resolveProxyTarget(host, r.URL.Path)
+	if err != nil {
+		writeErrorWithCode(w, http.StatusBadGateway, "proxy_target_error", err)
+		return
+	}
+
+	target, _ := url.Parse("http://unix")
+	reverseProxy := httputil.NewSingleHostReverseProxy(target)
+	originalDirector := reverseProxy.Director
+	reverseProxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		req.Header.Set("X-Forwarded-Proto", "https")
+		req.Header.Set("X-Forwarded-Host", host)
+	}
+	reverseProxy.Transport = &http.Transport{
+		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return net.Dial(network, address)
+		},
+	}
+	rewriteDomain := host
+	apex := s.projectApexZone()
+	reverseProxy.ModifyResponse = func(resp *http.Response) error {
+		if loc := resp.Header.Get("Location"); loc != "" {
+			if rewritten, ok := rewriteLocation(loc, rewriteDomain); ok {
+				resp.Header.Set("Location", rewritten)
+			}
+		}
+		if apex != "" {
+			rewriteSetCookieDomain(resp.Header, apex, rewriteDomain)
+		}
+		return nil
+	}
+	reverseProxy.ErrorHandler = func(rw http.ResponseWriter, _ *http.Request, err error) {
+		writeErrorWithCode(rw, http.StatusBadGateway, "proxy_upstream_error", err)
+	}
+	reverseProxy.ServeHTTP(w, r)
+}
+
+func proxyCertPaths() (leafCert, leafKey, caKey, caCert string, err error) {
+	dir, err := config.ExpandUserPath("~/.config/dev-mode/certs")
+	if err != nil {
+		return "", "", "", "", err
+	}
+	return filepath.Join(dir, "localhost.pem"),
+		filepath.Join(dir, "localhost-key.pem"),
+		filepath.Join(dir, "ca-key.pem"),
+		filepath.Join(dir, "ca.pem"),
+		nil
+}
+
+func (s *Server) checkProxyAllow(r *http.Request) error {
+	allow := ""
+	if s.userConfig != nil {
+		allow = strings.TrimSpace(s.userConfig.Proxy.Allow)
+	}
+	if allow == "" {
+		allow = "loopback"
+	}
+	if allow == "all" {
+		return nil
+	}
+	if allow != "loopback" {
+		return fmt.Errorf("invalid proxy.allow: %s", allow)
+	}
+
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return errors.New("invalid remote address")
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return errors.New("proxy access denied")
+	}
+	return nil
+}

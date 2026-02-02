@@ -39,6 +39,17 @@ func Execute() error {
 	root.PersistentFlags().BoolVar(&opts.Debug, "debug", false, "enable debug logging")
 
 	root.AddCommand(newConfigCmd(opts))
+	root.AddCommand(newInitCmd(opts))
+	root.AddCommand(newDaemonCmd(opts))
+	root.AddCommand(newAttachCmd(opts))
+	root.AddCommand(newDNSCmd())
+	root.AddCommand(newCertCmd())
+	root.AddCommand(newInstallCmd())
+	root.AddCommand(newLogsCmd(opts))
+	root.AddCommand(newWorktreeStartCmd(opts))
+	root.AddCommand(newWorktreeStopCmd(opts))
+	root.AddCommand(newWorktreeRestartCmd(opts))
+	root.AddCommand(newWorktreeStatusCmd(opts))
 
 	return root.Execute()
 }

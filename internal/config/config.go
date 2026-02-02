@@ -16,26 +16,52 @@ const (
 )
 
 type ProjectConfig struct {
-	Project   ProjectBlock              `toml:"project"`
-	Gateway   map[string]any            `toml:"gateway"`
-	Services  map[string]map[string]any `toml:"services"`
-	Processes map[string]map[string]any `toml:"processes"`
-	Proxy     map[string]any            `toml:"proxy"`
+	Project   ProjectBlock              `toml:"project" json:"project"`
+	Gateway   map[string]any            `toml:"gateway" json:"gateway,omitempty"`
+	Processes map[string]map[string]any `toml:"processes" json:"processes,omitempty"`
+	Proxy     ProjectProxyBlock         `toml:"proxy" json:"proxy,omitempty"`
+	Hooks     HooksBlock                `toml:"hooks" json:"hooks,omitempty"`
+	Commands  CommandsBlock             `toml:"commands" json:"commands,omitempty"`
 }
 
 type ProjectBlock struct {
-	Name     string `toml:"name"`
-	ApexZone string `toml:"apex_zone"`
+	Name     string `toml:"name" json:"name"`
+	MainSlug string `toml:"main_slug" json:"main_slug,omitempty"`
 }
 
 type UserConfig struct {
-	Worktrees map[string]WorktreeTrust `toml:"worktrees"`
-	Gateway   map[string]any           `toml:"gateway"`
+	Worktrees map[string]WorktreeTrust `toml:"worktrees" json:"worktrees,omitempty"`
+	Gateway   map[string]any           `toml:"gateway" json:"gateway,omitempty"`
+	Proxy     UserProxyBlock           `toml:"proxy" json:"proxy,omitempty"`
 }
 
 type WorktreeTrust struct {
-	Project string `toml:"project"`
-	Trusted bool   `toml:"trusted"`
+	Project string `toml:"project" json:"project"`
+	Trusted bool   `toml:"trusted" json:"trusted"`
+}
+
+type HooksBlock struct {
+	PostCreate string `toml:"post_create" json:"post_create,omitempty"`
+	PreCleanup string `toml:"pre_cleanup" json:"pre_cleanup,omitempty"`
+	PreStart   string `toml:"pre_start" json:"pre_start,omitempty"`
+	PostStart  string `toml:"post_start" json:"post_start,omitempty"`
+	PreStop    string `toml:"pre_stop" json:"pre_stop,omitempty"`
+	PostStop   string `toml:"post_stop" json:"post_stop,omitempty"`
+}
+
+type CommandsBlock struct {
+	Wrapper string `toml:"wrapper" json:"wrapper,omitempty"`
+}
+
+type ProjectProxyBlock struct {
+	// Reserved for future project-level proxy options.
+}
+
+type UserProxyBlock struct {
+	ListenHTTP  string `toml:"listen_http" json:"listen_http,omitempty"`
+	ListenHTTPS string `toml:"listen_https" json:"listen_https,omitempty"`
+	ApexZone    string `toml:"apex_zone" json:"apex_zone,omitempty"`
+	Allow       string `toml:"allow" json:"allow,omitempty"`
 }
 
 type LoadInfo struct {
@@ -117,9 +143,6 @@ func ExpandUserPath(path string) (string, error) {
 func validateProjectConfig(cfg *ProjectConfig) error {
 	if cfg.Project.Name == "" {
 		return errors.New("project.name is required")
-	}
-	if cfg.Project.ApexZone == "" {
-		return errors.New("project.apex_zone is required")
 	}
 	return nil
 }

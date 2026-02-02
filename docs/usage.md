@@ -1,6 +1,6 @@
 # dev-mode Usage
 
-See `docs/config.md` for configuration options and examples.
+See `docs/config.md` for configuration options and examples. See `docs/logging.md` for log locations.
 
 ## Global Options
 
@@ -12,12 +12,17 @@ See `docs/config.md` for configuration options and examples.
 
 ### `dev-mode daemon start`
 Starts the single global daemon (proxy, DNS, certs, shared services, worktree supervisor, tunnel agent).
+If the daemon was previously shut down cleanly, it restores previously running worktrees/services on startup.
 
 ### `dev-mode daemon stop`
 Stops the global daemon.
+On clean shutdown, the daemon saves currently running worktrees/services and restores them on the next start.
 
 ### `dev-mode daemon status`
 Shows daemon health plus proxy/DNS/cert status and shared service state.
+
+### `dev-mode daemon restart`
+Restarts the daemon.
 
 ## Projects
 
@@ -26,43 +31,43 @@ Lists all trusted projects, their main worktree path, and known worktrees per pr
 
 ## Config
 
+### `dev-mode init`
+Initializes a `.dev-mode.toml` project config in the current directory.
+Defaults `project.name` to the directory basename.
+
 ### `dev-mode config show`
 Shows the effective project config (with local override applied) and user config.
 Use `--output json` for machine-readable output.
 
-## Worktrees
+## Process Identifiers
 
-### `dev-mode worktree new <path> [branch]`
-Creates a new worktree and initializes per-worktree state.
+Many commands accept process identifiers in these forms:
 
-Alias: `dev-mode new <path> [branch]`
+- `process` (current worktree inferred from cwd)
+- `worktree:process`
+- `project/worktree:process`
+- `project/worktree:*` (all processes in that worktree)
 
-### `dev-mode worktree cleanup [path|slug] [--yes] [--delete-branch]`
-Stops the worktree (if running), removes state and data, and deletes the worktree directory.
+If no process identifiers are provided to `start`/`stop`/`restart`, dev-mode targets all processes in the current worktree.
 
-Alias: `dev-mode cleanup [path|slug] [--yes] [--delete-branch]`
+## Process Control
 
-### `dev-mode worktree list`
-Lists configured worktrees.
+### `dev-mode status [process_identifier...]`
+Shows process status. With no args, shows all processes in the current worktree.
 
-Alias: `dev-mode list`
+### `dev-mode start [process_identifier...]`
+Starts processes. With no args, starts all processes in the current worktree.
 
-### `dev-mode worktree status [slug]`
-Shows worktree status (processes, sockets, idle time). Includes tunnel status when available.
+### `dev-mode stop [process_identifier...]`
+Stops processes. With no args, stops all processes in the current worktree.
 
-Alias: `dev-mode status [slug]`
+### `dev-mode restart [process_identifier...]`
+Restarts processes. With no args, restarts all processes in the current worktree.
 
-### `dev-mode worktree start [slug]`
-Starts worktree processes on demand.
+## Attach
 
-Alias: `dev-mode start [slug]`
-
-### `dev-mode worktree stop [slug]`
-Stops worktree processes.
-
-Alias: `dev-mode stop [slug]`
-
-Slugs can be qualified with a project name, e.g. `foocorp/feature-test`.
+### `dev-mode attach <process|slug:process|project/slug:process>`
+Attaches your terminal to a process PTY. Uses the current worktree when only `process` is provided.
 
 ## Tunnels
 
@@ -90,7 +95,13 @@ Removes the `localhost` resolver.
 ### `dev-mode cert install`
 Creates a local CA and installs trust (mkcert-style). Generates local certs for `*.localhost`.
 
+## Install
+
+### `dev-mode install`
+Installs DNS, certs, and proxy privileges (requires sudo).
+
+
 ## Gateway
 
 ### `dev-mode gateway`
-Runs the gateway in the foreground (intended for systemd).
+Runs the gateway in the foreground.

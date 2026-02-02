@@ -27,8 +27,8 @@ func TestRunConfigShow_JSON(t *testing.T) {
 
 	project := `
 [project]
-name = "foocorp"
-apex_zone = "example.dev"
+name = "Foo Corp"
+main_slug = "foocorp"
 `
 	if err := os.WriteFile(projectPath, []byte(project), 0o600); err != nil {
 		t.Fatal(err)
@@ -36,7 +36,7 @@ apex_zone = "example.dev"
 
 	user := `
 [worktrees."/abs/path"]
-project = "foocorp"
+project = "Foo Corp"
 trusted = true
 `
 	if err := os.WriteFile(userPath, []byte(user), 0o600); err != nil {
@@ -64,12 +64,12 @@ trusted = true
 		t.Fatalf("expected user path %q, got %q", userPath, payload.Paths.UserConfig)
 	}
 
-	projectBlock, ok := payload.ProjectConfig["Project"].(map[string]any)
+	projectBlock, ok := payload.ProjectConfig["project"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected project block")
 	}
-	if projectBlock["Name"] != "foocorp" {
-		t.Fatalf("expected project.name 'foocorp', got %v", projectBlock["Name"])
+	if projectBlock["name"] != "Foo Corp" {
+		t.Fatalf("expected project.name 'Foo Corp', got %v", projectBlock["name"])
 	}
 }
 
