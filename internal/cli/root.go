@@ -46,6 +46,7 @@ func Execute() error {
 	root.AddCommand(newCertCmd())
 	root.AddCommand(newInstallCmd())
 	root.AddCommand(newLogsCmd(opts))
+	root.AddCommand(newGatewayCmd(opts))
 	root.AddCommand(newWorktreeStartCmd(opts))
 	root.AddCommand(newWorktreeStopCmd(opts))
 	root.AddCommand(newWorktreeRestartCmd(opts))

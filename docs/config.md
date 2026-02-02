@@ -120,12 +120,18 @@ trusted = true
 
 [gateway]
 enabled = false
+data_dir = ""
 listen = ":443"
 http_listen = ":80"
 acme_email = "tech@foocorp.dev"
 acme_storage = "~/.config/dev-mode/gateway/acme"
 acme_directory = "https://acme-v02.api.letsencrypt.org/directory"
 dns_provider = "route53"
+
+[gateway.auth]
+enabled = false
+username = ""
+password = ""
 
 [proxy]
 apex_zone = ".localhost"
@@ -138,6 +144,10 @@ Notes:
 - Trust is stored per absolute worktree path under `[worktrees."/abs/path"]`.
 - The daemon prompts on first use and records the trust decision.
 - `proxy.apex_zone` is user-level and defaults to `.localhost`.
+- `gateway.data_dir` is the gateway persistence root; set it in deployed gateway environments and mount it as durable storage.
+- `gateway.auth` configures optional HTTP Basic Auth for public gateway requests.
+- `gateway.auth` is global (not per project/label).
+- Keep `gateway.auth.password` in user/global config only.
 
 ## CLI overrides
 

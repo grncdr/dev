@@ -163,6 +163,7 @@ trusted = true
 
 [gateway]
 enabled = false
+data_dir = ""
 listen = ":443"
 http_listen = ":80"
 acme_email = "tech@foocorp.dev"
@@ -170,12 +171,20 @@ acme_storage = "~/.config/dev-mode/gateway/acme"
 acme_directory = "https://acme-v02.api.letsencrypt.org/directory"
 dns_provider = "route53"
 
+[gateway.auth]
+enabled = false
+username = ""
+password = ""
+
 [proxy]
 apex_zone = ".localhost"
 listen_http = "0.0.0.0:80"
 listen_https = "0.0.0.0:443"
 allow = "loopback"
 ```
+
+`gateway.auth` is a user/global setting and applies to all public gateway requests for that user instance.
+`gateway.data_dir` is the gateway persistence root for deployed gateway instances.
 
 Trust is **per worktree path**. The daemon prompts on first use and records the trust decision.
 

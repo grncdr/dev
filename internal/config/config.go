@@ -31,8 +31,22 @@ type ProjectBlock struct {
 
 type UserConfig struct {
 	Worktrees map[string]WorktreeTrust `toml:"worktrees" json:"worktrees,omitempty"`
-	Gateway   map[string]any           `toml:"gateway" json:"gateway,omitempty"`
+	Gateway   UserGatewayBlock         `toml:"gateway" json:"gateway,omitempty"`
 	Proxy     UserProxyBlock           `toml:"proxy" json:"proxy,omitempty"`
+}
+
+type UserGatewayBlock struct {
+	Enabled    bool            `toml:"enabled" json:"enabled,omitempty"`
+	DataDir    string          `toml:"data_dir" json:"data_dir,omitempty"`
+	Listen     string          `toml:"listen" json:"listen,omitempty"`
+	HTTPListen string          `toml:"http_listen" json:"http_listen,omitempty"`
+	Auth       UserGatewayAuth `toml:"auth" json:"auth,omitempty"`
+}
+
+type UserGatewayAuth struct {
+	Enabled  bool   `toml:"enabled" json:"enabled,omitempty"`
+	Username string `toml:"username" json:"username,omitempty"`
+	Password string `toml:"password" json:"password,omitempty"`
 }
 
 type WorktreeTrust struct {
@@ -138,6 +152,15 @@ func ExpandUserPath(path string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, path[1:]), nil
+}
+
+const DefaultGatewayDataDir = "~/.local/state/dev-mode/gateway"
+
+func ResolveGatewayDataDir(cfg *UserConfig) (string, error) {
+	if cfg != nil && cfg.Gateway.DataDir != "" {
+		return ExpandUserPath(cfg.Gateway.DataDir)
+	}
+	return ExpandUserPath(DefaultGatewayDataDir)
 }
 
 func validateProjectConfig(cfg *ProjectConfig) error {
