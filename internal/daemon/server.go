@@ -365,6 +365,7 @@ func (s *Server) loadConfig() error {
 			s.daemonConfig = daemonCfg
 		}
 	}
+	s.manager.SetApexZone(s.projectApexZone())
 	return nil
 }
 

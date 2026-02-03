@@ -25,13 +25,21 @@ type Manager struct {
 	mu        sync.Mutex
 	processes map[string]map[string]*processInfo
 	paths     map[string]string
+	apexZone  string
 }
 
 func NewManager() *Manager {
 	return &Manager{
 		processes: make(map[string]map[string]*processInfo),
 		paths:     make(map[string]string),
+		apexZone:  ".localhost",
 	}
+}
+
+func (m *Manager) SetApexZone(zone string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.apexZone = zone
 }
 
 type WorktreeStatus struct {
@@ -111,7 +119,10 @@ func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string,
 		return nil, fmt.Errorf("create worktree state dir: %w", err)
 	}
 
-	vars := buildVars(cfg.Project.Name, slug, path, mainPath, worktreeState)
+	m.mu.Lock()
+	apexZone := m.apexZone
+	m.mu.Unlock()
+	vars := buildVars(cfg.Project.Name, slug, path, mainPath, worktreeState, apexZone)
 	statuses := []ProcessStatus{}
 
 	m.mu.Lock()
@@ -517,14 +528,20 @@ func (m *Manager) Connect(slug, process string, conn net.Conn) error {
 	return err
 }
 
-func buildVars(project, slug, worktreePath, mainPath, worktreeState string) map[string]string {
+func buildVars(project, slug, worktreePath, mainPath, worktreeState, apexZone string) map[string]string {
+	dnsLabel := worktree.SlugDNSLabel(slug)
+	zone := strings.TrimPrefix(apexZone, ".")
+	if zone == "" {
+		zone = "localhost"
+	}
 	return map[string]string{
-		"PROJECT_NAME":           project,
-		"WORKTREE_SLUG":          slug,
-		"DEV_MODE_PROJECT":       project,
-		"DEV_MODE_WORKTREE_SLUG": slug,
-		"WORKTREE_PATH":          worktreePath,
-		"MAIN_WORKTREE":          mainPath,
+		"PROJECT_NAME":            project,
+		"WORKTREE_SLUG":           slug,
+		"DEV_MODE_PROJECT":        project,
+		"DEV_MODE_WORKTREE_SLUG":  slug,
+		"DEV_MODE_LOCAL_DNS_NAME": dnsLabel + "." + zone,
+		"WORKTREE_PATH":           worktreePath,
+		"MAIN_WORKTREE":           mainPath,
 		"WORKTREE_STATE": func() string {
 			if worktreeState == "" {
 				return ""
