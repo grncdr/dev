@@ -45,6 +45,7 @@ func Execute() error {
 	root.AddCommand(newDNSCmd())
 	root.AddCommand(newCertCmd())
 	root.AddCommand(newInstallCmd())
+	root.AddCommand(newDocsCmd(opts))
 	root.AddCommand(newLogsCmd(opts))
 	root.AddCommand(newGatewayCmd(opts))
 	root.AddCommand(newShareCmd(opts))

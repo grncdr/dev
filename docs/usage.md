@@ -52,6 +52,12 @@ Defaults `project.name` to the directory basename.
 Shows the effective project config (with local override applied) and daemon config.
 Use `--output json` for machine-readable output.
 
+## Documentation
+
+### `dev-mode docs <basename>`
+Shows embedded markdown from `docs/<basename>.md` (for example, `dev-mode docs config`).
+Output is piped through `DEV_MODE_PAGER`, then `bat` (if installed), then `PAGER`, then stdout.
+
 ## Process Identifiers
 
 Many commands accept process identifiers in these forms:
