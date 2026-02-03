@@ -594,6 +594,20 @@ func dedupeStrings(values []string) []string {
 
 func resolveSlug(arg string) (string, error) {
 	if arg != "" {
+		if strings.Contains(arg, ":") {
+			currentProject, err := resolveProjectFromCurrentDir()
+			if err != nil {
+				return "", err
+			}
+			target, err := parseProjectSlugWithDefault(arg, currentProject)
+			if err != nil {
+				return "", err
+			}
+			if target.Project != currentProject {
+				return "", fmt.Errorf("project mismatch: target %q does not match current repository %q", target.Project, currentProject)
+			}
+			return target.Slug, nil
+		}
 		return arg, nil
 	}
 

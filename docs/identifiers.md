@@ -10,10 +10,12 @@ Worktrees are identified by `project:slug`:
 myproject:feature/my-branch
 ```
 
-- **Project**: The repository name (no slashes allowed)
+- **Project**: The repository identifier (slashes allowed, for example `org/repo`)
 - **Slug**: The worktree name (slashes allowed, matching git branch names)
 
 The colon `:` separates project from slug.
+
+For commands that take a worktree slug directly (for example `worktree add` and `worktree cleanup`), you may pass just `slug`; dev-mode infers `project` from the current working directory.
 
 ## Process Identifiers
 
@@ -50,7 +52,10 @@ Both resolve to the same worktree due to the uniqueness constraint.
 ## Examples
 
 ```bash
-# Create a worktree (project:slug format)
+# Create a worktree (project inferred from cwd)
+dev-mode worktree add feature/auth-rewrite
+
+# Create a worktree (explicit project:slug format)
 dev-mode worktree add myapp:feature/auth-rewrite
 
 # Start all processes in current worktree
@@ -78,7 +83,8 @@ Worktrees are created in nested directories mirroring the slug structure:
 
 ```
 ~/.local/share/dev-mode/worktrees/
-└── myapp/
-    └── feature/
-        └── auth-rewrite/   # worktree directory
+└── org/
+    └── repo/
+        └── feature/
+            └── auth-rewrite/   # worktree directory
 ```

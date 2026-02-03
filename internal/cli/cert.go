@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"os"
 	"os/exec"
@@ -32,6 +33,7 @@ func newCertCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(newCertInstallCmd())
+	cmd.AddCommand(newCertExportCmd())
 	return cmd
 }
 
@@ -41,6 +43,16 @@ func newCertInstallCmd() *cobra.Command {
 		Short: "create and trust a local CA",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCertInstall()
+		},
+	}
+}
+
+func newCertExportCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "export",
+		Short: "write the local CA certificate to stdout",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCertExport(cmd.OutOrStdout())
 		},
 	}
 }
@@ -80,6 +92,20 @@ func runCertInstall() error {
 
 	fmt.Printf("certs written to %s\n", dir)
 	return nil
+}
+
+func runCertExport(out io.Writer) error {
+	dir, err := certsDir()
+	if err != nil {
+		return err
+	}
+	caCertPath := filepath.Join(dir, "ca.pem")
+	data, err := os.ReadFile(caCertPath)
+	if err != nil {
+		return fmt.Errorf("read local CA certificate %s (run dev-mode cert install): %w", caCertPath, err)
+	}
+	_, err = out.Write(data)
+	return err
 }
 
 func certsDir() (string, error) {

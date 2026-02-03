@@ -12,7 +12,7 @@ const (
 )
 
 var (
-	validProjectPattern = regexp.MustCompile(`^[a-z0-9_-]+$`)
+	validProjectPattern = regexp.MustCompile(`^[a-z0-9/_-]+$`)
 	validSlugPattern2   = regexp.MustCompile(`^[a-z0-9/_-]+$`)
 )
 
@@ -110,7 +110,7 @@ func normalizeProject(segment string) (string, error) {
 		return "", fmt.Errorf("invalid project %q: max length is %d", segment, maxIdentifierSegmentLen)
 	}
 	if !validProjectPattern.MatchString(normalized) {
-		return "", fmt.Errorf("invalid project %q: allowed chars are [a-z0-9_-]", segment)
+		return "", fmt.Errorf("invalid project %q: allowed chars are [a-z0-9/_-]", segment)
 	}
 	return normalized, nil
 }

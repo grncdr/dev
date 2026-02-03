@@ -141,7 +141,7 @@ path = "/"
 	}
 	slug := filepath.Base(repoDir)
 	start := time.Now()
-	network, address, err := s.resolveProxyTarget(slug+".localhost", "/")
+	network, address, _, err := s.resolveProxyTarget(slug+".localhost", "/")
 	if err != nil {
 		t.Fatalf("resolve proxy target: %v", err)
 	}

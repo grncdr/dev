@@ -1,6 +1,6 @@
 # dev-mode Usage
 
-See `docs/config.md` for configuration options and examples. See `docs/logging.md` for log locations.
+See `docs/config.md` for configuration options and examples. See `docs/environment.md` for runtime/hook environments. See `docs/hooks.md` for hook behavior. See `docs/logging.md` for log locations.
 
 ## Global Options
 
@@ -33,11 +33,12 @@ Lists projects, their main worktree path, and known worktrees per project.
 
 ### `dev-mode worktree add <slug> [branch]`
 Creates a managed worktree under daemon `worktree_dir`. Accepts `slug` or `project:slug` format.
+When only `slug` is provided, project is inferred from the current working directory.
 Slugs can contain slashes (e.g., `feature/my-branch`).
 
 ### `dev-mode worktree cleanup [slug] [--delete-branch] [--dry-run] [--force]`
 Removes a managed worktree. Accepts `slug` or `project:slug` format.
-If omitted, dev-mode targets the current worktree from cwd.
+If omitted, dev-mode targets the current worktree from cwd. When `slug` is provided without project, project is inferred from cwd.
 
 ### `dev-mode worktree list`
 Lists managed worktrees with path, branch, and status flags.
@@ -46,7 +47,7 @@ Lists managed worktrees with path, branch, and status flags.
 
 ### `dev-mode init`
 Initializes a `.dev-mode.toml` project config in the current directory.
-Defaults `project.name` to the directory basename.
+Defaults `project.name` to `<owner>/<repo>` when the git `origin` remote matches that format; otherwise uses the directory basename.
 
 ### `dev-mode config show`
 Shows the effective project config (with local override applied) and daemon config.
@@ -113,6 +114,9 @@ Removes the `localhost` resolver.
 
 ### `dev-mode cert install`
 Creates a local CA and installs trust (mkcert-style). Generates local certs for `*.localhost`.
+
+### `dev-mode cert export`
+Writes the local CA certificate PEM (`ca.pem`) to stdout.
 
 ## Install
 

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,7 +10,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/mattn/go-shellwords"
 	"github.com/spf13/cobra"
@@ -19,8 +17,6 @@ import (
 	"dev-mode/internal/config"
 	"dev-mode/internal/worktree"
 )
-
-const worktreeHookTimeout = 30 * time.Second
 
 type worktreeCleanupOptions struct {
 	DeleteBranch bool
@@ -89,11 +85,6 @@ func newWorktreeListCmd(opts *Options) *cobra.Command {
 }
 
 func runWorktreeAdd(opts *Options, targetArg, branchArg string, out, errOut io.Writer) error {
-	target, err := worktree.ParseProjectSlug(targetArg)
-	if err != nil {
-		return err
-	}
-
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -106,9 +97,13 @@ func runWorktreeAdd(opts *Options, targetArg, branchArg string, out, errOut io.W
 		return errors.New("main worktree path missing")
 	}
 	mainPath := entries[0].Path
-	repoProject, err := worktree.NormalizeIdentifierSegment(filepath.Base(mainPath))
+	repoProject, err := resolveProjectIdentifierFromMainPath(mainPath)
 	if err != nil {
 		return fmt.Errorf("resolve project identifier from repository path: %w", err)
+	}
+	target, err := parseProjectSlugWithDefault(targetArg, repoProject)
+	if err != nil {
+		return err
 	}
 	if target.Project != repoProject {
 		return fmt.Errorf("project mismatch: target %q does not match current repository %q", target.Project, repoProject)
@@ -162,8 +157,8 @@ func runWorktreeAdd(opts *Options, targetArg, branchArg string, out, errOut io.W
 		fmt.Fprintf(errOut, "warning: branch %q already exists; reusing existing branch\n", branchName)
 	}
 
-	hookEnv := lifecycleHookEnv(target.Project, target.Slug, targetPath, branchName, "add", false)
-	if err := runLifecycleHook(cfg.Hooks.PreWorktreeAdd, "pre-worktree-add", mainPath, hookEnv, out, errOut); err != nil {
+	hookEnv := lifecycleHookEnv(target.Project, target.Slug, targetPath, branchName, "add", false, proxyApexZone(daemonCfg))
+	if err := runLifecycleHook(cfg.Hooks.PreWorktreeAdd, cfg.Commands.Wrapper, "pre_worktree_add", mainPath, hookEnv, out, errOut); err != nil {
 		return err
 	}
 
@@ -177,7 +172,7 @@ func runWorktreeAdd(opts *Options, targetArg, branchArg string, out, errOut io.W
 		return addErr
 	}
 
-	if err := runLifecycleHook(cfg.Hooks.PostWorktreeAdd, "post-worktree-add", targetPath, hookEnv, out, errOut); err != nil {
+	if err := runLifecycleHook(cfg.Hooks.PostWorktreeAdd, cfg.Commands.Wrapper, "post_worktree_add", targetPath, hookEnv, out, errOut); err != nil {
 		return fmt.Errorf("worktree created at %s, but %w", targetPath, err)
 	}
 
@@ -229,7 +224,7 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 	if err != nil {
 		return err
 	}
-	hookEnv := lifecycleHookEnv(resolved.project, resolved.slug, resolved.path, resolved.branch, "cleanup", resolved.implicit)
+	hookEnv := lifecycleHookEnv(resolved.project, resolved.slug, resolved.path, resolved.branch, "cleanup", resolved.implicit, proxyApexZone(daemonCfg))
 
 	if cleanup.DryRun {
 		fmt.Fprintf(out, "would remove worktree: %s\n", resolved.path)
@@ -239,7 +234,7 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 		return nil
 	}
 
-	if err := runLifecycleHook(cfg.Hooks.PreWorktreeCleanup, "pre-worktree-cleanup", resolved.path, hookEnv, out, errOut); err != nil {
+	if err := runLifecycleHook(cfg.Hooks.PreWorktreeCleanup, cfg.Commands.Wrapper, "pre_worktree_cleanup", resolved.path, hookEnv, out, errOut); err != nil {
 		return err
 	}
 
@@ -262,7 +257,7 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 		}
 	}
 
-	if err := runLifecycleHook(cfg.Hooks.PostWorktreeCleanup, "post-worktree-cleanup", resolved.mainPath, hookEnv, out, errOut); err != nil {
+	if err := runLifecycleHook(cfg.Hooks.PostWorktreeCleanup, cfg.Commands.Wrapper, "post_worktree_cleanup", resolved.mainPath, hookEnv, out, errOut); err != nil {
 		return fmt.Errorf("worktree cleaned up at %s, but %w", resolved.path, err)
 	}
 
@@ -292,7 +287,7 @@ func runWorktreeList(opts *Options, out io.Writer) error {
 		return errors.New("main worktree path missing")
 	}
 	mainPath := entries[0].Path
-	project, err := worktree.NormalizeIdentifierSegment(filepath.Base(mainPath))
+	project, err := resolveProjectIdentifierFromMainPath(mainPath)
 	if err != nil {
 		return fmt.Errorf("resolve project identifier from repository path: %w", err)
 	}
@@ -383,7 +378,7 @@ func resolveCleanupTarget(arg, worktreeDir string) (*cleanupTarget, error) {
 		if err != nil {
 			return nil, fmt.Errorf("unable to resolve current worktree: %w", err)
 		}
-		project, err := worktree.NormalizeIdentifierSegment(filepath.Base(entries[0].Path))
+		project, err := resolveProjectIdentifierFromMainPath(entries[0].Path)
 		if err != nil {
 			return nil, err
 		}
@@ -402,7 +397,11 @@ func resolveCleanupTarget(arg, worktreeDir string) (*cleanupTarget, error) {
 		}, nil
 	}
 
-	parsed, err := worktree.ParseProjectSlug(arg)
+	project, err := resolveProjectFromCurrentDir()
+	if err != nil {
+		return nil, err
+	}
+	parsed, err := parseProjectSlugWithDefault(arg, project)
 	if err != nil {
 		return nil, err
 	}
@@ -433,6 +432,37 @@ func resolveCleanupTarget(arg, worktreeDir string) (*cleanupTarget, error) {
 		implicit: false,
 		exists:   true,
 	}, nil
+}
+
+func parseProjectSlugWithDefault(arg, defaultProject string) (worktree.ProjectSlug, error) {
+	trimmed := strings.TrimSpace(arg)
+	if strings.Contains(trimmed, ":") {
+		return worktree.ParseProjectSlug(trimmed)
+	}
+	return worktree.ParseProjectSlug(defaultProject + ":" + trimmed)
+}
+
+func resolveProjectFromCurrentDir() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	entries, err := worktree.ListWorktreesInDir(cwd)
+	if err != nil {
+		return "", err
+	}
+	if len(entries) == 0 || entries[0].Path == "" {
+		return "", errors.New("main worktree path missing")
+	}
+	return resolveProjectIdentifierFromMainPath(entries[0].Path)
+}
+
+func resolveProjectIdentifierFromMainPath(mainPath string) (string, error) {
+	cfg, err := loadProjectConfigFromDir(mainPath)
+	if err != nil {
+		return "", err
+	}
+	return worktree.NormalizeIdentifierSegment(cfg.Project.Name)
 }
 
 func loadDaemonConfig(opts *Options) (*config.DaemonConfig, error) {
@@ -503,18 +533,24 @@ func gitWorktreeDirty(path string) (bool, error) {
 	return strings.TrimSpace(output) != "", nil
 }
 
-func lifecycleHookEnv(project, slug, worktreePath, branch, operation string, implicit bool) map[string]string {
+func lifecycleHookEnv(project, slug, worktreePath, branch, operation string, implicit bool, apexZone string) map[string]string {
+	zone := strings.TrimPrefix(strings.TrimSpace(apexZone), ".")
+	if zone == "" {
+		zone = "localhost"
+	}
+	localDNSName := worktree.SlugDNSLabel(slug) + "." + zone
 	return map[string]string{
-		"DEV_MODE_PROJECT":         project,
-		"DEV_MODE_SLUG":            slug,
-		"DEV_MODE_WORKTREE_PATH":   worktreePath,
-		"DEV_MODE_WORKTREE_BRANCH": branch,
-		"DEV_MODE_OPERATION":       operation,
-		"DEV_MODE_IMPLICIT_TARGET": fmt.Sprintf("%t", implicit),
+		"DEV_MODE_PROJECT":           project,
+		"DEV_MODE_WORKTREE_SLUG":     slug,
+		"DEV_MODE_WORKTREE_PATH":     worktreePath,
+		"DEV_MODE_WORKTREE_BRANCH":   branch,
+		"DEV_MODE_WORKTREE_DNS_NAME": localDNSName,
+		"DEV_MODE_OPERATION":         operation,
+		"DEV_MODE_IMPLICIT_TARGET":   fmt.Sprintf("%t", implicit),
 	}
 }
 
-func runLifecycleHook(command, phase, dir string, env map[string]string, out, errOut io.Writer) error {
+func runLifecycleHook(command, wrapper, phase, dir string, env map[string]string, out, errOut io.Writer) error {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return nil
@@ -526,22 +562,59 @@ func runLifecycleHook(command, phase, dir string, env map[string]string, out, er
 	if len(args) == 0 {
 		return nil
 	}
+	if strings.TrimSpace(wrapper) != "" {
+		args, err = applyHookWrapper(wrapper, args)
+		if err != nil {
+			return fmt.Errorf("%s hook wrapper parse failed: %w", phase, err)
+		}
+	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), worktreeHookTimeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), formatEnv(env)...)
+	hookEnv := cloneEnv(env)
+	hookEnv["DEV_MODE_HOOK_NAME"] = phase
+	cmd.Env = append(os.Environ(), formatEnv(hookEnv)...)
 	cmd.Stdout = &prefixedLineWriter{prefix: "[hook " + phase + "] ", writer: out}
 	cmd.Stderr = &prefixedLineWriter{prefix: "[hook " + phase + "] ", writer: errOut}
 	if err := cmd.Run(); err != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return fmt.Errorf("%s hook timed out after %s", phase, worktreeHookTimeout)
-		}
 		return fmt.Errorf("%s hook failed: %w", phase, err)
 	}
 	return nil
+}
+
+func applyHookWrapper(wrapper string, command []string) ([]string, error) {
+	wrapperArgs, err := shellwords.Parse(wrapper)
+	if err != nil {
+		return nil, err
+	}
+	if len(wrapperArgs) == 0 {
+		return command, nil
+	}
+	out := make([]string, 0, len(wrapperArgs)+len(command))
+	replaced := false
+	for _, arg := range wrapperArgs {
+		if strings.Contains(arg, "$COMMAND") {
+			replaced = true
+			parts := strings.Split(arg, "$COMMAND")
+			if len(parts) == 2 {
+				if parts[0] != "" {
+					out = append(out, parts[0])
+				}
+				out = append(out, command...)
+				if parts[1] != "" {
+					out = append(out, parts[1])
+				}
+			} else {
+				out = append(out, command...)
+			}
+			continue
+		}
+		out = append(out, arg)
+	}
+	if !replaced {
+		out = append(out, command...)
+	}
+	return out, nil
 }
 
 func formatEnv(values map[string]string) []string {
@@ -556,6 +629,17 @@ func formatEnv(values map[string]string) []string {
 	out := make([]string, 0, len(keys))
 	for _, key := range keys {
 		out = append(out, fmt.Sprintf("%s=%s", key, values[key]))
+	}
+	return out
+}
+
+func cloneEnv(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(values))
+	for k, v := range values {
+		out[k] = v
 	}
 	return out
 }

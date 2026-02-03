@@ -230,7 +230,7 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 		routeHost = mappedHost
 	}
 
-	network, address, err := s.resolveProxyTarget(routeHost, r.URL.Path)
+	network, address, mode, err := s.resolveProxyTarget(routeHost, r.URL.Path)
 	if err != nil {
 		writeErrorWithCode(w, http.StatusBadGateway, "proxy_target_error", err)
 		return
@@ -239,12 +239,11 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 	target, _ := url.Parse("http://unix")
 	reverseProxy := httputil.NewSingleHostReverseProxy(target)
 	originalDirector := reverseProxy.Director
-		reverseProxy.Director = func(req *http.Request) {
-			originalDirector(req)
-			req.Header.Set("X-Forwarded-Proto", "https")
-			req.Header.Del("X-Forwarded-Host")
-			req.Host = routeHost
-		}
+	reverseProxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		req.Host = routeHost
+		applyForwardedHeaders(req, mode)
+	}
 	reverseProxy.Transport = &http.Transport{
 		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
 			return net.Dial(network, address)
@@ -252,6 +251,7 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 	}
 	rewriteDomain := host
 	apex := s.projectApexZone()
+	if mode == "transparent" {
 		reverseProxy.ModifyResponse = func(resp *http.Response) error {
 			if loc := resp.Header.Get("Location"); loc != "" {
 				if rewritten, ok := rewriteLocation(loc, rewriteDomain); ok {
@@ -266,10 +266,20 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 			}
 			return nil
 		}
+	}
 	reverseProxy.ErrorHandler = func(rw http.ResponseWriter, _ *http.Request, err error) {
 		writeErrorWithCode(rw, http.StatusBadGateway, "proxy_upstream_error", err)
 	}
 	reverseProxy.ServeHTTP(w, r)
+}
+
+func applyForwardedHeaders(req *http.Request, mode string) {
+	req.Header.Set("X-Forwarded-Proto", "https")
+	if mode != "transparent" {
+		return
+	}
+	req.Header.Del("X-Forwarded-Host")
+	req.Header.Del("X-Forwarded-For")
 }
 
 func proxyCertPaths() (leafCert, leafKey, caKey, caCert string, err error) {

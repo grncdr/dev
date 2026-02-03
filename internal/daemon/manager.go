@@ -104,12 +104,16 @@ func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string,
 	if err != nil {
 		return nil, err
 	}
-	mainSlug := filepath.Base(mainPath)
-	isMain := slug == mainSlug
-
-	if err := runHook(cfg.Hooks.PreStart, path); err != nil {
+	projectID, err := resolveProjectIdentifier(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("resolve project identifier: %w", err)
+	}
+	branch, err := resolveWorktreeBranch(path)
+	if err != nil {
 		return nil, err
 	}
+	mainSlug := filepath.Base(mainPath)
+	isMain := slug == mainSlug
 
 	worktreeState, err := resolveWorktreeState(cfg.Project.Name, slug)
 	if err != nil {
@@ -122,7 +126,12 @@ func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string,
 	m.mu.Lock()
 	apexZone := m.apexZone
 	m.mu.Unlock()
-	vars := buildVars(cfg.Project.Name, slug, path, mainPath, worktreeState, apexZone)
+	envSlug := effectiveWorktreeEnvSlug(cfg, slug, path, mainPath)
+	runtimeVars := buildRuntimeVars(projectID, envSlug, path, branch, apexZone)
+	templateVars := buildTemplateVars(runtimeVars, mainPath, worktreeState)
+	if err := runHook(cfg.Hooks.PreStart, cfg.Commands.Wrapper, "pre_start", path, runtimeVars); err != nil {
+		return nil, err
+	}
 	statuses := []ProcessStatus{}
 
 	m.mu.Lock()
@@ -142,7 +151,7 @@ func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string,
 		if err != nil {
 			return nil, fmt.Errorf("resolve port for %s: %w", name, err)
 		}
-		procVars := cloneVars(vars)
+		procVars := cloneVars(templateVars)
 		if port != "" {
 			procVars["PORT"] = port
 		}
@@ -184,13 +193,7 @@ func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string,
 
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Dir = path
-		cmd.Env = append(os.Environ(),
-			fmt.Sprintf("WORKTREE_STATE=%s", worktreeState),
-			fmt.Sprintf("MAIN_WORKTREE=%s", mainPath),
-			fmt.Sprintf("WORKTREE_PATH=%s", path),
-			fmt.Sprintf("PROJECT_NAME=%s", cfg.Project.Name),
-			fmt.Sprintf("WORKTREE_SLUG=%s", slug),
-		)
+		cmd.Env = append(os.Environ(), mapEnv(runtimeVars)...)
 
 		if envVars, ok := proc["env"].(map[string]any); ok {
 			for key, raw := range envVars {
@@ -278,7 +281,7 @@ func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string,
 		statuses = append(statuses, ProcessStatus{Name: name, PID: cmd.Process.Pid, Status: "running"})
 	}
 
-	if err := runHook(cfg.Hooks.PostStart, path); err != nil {
+	if err := runHook(cfg.Hooks.PostStart, cfg.Commands.Wrapper, "post_start", path, runtimeVars); err != nil {
 		return nil, err
 	}
 
@@ -292,6 +295,13 @@ func resolveWorktreePath(slug, dirHint string) (string, error) {
 		}
 	}
 	return worktree.ResolvePathFromSlug(slug)
+}
+
+func resolveProjectIdentifier(cfg *config.ProjectConfig) (string, error) {
+	if cfg == nil {
+		return "", errors.New("missing project config")
+	}
+	return worktree.NormalizeIdentifierSegment(cfg.Project.Name)
 }
 
 func selectProcesses(allProcesses map[string]map[string]any, names []string, all bool) map[string]map[string]any {
@@ -335,7 +345,26 @@ func (m *Manager) stopWorktreeFromDir(slug, dirHint string, processes []string, 
 		return nil, err
 	}
 
-	if err := runHook(cfg.Hooks.PreStop, path); err != nil {
+	mainPath, err := worktree.ResolveMainPathInDir(path)
+	if err != nil {
+		return nil, err
+	}
+	projectID, err := resolveProjectIdentifier(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("resolve project identifier: %w", err)
+	}
+	branch, err := resolveWorktreeBranch(path)
+	if err != nil {
+		return nil, err
+	}
+
+	m.mu.Lock()
+	apexZone := m.apexZone
+	m.mu.Unlock()
+	envSlug := effectiveWorktreeEnvSlug(cfg, slug, path, mainPath)
+	runtimeVars := buildRuntimeVars(projectID, envSlug, path, branch, apexZone)
+
+	if err := runHook(cfg.Hooks.PreStop, cfg.Commands.Wrapper, "pre_stop", path, runtimeVars); err != nil {
 		return nil, err
 	}
 
@@ -381,7 +410,7 @@ func (m *Manager) stopWorktreeFromDir(slug, dirHint string, processes []string, 
 	}
 	m.mu.Unlock()
 
-	if err := runHook(cfg.Hooks.PostStop, path); err != nil {
+	if err := runHook(cfg.Hooks.PostStop, cfg.Commands.Wrapper, "post_stop", path, runtimeVars); err != nil {
 		return nil, err
 	}
 
@@ -528,27 +557,39 @@ func (m *Manager) Connect(slug, process string, conn net.Conn) error {
 	return err
 }
 
-func buildVars(project, slug, worktreePath, mainPath, worktreeState, apexZone string) map[string]string {
-	dnsLabel := worktree.SlugDNSLabel(slug)
+func buildRuntimeVars(project, envSlug, worktreePath, branch, apexZone string) map[string]string {
+	dnsLabel := worktree.SlugDNSLabel(envSlug)
 	zone := strings.TrimPrefix(apexZone, ".")
 	if zone == "" {
 		zone = "localhost"
 	}
 	return map[string]string{
-		"PROJECT_NAME":            project,
-		"WORKTREE_SLUG":           slug,
-		"DEV_MODE_PROJECT":        project,
-		"DEV_MODE_WORKTREE_SLUG":  slug,
-		"DEV_MODE_LOCAL_DNS_NAME": dnsLabel + "." + zone,
-		"WORKTREE_PATH":           worktreePath,
-		"MAIN_WORKTREE":           mainPath,
-		"WORKTREE_STATE": func() string {
-			if worktreeState == "" {
-				return ""
-			}
-			return worktreeState
-		}(),
+		"DEV_MODE_PROJECT":           project,
+		"DEV_MODE_WORKTREE_SLUG":     envSlug,
+		"DEV_MODE_WORKTREE_DNS_NAME": dnsLabel + "." + zone,
+		"DEV_MODE_WORKTREE_PATH":     worktreePath,
+		"DEV_MODE_WORKTREE_BRANCH":   branch,
 	}
+}
+
+func effectiveWorktreeEnvSlug(cfg *config.ProjectConfig, slug, path, mainPath string) string {
+	if cfg == nil || strings.TrimSpace(cfg.Project.MainSlug) == "" {
+		return slug
+	}
+	if sameResolvedPath(path, mainPath) {
+		return strings.ToLower(strings.TrimSpace(cfg.Project.MainSlug))
+	}
+	return slug
+}
+
+func buildTemplateVars(runtimeVars map[string]string, mainPath, worktreeState string) map[string]string {
+	vars := cloneVars(runtimeVars)
+	vars["MAIN_WORKTREE"] = mainPath
+	vars["WORKTREE_STATE"] = worktreeState
+	vars["WORKTREE_PATH"] = runtimeVars["DEV_MODE_WORKTREE_PATH"]
+	vars["WORKTREE_SLUG"] = runtimeVars["DEV_MODE_WORKTREE_SLUG"]
+	vars["PROJECT_NAME"] = runtimeVars["DEV_MODE_PROJECT"]
+	return vars
 }
 
 func cloneVars(vars map[string]string) map[string]string {
@@ -741,7 +782,7 @@ func (p *processInfo) broadcast(data []byte) {
 	}
 }
 
-func runHook(command, dir string) error {
+func runHook(command, wrapper, hookName, dir string, vars map[string]string) error {
 	if command == "" {
 		return nil
 	}
@@ -753,13 +794,46 @@ func runHook(command, dir string) error {
 	if len(args) == 0 {
 		return nil
 	}
+	if strings.TrimSpace(wrapper) != "" {
+		args, err = applyWrapper(wrapper, args)
+		if err != nil {
+			return fmt.Errorf("apply hook wrapper: %w", err)
+		}
+	}
 
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Dir = dir
+	hookVars := cloneVars(vars)
+	hookVars["DEV_MODE_HOOK_NAME"] = hookName
+	cmd.Env = append(os.Environ(), mapEnv(hookVars)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("hook failed: %w", err)
 	}
 	return nil
+}
+
+func resolveWorktreeBranch(path string) (string, error) {
+	cmd := exec.Command("git", "-C", path, "rev-parse", "--abbrev-ref", "HEAD")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Repos without commits do not have a resolvable HEAD; use a stable placeholder.
+		if strings.Contains(string(output), "ambiguous argument 'HEAD'") {
+			return "HEAD", nil
+		}
+		return "", fmt.Errorf("resolve worktree branch: %s", strings.TrimSpace(string(output)))
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func mapEnv(vars map[string]string) []string {
+	if len(vars) == 0 {
+		return nil
+	}
+	env := make([]string, 0, len(vars))
+	for key, value := range vars {
+		env = append(env, fmt.Sprintf("%s=%s", key, value))
+	}
+	return env
 }

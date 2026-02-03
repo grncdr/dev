@@ -3,12 +3,17 @@ package cli
 import (
 	"fmt"
 	"io"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
+
+var validInitProjectPattern = regexp.MustCompile(`^[a-z0-9/_-]+$`)
 
 func newInitCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
@@ -40,7 +45,12 @@ func runInit(opts *Options, out io.Writer) error {
 		return fmt.Errorf("resolve current directory: %w", err)
 	}
 
-	template := buildInitTemplate(filepath.Base(cwd))
+	projectName := filepath.Base(cwd)
+	if inferred, ok := inferProjectNameFromRemote(cwd, "origin"); ok {
+		projectName = inferred
+	}
+
+	template := buildInitTemplate(projectName)
 	if err := os.WriteFile(opts.ResolvedPaths.ProjectConfig, []byte(template), 0o644); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
@@ -75,4 +85,54 @@ func buildInitTemplate(projectName string) string {
 		"",
 	}
 	return strings.Join(lines, "\n")
+}
+
+func inferProjectNameFromRemote(repoDir, remote string) (string, bool) {
+	if strings.TrimSpace(repoDir) == "" || strings.TrimSpace(remote) == "" {
+		return "", false
+	}
+	cmd := exec.Command("git", "-C", repoDir, "remote", "get-url", remote)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false
+	}
+	return parseOwnerRepoFromRemoteURL(strings.TrimSpace(string(out)))
+}
+
+func parseOwnerRepoFromRemoteURL(raw string) (string, bool) {
+	remote := strings.TrimSpace(raw)
+	if remote == "" {
+		return "", false
+	}
+
+	path := ""
+	if strings.Contains(remote, "://") {
+		u, err := url.Parse(remote)
+		if err != nil {
+			return "", false
+		}
+		path = u.Path
+	} else if strings.Contains(remote, ":") {
+		parts := strings.SplitN(remote, ":", 2)
+		path = parts[1]
+	}
+	path = strings.Trim(strings.TrimSuffix(path, ".git"), "/")
+	if path == "" {
+		return "", false
+	}
+
+	segments := strings.Split(path, "/")
+	if len(segments) < 2 {
+		return "", false
+	}
+	owner := strings.TrimSpace(segments[len(segments)-2])
+	repo := strings.TrimSpace(segments[len(segments)-1])
+	if owner == "" || repo == "" {
+		return "", false
+	}
+	project := strings.ToLower(owner + "/" + repo)
+	if !validInitProjectPattern.MatchString(project) {
+		return "", false
+	}
+	return project, true
 }

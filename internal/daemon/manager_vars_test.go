@@ -1,19 +1,32 @@
 package daemon
 
-import "testing"
+import (
+	"testing"
 
-func TestBuildVarsIncludesDevModeProjectAndSlug(t *testing.T) {
-	vars := buildVars("Foo Corp", "feature-123", "/repo/feature-123", "/repo/main", "/state/worktree", ".localhost")
+	"dev-mode/internal/config"
+)
 
-	if vars["DEV_MODE_PROJECT"] != "Foo Corp" {
+func TestBuildRuntimeVarsCoreNames(t *testing.T) {
+	vars := buildRuntimeVars("myproj", "feature/branch", "/repo/feature/branch", "feature/branch", ".localhost")
+
+	if vars["DEV_MODE_PROJECT"] != "myproj" {
 		t.Fatalf("expected DEV_MODE_PROJECT, got %q", vars["DEV_MODE_PROJECT"])
 	}
-	if vars["DEV_MODE_WORKTREE_SLUG"] != "feature-123" {
+	if vars["DEV_MODE_WORKTREE_SLUG"] != "feature/branch" {
 		t.Fatalf("expected DEV_MODE_WORKTREE_SLUG, got %q", vars["DEV_MODE_WORKTREE_SLUG"])
+	}
+	if vars["DEV_MODE_WORKTREE_DNS_NAME"] != "branch.localhost" {
+		t.Fatalf("expected DEV_MODE_WORKTREE_DNS_NAME, got %q", vars["DEV_MODE_WORKTREE_DNS_NAME"])
+	}
+	if vars["DEV_MODE_WORKTREE_PATH"] != "/repo/feature/branch" {
+		t.Fatalf("expected DEV_MODE_WORKTREE_PATH, got %q", vars["DEV_MODE_WORKTREE_PATH"])
+	}
+	if vars["DEV_MODE_WORKTREE_BRANCH"] != "feature/branch" {
+		t.Fatalf("expected DEV_MODE_WORKTREE_BRANCH, got %q", vars["DEV_MODE_WORKTREE_BRANCH"])
 	}
 }
 
-func TestBuildVarsLocalDNSName(t *testing.T) {
+func TestBuildRuntimeVarsDNSName(t *testing.T) {
 	cases := []struct {
 		slug     string
 		apexZone string
@@ -26,10 +39,21 @@ func TestBuildVarsLocalDNSName(t *testing.T) {
 		{"main", "", "main.localhost"},
 	}
 	for _, tc := range cases {
-		vars := buildVars("proj", tc.slug, "/repo", "/main", "/state", tc.apexZone)
-		if vars["DEV_MODE_LOCAL_DNS_NAME"] != tc.expected {
-			t.Errorf("slug=%q apexZone=%q: expected DEV_MODE_LOCAL_DNS_NAME=%q, got %q",
-				tc.slug, tc.apexZone, tc.expected, vars["DEV_MODE_LOCAL_DNS_NAME"])
+		vars := buildRuntimeVars("proj", tc.slug, "/repo", "main", tc.apexZone)
+		if vars["DEV_MODE_WORKTREE_DNS_NAME"] != tc.expected {
+			t.Errorf("slug=%q apexZone=%q: expected DEV_MODE_WORKTREE_DNS_NAME=%q, got %q",
+				tc.slug, tc.apexZone, tc.expected, vars["DEV_MODE_WORKTREE_DNS_NAME"])
 		}
+	}
+}
+
+func TestEffectiveWorktreeEnvSlug_MainSlugOverride(t *testing.T) {
+	cfg := &config.ProjectConfig{}
+	cfg.Project.MainSlug = "foocorp"
+	if got := effectiveWorktreeEnvSlug(cfg, "repo", "/tmp/repo", "/tmp/repo"); got != "foocorp" {
+		t.Fatalf("expected foocorp, got %q", got)
+	}
+	if got := effectiveWorktreeEnvSlug(cfg, "feature/x", "/tmp/repo-feature", "/tmp/repo"); got != "feature/x" {
+		t.Fatalf("expected feature/x, got %q", got)
 	}
 }

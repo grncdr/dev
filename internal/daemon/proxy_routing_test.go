@@ -89,7 +89,7 @@ func TestLocalProxyHostForTunnelRequest_UsesMainSlugOverride(t *testing.T) {
 	}
 	cfgBody := `
 [project]
-name = "Foo Corp"
+name = "foocorp"
 main_slug = "foocorp"
 `
 	cfgPath := filepath.Join(repo, ".dev-mode.toml")
@@ -141,6 +141,7 @@ func TestParseProxyMatchers(t *testing.T) {
 			"subdomain": "*",
 			"path":      "/api",
 			"match":     "prefix",
+			"mode":      "transparent",
 			"priority":  int64(5),
 		},
 	}
@@ -156,6 +157,12 @@ func TestParseProxyMatchers(t *testing.T) {
 	}
 	if matchers[1].Priority != 5 {
 		t.Fatalf("expected priority 5, got %d", matchers[1].Priority)
+	}
+	if matchers[0].Mode != "reverse" {
+		t.Fatalf("expected default mode reverse, got %q", matchers[0].Mode)
+	}
+	if matchers[1].Mode != "transparent" {
+		t.Fatalf("expected transparent mode, got %q", matchers[1].Mode)
 	}
 	if !matchers[0].Singleton || !matchers[1].Singleton {
 		t.Fatalf("expected singleton to propagate to matchers")
@@ -214,7 +221,7 @@ func TestProcessProxyMatchers_FromLoadedInlineProxyConfig(t *testing.T) {
 	cfgPath := filepath.Join(dir, ".dev-mode.toml")
 	body := `
 [project]
-name = "Foo Corp"
+name = "foocorp"
 
 [process.mailpit]
 singleton = true
@@ -242,7 +249,7 @@ func TestProjectConfigForSlug_UsesManagerWorktreePath(t *testing.T) {
 	cfgPath := filepath.Join(dir, ".dev-mode.toml")
 	body := `
 [project]
-name = "Foo Corp"
+name = "foocorp"
 
 [process.mailpit]
 command = "mailpit"
@@ -293,7 +300,7 @@ func TestResolveRequestedSlug_MapsMainSlugOverride(t *testing.T) {
 	}
 	cfg := `
 [project]
-name = "Foo Corp"
+name = "foocorp"
 main_slug = "foocorp"
 `
 	if err := os.WriteFile(filepath.Join(repo, ".dev-mode.toml"), []byte(cfg), 0o600); err != nil {

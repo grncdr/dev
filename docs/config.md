@@ -6,13 +6,13 @@ This doc describes the config files and options used by dev-mode.
 
 Path: `.dev-mode.toml` in the repo root.
 
-You can generate a starter config with `dev-mode init`, which creates `.dev-mode.toml` in the current directory and defaults `project.name` to the directory basename.
+You can generate a starter config with `dev-mode init`, which creates `.dev-mode.toml` in the current directory and defaults `project.name` to `<owner>/<repo>` when the git `origin` remote matches that format, otherwise the directory basename.
 
 Required fields:
 
 ```toml
 [project]
-name = "Foo Corp"     # required
+name = "foocorp/monorepo" # required
 main_slug = "foocorp" # optional, applies only to main worktree host slug
 ```
 
@@ -47,6 +47,7 @@ wrapper = "devbox run $COMMAND"
 subdomain = null
 path = "/"
 match = "prefix"
+mode = "reverse"
 priority = 0
 
 [[process.rails.proxy]]
@@ -82,6 +83,7 @@ post_stop = "bin/post-stop"
 
 Notes:
 - `project.name` is required.
+- `project.name` may include `/` (for example `org/repo`) to use nested project paths under `worktree_dir`.
 - `project.main_slug` is optional and only changes the main worktree host slug.
 - All runnable units live under `process.*`; use `singleton = true` for project-wide services.
 - Worktree lifecycle hooks are optional:
@@ -101,13 +103,25 @@ Notes:
   - `health = { type = "tcp" }` waits for a successful TCP connect (you can also set `port = <int>` inside health to probe a specific port).
 - `startup_timeout` is optional per process (decimal seconds) and overrides health timeout when waiting for startup readiness.
 - Proxy routing uses per-process matchers. Requests are matched by subdomain first (explicit beats `*` wildcard), then longest path match, then highest `priority`, then process name.
+- `mode` controls proxy behavior per matcher:
+  - `mode = "reverse"` (default): sends `X-Forwarded-*` headers and does not rewrite response headers/body.
+  - `mode = "transparent"`: sends `X-Forwarded-Proto`, omits `X-Forwarded-Host`/`X-Forwarded-For`, and rewrites response `Location`/`Set-Cookie`/body links for public host mapping.
 - `subdomain = null` matches `<slug>.<apex_zone>`. `subdomain = "app"` matches `app.<slug>.<apex_zone>`. `subdomain = "*"` matches any subdomain under `<slug>.<apex_zone>`.
 - `subdomains = [...]` is also supported in a matcher to map multiple subdomains in one block.
 - `path` defaults to `/`, `match` defaults to `prefix`, and `priority` defaults to `0`.
 - `tcp_listen = <port>` on a matcher opens a local TCP proxy listener on `127.0.0.1:<port>` that auto-starts the process and forwards raw TCP.
 - `match = "prefix"` matches segment boundaries (e.g. `/blah` matches `/blah/..`). Use `/foo*` to match raw prefixes.
 - `commands.wrapper` wraps any command execution; use `$COMMAND` to inject the command tokens. Each process can override with `process.<name>.wrapper`.
+- Managed process runtime includes these core variables:
+  - `DEV_MODE_PROJECT`
+  - `DEV_MODE_WORKTREE_SLUG`
+  - `DEV_MODE_WORKTREE_DNS_NAME` (for example `feature.localhost`)
+  - `DEV_MODE_WORKTREE_PATH`
+  - `DEV_MODE_WORKTREE_BRANCH`
+  - `PORT` (when a process has a resolved port)
+- See `docs/environment.md` for full execution-context details and hook/process env tables.
 - See `docs/logging.md` for log locations.
+- See `docs/hooks.md` for hook lifecycle, working directory, and environment variable details.
 
 ## Project local override (not committed)
 

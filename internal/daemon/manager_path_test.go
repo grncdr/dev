@@ -65,9 +65,9 @@ func TestStatusAndStopUseDirHint(t *testing.T) {
 		t.Fatalf("git init repoB: %v", err)
 	}
 
-	cfg := `
+cfg := `
 [project]
-name = "Foo Corp"
+name = "foocorp/monorepo"
 `
 	if err := os.WriteFile(filepath.Join(repoA, ".dev-mode.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)

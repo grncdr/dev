@@ -130,11 +130,16 @@ If matcher sets `tcp_listen`, daemon opens `127.0.0.1:<tcp_listen>` and forwards
 
 ## Header and Response Handling
 
-- HTTPS proxy sets:
-  - `X-Forwarded-Proto: https`
-  - `X-Forwarded-Host: <incoming host>`
-- `Location` response headers are rewritten to incoming host when absolute.
-- `Set-Cookie` `Domain` values matching apex are rewritten to request host domain.
+Per-matcher `mode` controls request/response behavior:
+
+- `mode = "reverse"` (default):
+  - sets `X-Forwarded-Proto: https`
+  - does not rewrite response headers/body
+- `mode = "transparent"`:
+  - keeps `X-Forwarded-Proto=https` and omits `X-Forwarded-Host` / `X-Forwarded-For`
+  - rewrites absolute `Location` headers to incoming host
+  - rewrites `Set-Cookie` `Domain` values matching apex to request host domain
+  - rewrites text response bodies for local/public host mapping
 
 ## Gateway → Agent Flow
 

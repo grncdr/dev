@@ -26,6 +26,7 @@ type proxyMatcher struct {
 	Kind      subdomainMatchKind
 	Path      string
 	Match     string
+	Mode      string
 	Priority  int
 	TCPListen int
 	Singleton bool
@@ -143,38 +144,42 @@ func sameResolvedPath(a, b string) bool {
 	return filepath.Clean(resolvedA) == filepath.Clean(resolvedB)
 }
 
-func (s *Server) resolveProxyTarget(host, path string) (network string, address string, err error) {
+func (s *Server) resolveProxyTarget(host, path string) (network string, address string, mode string, err error) {
 	requestedSlug, subdomain, err := s.parseProxyHost(host)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	slug, err := s.resolveRequestedSlug(requestedSlug)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	cfg, repoPath, err := s.projectConfigForSlug(slug)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	matchers := processProxyMatchers(cfg)
 	best, ok := selectProxyMatcher(matchers, subdomain, path)
 	if !ok {
-		return "", "", errors.New("no proxy matcher matched")
+		return "", "", "", errors.New("no proxy matcher matched")
 	}
 
 	targetSlug := slug
 	if best.Singleton {
 		mainSlug, err := worktree.ResolveMainSlugInDir(repoPath)
 		if err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
 		targetSlug = mainSlug
 	}
 
-	return s.manager.EnsureProcessForTarget(targetSlug, best.Process)
+	network, address, err = s.manager.EnsureProcessForTarget(targetSlug, best.Process)
+	if err != nil {
+		return "", "", "", err
+	}
+	return network, address, best.Mode, nil
 }
 
 func (s *Server) resolveRequestedSlug(requestedSlug string) (string, error) {
@@ -316,6 +321,7 @@ func parseProxyMatchersFromMap(process string, raw map[string]any, singleton boo
 	if rawMatch, ok := raw["match"].(string); ok && rawMatch != "" {
 		match = strings.ToLower(strings.TrimSpace(rawMatch))
 	}
+	mode := parseProxyMode(raw["mode"])
 	priority := parsePriority(raw["priority"])
 	tcpListen := 0
 	if val, ok := asInt(raw["tcp_listen"]); ok && val > 0 {
@@ -329,12 +335,25 @@ func parseProxyMatchersFromMap(process string, raw map[string]any, singleton boo
 			Kind:      sd.kind,
 			Path:      path,
 			Match:     match,
+			Mode:      mode,
 			Priority:  priority,
 			TCPListen: tcpListen,
 			Singleton: singleton,
 		})
 	}
 	return out
+}
+
+func parseProxyMode(raw any) string {
+	mode := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", raw)))
+	switch mode {
+	case "transparent":
+		return "transparent"
+	case "reverse", "<nil>", "":
+		return "reverse"
+	default:
+		return "reverse"
+	}
 }
 
 type parsedSubdomain struct {

@@ -15,6 +15,19 @@ func TestParseProjectSlug(t *testing.T) {
 	}
 }
 
+func TestParseProjectSlug_ProjectWithSlash(t *testing.T) {
+	target, err := ParseProjectSlug("FooCorp/Monorepo:Feature/Branch-1")
+	if err != nil {
+		t.Fatalf("ParseProjectSlug: %v", err)
+	}
+	if target.Project != "foocorp/monorepo" {
+		t.Fatalf("expected normalized project, got %q", target.Project)
+	}
+	if target.Slug != "feature/branch-1" {
+		t.Fatalf("expected normalized slug, got %q", target.Slug)
+	}
+}
+
 func TestParseProjectSlugInvalid(t *testing.T) {
 	cases := []string{
 		"",

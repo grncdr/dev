@@ -101,15 +101,16 @@ Behavior:
 - `pre-*` hooks run before mutation; non-zero exit aborts operation.
 - `post-*` hooks run after successful mutation.
 - `post-*` hook failure makes the command exit non-zero, even though mutation already happened.
-- Hook timeout is enforced per hook; timeout is treated as failure.
 - Hook stdout/stderr is surfaced with phase prefix and exit status.
 
 Suggested hook environment:
 
 - `DEV_MODE_PROJECT`
-- `DEV_MODE_SLUG`
+- `DEV_MODE_WORKTREE_SLUG`
 - `DEV_MODE_WORKTREE_PATH`
 - `DEV_MODE_WORKTREE_BRANCH`
+- `DEV_MODE_WORKTREE_DNS_NAME`
+- `DEV_MODE_HOOK_NAME`
 - `DEV_MODE_OPERATION` (`add` or `cleanup`)
 - `DEV_MODE_IMPLICIT_TARGET` (`true`/`false`)
 

@@ -27,20 +27,24 @@ func TestWorktreeStartStopEndToEnd(t *testing.T) {
 	configBody := `
 [project]
 name = "demo"
+main_slug = "demo-main"
 
 [process.sleeper]
 singleton = false
-command = "sh -c \"echo ${SLEEPER_FLAG}; sleep 60\""
+command = "sh -c \"echo ${SLEEPER_FLAG}; echo ${DEV_MODE_WORKTREE_DNS_NAME}; sleep 60\""
 port = "unix"
 
 [process.sleeper.env]
 SLEEPER_FLAG = "enabled"
 
+[commands]
+wrapper = "env DEV_MODE_WRAPPED=1 $COMMAND"
+
 [hooks]
-pre_start = "sh -c \"echo pre_start > hook_pre_start.txt\""
-post_start = "sh -c \"echo post_start > hook_post_start.txt\""
-pre_stop = "sh -c \"echo pre_stop > hook_pre_stop.txt\""
-post_stop = "sh -c \"echo post_stop > hook_post_stop.txt\""
+pre_start = "sh -c \"echo ${DEV_MODE_WRAPPED}:${DEV_MODE_WORKTREE_SLUG}:${DEV_MODE_WORKTREE_DNS_NAME} > hook_pre_start.txt\""
+post_start = "sh -c \"echo ${DEV_MODE_WRAPPED}:${DEV_MODE_WORKTREE_SLUG}:${DEV_MODE_WORKTREE_DNS_NAME} > hook_post_start.txt\""
+pre_stop = "sh -c \"echo ${DEV_MODE_WRAPPED}:${DEV_MODE_WORKTREE_SLUG}:${DEV_MODE_WORKTREE_DNS_NAME} > hook_pre_stop.txt\""
+post_stop = "sh -c \"echo ${DEV_MODE_WRAPPED}:${DEV_MODE_WORKTREE_SLUG}:${DEV_MODE_WORKTREE_DNS_NAME} > hook_post_stop.txt\""
 `
 	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {
 		t.Fatal(err)
@@ -113,6 +117,9 @@ post_stop = "sh -c \"echo post_stop > hook_post_stop.txt\""
 	if err := waitForLogContains(logPath, "enabled", 2*time.Second); err != nil {
 		t.Fatalf("expected env var in log: %v", err)
 	}
+	if err := waitForLogContains(logPath, "demo-main.localhost", 2*time.Second); err != nil {
+		t.Fatalf("expected DEV_MODE_WORKTREE_DNS_NAME in log: %v", err)
+	}
 
 	status, err := client.WorktreeStatus(ctx, slug)
 	if err != nil {
@@ -137,8 +144,12 @@ post_stop = "sh -c \"echo post_stop > hook_post_stop.txt\""
 		"hook_post_stop.txt",
 	} {
 		path := filepath.Join(repoDir, name)
-		if _, err := os.Stat(path); err != nil {
+		data, err := os.ReadFile(path)
+		if err != nil {
 			t.Fatalf("expected hook file %s to exist: %v", name, err)
+		}
+		if strings.TrimSpace(string(data)) != "1:demo-main:demo-main.localhost" {
+			t.Fatalf("expected %s to contain wrapped dns value, got %q", name, strings.TrimSpace(string(data)))
 		}
 	}
 

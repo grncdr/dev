@@ -13,22 +13,26 @@ import (
 	"sync"
 	"time"
 
+	mdns "github.com/miekg/dns"
+
 	"dev-mode/internal/config"
 	"dev-mode/internal/worktree"
 )
 
 type Server struct {
-	socketPath string
-	listener   net.Listener
-	httpServer *http.Server
-	manager    *Manager
-	shutdown   chan struct{}
-	once       sync.Once
-	config     *config.ProjectConfig
-	mainPath   string
+	socketPath   string
+	listener     net.Listener
+	httpServer   *http.Server
+	manager      *Manager
+	shutdown     chan struct{}
+	once         sync.Once
+	config       *config.ProjectConfig
+	mainPath     string
 	daemonConfig *config.DaemonConfig
-	tunnelMu   sync.Mutex
-	tunnels    map[string]*managedTunnel
+	localDNSUDP  *mdns.Server
+	localDNSTCP  *mdns.Server
+	tunnelMu     sync.Mutex
+	tunnels      map[string]*managedTunnel
 }
 
 func NewServer(socketPath string) (*Server, error) {
@@ -104,6 +108,10 @@ func (s *Server) Serve() error {
 	if err := s.loadConfig(); err != nil {
 		return err
 	}
+	if err := s.startLocalDNS(); err != nil {
+		return err
+	}
+	defer s.stopLocalDNS()
 	if err := s.startProxy(); err != nil {
 		return err
 	}
@@ -245,6 +253,7 @@ func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "shutting_down"})
 	go func() {
 		s.persistAndStopRuntime()
+		s.stopLocalDNS()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = s.httpServer.Shutdown(ctx)
