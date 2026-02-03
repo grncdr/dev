@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -86,7 +85,7 @@ func runWorktreeStart(targetArgs []string, opts *Options) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	targets, err := resolveProcessTargets(targetArgs)
+	targets, err := resolveProcessTargets(targetArgs, opts)
 	if err != nil {
 		return err
 	}
@@ -118,7 +117,7 @@ func runWorktreeStop(targetArgs []string, opts *Options) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	targets, err := resolveProcessTargets(targetArgs)
+	targets, err := resolveProcessTargets(targetArgs, opts)
 	if err != nil {
 		return err
 	}
@@ -142,7 +141,7 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 		return err
 	}
 
-	targets, err := resolveProcessTargets(targetArgs)
+	targets, err := resolveProcessTargets(targetArgs, opts)
 	if err != nil {
 		return err
 	}
@@ -165,9 +164,10 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 			}
 		}
 	}
+	cwd := workingDir(opts)
 
 	for i, slug := range sortedTargetSlugs(targets) {
-		projectPath, _ := worktree.ResolvePathFromSlug(slug)
+		projectPath, _ := worktree.ResolvePathFromSlug(slug, cwd)
 		var cfg *config.ProjectConfig
 		var daemonCfg *config.DaemonConfig
 		if projectPath != "" {
@@ -188,7 +188,7 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 		fmt.Println()
 
 		if !daemonUp {
-			printProcessesSection(nil, cfg, daemonCfg, slug, false, targets[slug], nil)
+			printProcessesSection(nil, cfg, daemonCfg, slug, projectPath, false, targets[slug], nil)
 			fmt.Println()
 			printGatewaySection(cfg, nil, false)
 			continue
@@ -198,14 +198,14 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 		resp, err := client.WorktreeStatus(ctx, slug)
 		cancel()
 		if err != nil {
-			printProcessesSection(nil, cfg, daemonCfg, slug, false, targets[slug], tunnelForSlug(tunnelBySlug, slug))
+			printProcessesSection(nil, cfg, daemonCfg, slug, projectPath, false, targets[slug], tunnelForSlug(tunnelBySlug, slug))
 			fmt.Println()
 			printGatewaySection(cfg, tunnelForSlug(tunnelBySlug, slug), true)
 			continue
 		}
 
 		filtered := filterWorktreeStatus(resp, targets[slug])
-		printProcessesSection(filtered, cfg, daemonCfg, slug, true, targets[slug], tunnelForSlug(tunnelBySlug, slug))
+		printProcessesSection(filtered, cfg, daemonCfg, slug, projectPath, true, targets[slug], tunnelForSlug(tunnelBySlug, slug))
 		fmt.Println()
 		printGatewaySection(cfg, tunnelForSlug(tunnelBySlug, slug), true)
 	}
@@ -260,7 +260,7 @@ func printProjectSection(slug, path string, cfg *config.ProjectConfig) {
 	fmt.Printf("  main worktree: %s\n", mainPath)
 }
 
-func printProcessesSection(status *daemon.WorktreeStatus, cfg *config.ProjectConfig, daemonCfg *config.DaemonConfig, slug string, daemonUp bool, target *processTarget, tunnel *daemon.TunnelStatus) {
+func printProcessesSection(status *daemon.WorktreeStatus, cfg *config.ProjectConfig, daemonCfg *config.DaemonConfig, slug, projectPath string, daemonUp bool, target *processTarget, tunnel *daemon.TunnelStatus) {
 	fmt.Println(bold("Processes"))
 	if !daemonUp {
 		fmt.Println("  daemon not running")
@@ -270,7 +270,7 @@ func printProcessesSection(status *daemon.WorktreeStatus, cfg *config.ProjectCon
 		fmt.Println("  (no processes)")
 		return
 	}
-	proxyByProcess := processProxyURLsByProcess(slug, cfg, daemonCfg)
+	proxyByProcess := processProxyURLsByProcess(slug, projectPath, cfg, daemonCfg)
 	gatewayByProcess := gatewayProxyURLsByProcess(proxyByProcess, cfg, tunnel)
 	processes := append([]daemon.ProcessStatus(nil), status.Processes...)
 	sort.Slice(processes, func(i, j int) bool { return processes[i].Name < processes[j].Name })
@@ -315,7 +315,7 @@ func filterWorktreeStatus(status *daemon.WorktreeStatus, target *processTarget) 
 	return &daemon.WorktreeStatus{Slug: status.Slug, Processes: filtered}
 }
 
-func processProxyURLsByProcess(slug string, cfg *config.ProjectConfig, daemonCfg *config.DaemonConfig) map[string][]string {
+func processProxyURLsByProcess(slug, projectPath string, cfg *config.ProjectConfig, daemonCfg *config.DaemonConfig) map[string][]string {
 	result := map[string][]string{}
 	if cfg == nil {
 		return result
@@ -324,7 +324,7 @@ func processProxyURLsByProcess(slug string, cfg *config.ProjectConfig, daemonCfg
 	if zone == "" {
 		zone = "localhost"
 	}
-	displaySlug := effectiveDisplaySlug(slug, cfg)
+	displaySlug := effectiveDisplaySlug(slug, projectPath, cfg)
 	for process, proc := range cfg.Processes {
 		rawProxy, ok := proc["proxy"]
 		if !ok || rawProxy == nil {
@@ -396,15 +396,13 @@ func proxyApexZone(daemonCfg *config.DaemonConfig) string {
 	return ".localhost"
 }
 
-func effectiveDisplaySlug(slug string, cfg *config.ProjectConfig) string {
+func effectiveDisplaySlug(slug, projectPath string, cfg *config.ProjectConfig) string {
 	displaySlug := worktree.SlugDNSLabel(slug)
-	if cfg == nil || cfg.Project.MainSlug == "" {
+	if cfg == nil || cfg.Project.MainSlug == "" || projectPath == "" {
 		return displaySlug
 	}
-	if path, err := worktree.ResolvePathFromSlug(slug); err == nil {
-		if mainPath, err := worktree.ResolveMainPathInDir(path); err == nil && samePath(path, mainPath) {
-			displaySlug = cfg.Project.MainSlug
-		}
+	if mainPath, err := worktree.ResolveMainPathInDir(projectPath); err == nil && samePath(projectPath, mainPath) {
+		displaySlug = cfg.Project.MainSlug
 	}
 	return displaySlug
 }
@@ -592,10 +590,10 @@ func dedupeStrings(values []string) []string {
 	return out
 }
 
-func resolveSlug(arg string) (string, error) {
+func resolveSlug(opts *Options, arg string) (string, error) {
 	if arg != "" {
 		if strings.Contains(arg, ":") {
-			currentProject, err := resolveProjectFromCurrentDir()
+			currentProject, err := resolveProjectFromCurrentDir(opts)
 			if err != nil {
 				return "", err
 			}
@@ -611,10 +609,7 @@ func resolveSlug(arg string) (string, error) {
 		return arg, nil
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
+	cwd := workingDir(opts)
 
 	slug, err := worktree.ResolveSlug(cwd)
 	if err != nil {
@@ -655,10 +650,10 @@ func (t *processTarget) processList() []string {
 	return out
 }
 
-func resolveProcessTargets(args []string) (map[string]*processTarget, error) {
+func resolveProcessTargets(args []string, opts *Options) (map[string]*processTarget, error) {
 	targets := map[string]*processTarget{}
 	if len(args) == 0 {
-		slug, err := resolveSlug("")
+		slug, err := resolveSlug(opts, "")
 		if err != nil {
 			return nil, err
 		}
@@ -672,7 +667,7 @@ func resolveProcessTargets(args []string) (map[string]*processTarget, error) {
 		}
 		slug := id.Slug
 		if slug == "" {
-			resolved, err := resolveSlug("")
+			resolved, err := resolveSlug(opts, "")
 			if err != nil {
 				return nil, err
 			}

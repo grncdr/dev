@@ -294,7 +294,11 @@ func resolveWorktreePath(slug, dirHint string) (string, error) {
 			return path, nil
 		}
 	}
-	return worktree.ResolvePathFromSlug(slug)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return worktree.ResolvePathFromSlug(slug, cwd)
 }
 
 func resolveProjectIdentifier(cfg *config.ProjectConfig) (string, error) {

@@ -14,10 +14,7 @@ import (
 
 func TestRunInit_WritesConfig(t *testing.T) {
 	dir := t.TempDir()
-	orig, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("get cwd: %v", err)
-	}
+	orig := rememberCWD()
 	if err := os.Chdir(dir); err != nil {
 		t.Fatalf("chdir: %v", err)
 	}
@@ -28,6 +25,7 @@ func TestRunInit_WritesConfig(t *testing.T) {
 	}()
 
 	opts := &Options{
+		WorkingDir: dir,
 		ResolvedPaths: ResolvedPaths{
 			ProjectConfig: filepath.Join(dir, config.DefaultProjectConfig),
 		},
@@ -66,10 +64,7 @@ func TestRunInit_UsesOriginRemoteOwnerRepo(t *testing.T) {
 		t.Fatalf("git remote add: %v", err)
 	}
 
-	orig, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("get cwd: %v", err)
-	}
+	orig := rememberCWD()
 	if err := os.Chdir(dir); err != nil {
 		t.Fatalf("chdir: %v", err)
 	}
@@ -78,6 +73,7 @@ func TestRunInit_UsesOriginRemoteOwnerRepo(t *testing.T) {
 	}()
 
 	opts := &Options{
+		WorkingDir: dir,
 		ResolvedPaths: ResolvedPaths{
 			ProjectConfig: filepath.Join(dir, config.DefaultProjectConfig),
 		},
@@ -131,6 +127,7 @@ func TestRunInit_RefusesExistingConfig(t *testing.T) {
 	}
 
 	opts := &Options{
+		WorkingDir: dir,
 		ResolvedPaths: ResolvedPaths{
 			ProjectConfig: path,
 		},

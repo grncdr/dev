@@ -2,7 +2,6 @@ package worktree
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -13,6 +12,9 @@ type Entry struct {
 }
 
 func ResolveSlug(cwd string) (string, error) {
+	if strings.TrimSpace(cwd) == "" {
+		return "", errors.New("cwd is required")
+	}
 	entries, err := listWorktreesInDir(cwd)
 	if err != nil {
 		return "", err
@@ -32,12 +34,8 @@ func ResolveSlug(cwd string) (string, error) {
 }
 
 func matchWorktree(entries []Entry, cwd string) (Entry, error) {
-	if cwd == "" {
-		var err error
-		cwd, err = os.Getwd()
-		if err != nil {
-			return Entry{}, err
-		}
+	if strings.TrimSpace(cwd) == "" {
+		return Entry{}, errors.New("cwd is required")
 	}
 
 	cwd, err := filepath.Abs(cwd)

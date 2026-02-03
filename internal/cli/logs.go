@@ -96,15 +96,15 @@ func runLogs(opts *Options, target string, view *logViewOptions) error {
 		process = id.Process
 	}
 	if slug == "" {
-		resolved, err := resolveSlug("")
+		resolved, err := resolveSlug(opts, "")
 		if err != nil {
 			return err
 		}
 		slug = resolved
 	}
-	_ = opts
 
-	path, err := worktree.ResolvePathFromSlug(slug)
+	cwd := workingDir(opts)
+	path, err := worktree.ResolvePathFromSlug(slug, cwd)
 	if err != nil {
 		return err
 	}

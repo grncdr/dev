@@ -13,6 +13,10 @@ func TestWorktreeLifecycleAddListCleanupDryRun(t *testing.T) {
 	repoDir, daemonConfigPath, opts := setupWorktreeLifecycleRepo(t)
 	projectID := "demo"
 	target := "feature"
+	origWD := rememberCWD()
+	t.Cleanup(func() {
+		_ = os.Chdir(origWD)
+	})
 
 	if err := runGitForTest(repoDir, "branch", "feature"); err != nil {
 		t.Fatalf("create branch: %v", err)
@@ -24,7 +28,6 @@ func TestWorktreeLifecycleAddListCleanupDryRun(t *testing.T) {
 		t.Fatalf("chdir repo: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = os.Chdir(repoDir)
 		_ = os.Remove(daemonConfigPath)
 	})
 	if err := runWorktreeAdd(opts, target, "", &addOut, &addErr); err != nil {
@@ -54,6 +57,7 @@ func TestWorktreeLifecycleAddListCleanupDryRun(t *testing.T) {
 	if err := os.Chdir(subdir); err != nil {
 		t.Fatalf("chdir subdir: %v", err)
 	}
+	opts.WorkingDir = subdir
 
 	var cleanupOut bytes.Buffer
 	if err := runWorktreeCleanup(opts, "", &worktreeCleanupOptions{DryRun: true, Force: true}, &cleanupOut, &addErr); err != nil {
@@ -69,6 +73,10 @@ func TestWorktreeLifecycleAddListCleanupDryRun(t *testing.T) {
 
 func TestWorktreeCleanupMainFails(t *testing.T) {
 	repoDir, _, opts := setupWorktreeLifecycleRepo(t)
+	origWD := rememberCWD()
+	t.Cleanup(func() {
+		_ = os.Chdir(origWD)
+	})
 	if err := os.Chdir(repoDir); err != nil {
 		t.Fatalf("chdir repo: %v", err)
 	}
@@ -125,12 +133,9 @@ post_worktree_cleanup = "sh -c \"echo ${DEV_MODE_WRAPPED}:${DEV_MODE_WORKTREE_DN
 	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
 		t.Fatalf("write daemon config: %v", err)
 	}
-	opts := &Options{ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+	opts := &Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
 
-	origWD, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
+	origWD := rememberCWD()
 	t.Cleanup(func() {
 		_ = os.Chdir(origWD)
 	})
@@ -207,7 +212,11 @@ name = "foocorp/monorepo"
 	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
 		t.Fatalf("write daemon config: %v", err)
 	}
-	opts := &Options{ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+	opts := &Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+	origWD := rememberCWD()
+	t.Cleanup(func() {
+		_ = os.Chdir(origWD)
+	})
 
 	if err := os.Chdir(repoDir); err != nil {
 		t.Fatalf("chdir repo: %v", err)
@@ -267,7 +276,7 @@ name = "demo"
 	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
 		t.Fatalf("write daemon config: %v", err)
 	}
-	return repoDir, daemonConfigPath, &Options{ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+	return repoDir, daemonConfigPath, &Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
 }
 
 func runGitForTest(dir string, args ...string) error {

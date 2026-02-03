@@ -91,3 +91,15 @@ func TestMatchWorktree_PathBoundary(t *testing.T) {
 		t.Fatalf("expected /tmp/repo-feature, got %s", entry.Path)
 	}
 }
+
+func TestResolveSlugRequiresCWD(t *testing.T) {
+	if _, err := ResolveSlug(""); err == nil {
+		t.Fatalf("expected ResolveSlug to fail when cwd is empty")
+	}
+}
+
+func TestMatchWorktreeRequiresCWD(t *testing.T) {
+	if _, err := matchWorktree([]Entry{{Path: "/tmp/repo"}}, ""); err == nil {
+		t.Fatalf("expected matchWorktree to fail when cwd is empty")
+	}
+}

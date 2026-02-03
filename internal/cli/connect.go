@@ -42,7 +42,7 @@ func runAttach(opts *Options, process, slug string) error {
 		return errors.New("process is required")
 	}
 	if slug == "" {
-		resolved, err := resolveSlug("")
+		resolved, err := resolveSlug(opts, "")
 		if err != nil {
 			return err
 		}
@@ -106,4 +106,3 @@ func runAttach(opts *Options, process, slug string) error {
 
 	return <-errCh
 }
-

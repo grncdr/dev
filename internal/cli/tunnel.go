@@ -66,7 +66,7 @@ func runTunnelOpen(opts *Options, slugArg, labelArg, gatewayURLArg string) error
 		return err
 	}
 
-	slug, cfg, err := resolveTunnelConfig(slugArg)
+	slug, path, cfg, err := resolveTunnelConfig(opts, slugArg)
 	if err != nil {
 		return err
 	}
@@ -80,7 +80,7 @@ func runTunnelOpen(opts *Options, slugArg, labelArg, gatewayURLArg string) error
 	}
 	label := strings.TrimSpace(labelArg)
 	if label == "" {
-		label = effectiveDisplaySlug(slug, cfg)
+		label = effectiveDisplaySlug(slug, path, cfg)
 	}
 
 	req := daemon.TunnelRequest{
@@ -116,14 +116,14 @@ func runTunnelClose(opts *Options, slugArg, labelArg, gatewayURLArg string) erro
 	}
 	req := daemon.TunnelRequest{Label: strings.TrimSpace(labelArg)}
 	if req.Label == "" {
-		slug, err := resolveSlug(slugArg)
+		slug, err := resolveSlug(opts, slugArg)
 		if err != nil {
 			return err
 		}
 		req.Slug = slug
 	}
 	if strings.TrimSpace(gatewayURLArg) == "" {
-		_, cfg, err := resolveTunnelConfig(slugArg)
+		_, _, cfg, err := resolveTunnelConfig(opts, slugArg)
 		if err != nil {
 			return err
 		}
@@ -143,21 +143,22 @@ func runTunnelClose(opts *Options, slugArg, labelArg, gatewayURLArg string) erro
 	return nil
 }
 
-func resolveTunnelConfig(slugArg string) (string, *config.ProjectConfig, error) {
-	slug, err := resolveSlug(slugArg)
+func resolveTunnelConfig(opts *Options, slugArg string) (string, string, *config.ProjectConfig, error) {
+	slug, err := resolveSlug(opts, slugArg)
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
-	path, err := worktree.ResolvePathFromSlug(slug)
+	cwd := workingDir(opts)
+	path, err := worktree.ResolvePathFromSlug(slug, cwd)
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 	cfgPath := filepath.Join(path, config.DefaultProjectConfig)
 	cfg, _, err := config.LoadProjectConfig(cfgPath)
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
-	return slug, cfg, nil
+	return slug, path, cfg, nil
 }
 
 func gatewayPublicURL(gatewayURL, publicHost, label string) string {

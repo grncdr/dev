@@ -2,7 +2,6 @@ package worktree
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -23,10 +22,9 @@ func ValidateSlug(slug string) error {
 	return nil
 }
 
-func ResolvePathFromSlug(slug string) (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
+func ResolvePathFromSlug(slug, cwd string) (string, error) {
+	if strings.TrimSpace(cwd) == "" {
+		return "", errors.New("cwd is required")
 	}
 	return ResolvePathFromSlugInDir(slug, cwd)
 }
@@ -34,6 +32,9 @@ func ResolvePathFromSlug(slug string) (string, error) {
 func ResolvePathFromSlugInDir(slug, dir string) (string, error) {
 	if slug == "" {
 		return "", errors.New("slug is required")
+	}
+	if strings.TrimSpace(dir) == "" {
+		return "", errors.New("dir is required")
 	}
 
 	// Allow qualified slugs like project/slug; use the last segment for matching.

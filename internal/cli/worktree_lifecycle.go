@@ -85,10 +85,8 @@ func newWorktreeListCmd(opts *Options) *cobra.Command {
 }
 
 func runWorktreeAdd(opts *Options, targetArg, branchArg string, out, errOut io.Writer) error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
+	cwd := workingDir(opts)
+	var err error
 	entries, err := worktree.ListWorktreesInDir(cwd)
 	if err != nil {
 		return err
@@ -193,7 +191,8 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 		return err
 	}
 
-	resolved, err := resolveCleanupTarget(targetArg, worktreeDir)
+	cwd := workingDir(opts)
+	resolved, err := resolveCleanupTarget(targetArg, worktreeDir, cwd, opts)
 	if err != nil {
 		return err
 	}
@@ -204,10 +203,6 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 		return errors.New("cannot cleanup the main worktree")
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
 	if containsPath(cwd, resolved.path) && !cleanup.Force {
 		return errors.New("cannot cleanup the current worktree while your shell is inside it (use --force)")
 	}
@@ -275,10 +270,7 @@ func runWorktreeList(opts *Options, out io.Writer) error {
 		return err
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
+	cwd := workingDir(opts)
 	entries, err := worktree.ListWorktreesInDir(cwd)
 	if err != nil {
 		return err
@@ -361,12 +353,8 @@ type cleanupTarget struct {
 	exists   bool
 }
 
-func resolveCleanupTarget(arg, worktreeDir string) (*cleanupTarget, error) {
+func resolveCleanupTarget(arg, worktreeDir, cwd string, opts *Options) (*cleanupTarget, error) {
 	if strings.TrimSpace(arg) == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return nil, err
-		}
 		entries, err := worktree.ListWorktreesInDir(cwd)
 		if err != nil {
 			return nil, err
@@ -397,7 +385,7 @@ func resolveCleanupTarget(arg, worktreeDir string) (*cleanupTarget, error) {
 		}, nil
 	}
 
-	project, err := resolveProjectFromCurrentDir()
+	project, err := resolveProjectFromCurrentDir(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -442,11 +430,9 @@ func parseProjectSlugWithDefault(arg, defaultProject string) (worktree.ProjectSl
 	return worktree.ParseProjectSlug(defaultProject + ":" + trimmed)
 }
 
-func resolveProjectFromCurrentDir() (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
+func resolveProjectFromCurrentDir(opts *Options) (string, error) {
+	cwd := workingDir(opts)
+	var err error
 	entries, err := worktree.ListWorktreesInDir(cwd)
 	if err != nil {
 		return "", err
@@ -672,12 +658,8 @@ func (w *prefixedLineWriter) Write(p []byte) (int, error) {
 }
 
 func matchCurrentEntry(entries []worktree.Entry, cwd string) (worktree.Entry, error) {
-	if cwd == "" {
-		var err error
-		cwd, err = os.Getwd()
-		if err != nil {
-			return worktree.Entry{}, err
-		}
+	if strings.TrimSpace(cwd) == "" {
+		return worktree.Entry{}, errors.New("cwd is required")
 	}
 	cwdAbs, err := filepath.Abs(cwd)
 	if err != nil {

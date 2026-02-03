@@ -250,7 +250,7 @@ func (s *Server) projectConfigForSlug(slug string) (*config.ProjectConfig, strin
 	}
 	if !ok || repoPath == "" {
 		var err error
-		repoPath, err = worktree.ResolvePathFromSlug(slug)
+		repoPath, err = worktree.ResolvePathFromSlugInDir(slug, s.mainPath)
 		if err != nil {
 			if s.config != nil && s.mainPath != "" {
 				return s.config, s.mainPath, nil

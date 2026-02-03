@@ -11,7 +11,7 @@ func TestResolveProcessTargetsExplicit(t *testing.T) {
 		"proj:feature:rails",
 		"proj:feature:webpack",
 		"proj:other:*",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("resolveProcessTargets: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestResolveProcessTargetsWildcardWins(t *testing.T) {
 		"foo:rails",
 		"foo:*",
 		"foo:webpack",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("resolveProcessTargets: %v", err)
 	}
@@ -74,16 +74,13 @@ func TestResolveSlugProjectQualified(t *testing.T) {
 	if err := runGitForTest(repoDir, "commit", "-m", "init"); err != nil {
 		t.Fatalf("git commit: %v", err)
 	}
-	orig, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
+	orig := rememberCWD()
 	t.Cleanup(func() { _ = os.Chdir(orig) })
 	if err := os.Chdir(repoDir); err != nil {
 		t.Fatalf("chdir: %v", err)
 	}
 
-	slug, err := resolveSlug("demo:feature/x")
+	slug, err := resolveSlug(&Options{WorkingDir: repoDir}, "demo:feature/x")
 	if err != nil {
 		t.Fatalf("resolveSlug: %v", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -15,6 +16,7 @@ type Options struct {
 	ConfigPath    string
 	DaemonConfig  string
 	Debug         bool
+	WorkingDir    string
 	ResolvedPaths ResolvedPaths
 }
 
@@ -24,7 +26,11 @@ type ResolvedPaths struct {
 }
 
 func Execute() error {
-	opts := &Options{}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolve working directory: %w", err)
+	}
+	opts := &Options{WorkingDir: cwd}
 
 	root := &cobra.Command{
 		Use:   "dev-mode",
@@ -63,11 +69,15 @@ func resolvePaths(opts *Options) error {
 	if opts == nil {
 		return errors.New("missing options")
 	}
-
-	projectPath, err := filepath.Abs(opts.ConfigPath)
-	if err != nil {
-		return fmt.Errorf("resolve project config path: %w", err)
+	if strings.TrimSpace(opts.WorkingDir) == "" {
+		return errors.New("missing working directory")
 	}
+
+	projectPath := opts.ConfigPath
+	if !filepath.IsAbs(projectPath) {
+		projectPath = filepath.Join(opts.WorkingDir, projectPath)
+	}
+	projectPath = filepath.Clean(projectPath)
 	opts.ResolvedPaths.ProjectConfig = projectPath
 
 	daemonPath, err := config.ExpandUserPath(opts.DaemonConfig)
@@ -77,6 +87,13 @@ func resolvePaths(opts *Options) error {
 	opts.ResolvedPaths.DaemonConfig = daemonPath
 
 	return nil
+}
+
+func workingDir(opts *Options) string {
+	if opts == nil {
+		return ""
+	}
+	return opts.WorkingDir
 }
 
 func ExitErr(err error) {

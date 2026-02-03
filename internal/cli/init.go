@@ -40,10 +40,7 @@ func runInit(opts *Options, out io.Writer) error {
 		return fmt.Errorf("check config path: %w", err)
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("resolve current directory: %w", err)
-	}
+	cwd := workingDir(opts)
 
 	projectName := filepath.Base(cwd)
 	if inferred, ok := inferProjectNameFromRemote(cwd, "origin"); ok {

@@ -3,25 +3,19 @@ package worktree
 import (
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 )
-
-func listWorktrees() ([]Entry, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
-	return listWorktreesInDir(cwd)
-}
 
 func ListWorktreesInDir(dir string) ([]Entry, error) {
 	return listWorktreesInDir(dir)
 }
 
 func listWorktreesInDir(dir string) ([]Entry, error) {
+	if strings.TrimSpace(dir) == "" {
+		return nil, errors.New("dir is required")
+	}
 	cmd := exec.Command("git", "worktree", "list", "--porcelain")
 	cmd.Dir = dir
 	output, err := cmd.Output()

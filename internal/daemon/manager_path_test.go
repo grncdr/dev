@@ -65,7 +65,7 @@ func TestStatusAndStopUseDirHint(t *testing.T) {
 		t.Fatalf("git init repoB: %v", err)
 	}
 
-cfg := `
+	cfg := `
 [project]
 name = "foocorp/monorepo"
 `
