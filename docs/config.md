@@ -137,7 +137,8 @@ enabled = false
 hosted_zone_id = ""
 ttl = 60
 
-[proxy]
+[local-proxy]
+enabled = true
 apex_zone = ".localhost"
 listen_http = "0.0.0.0:80"
 listen_https = "0.0.0.0:443"
@@ -145,7 +146,8 @@ allow = "loopback"
 ```
 
 Notes:
-- `proxy.apex_zone` is daemon-level and defaults to `.localhost`.
+- `local-proxy.enabled` defaults to `true`; set to `false` to disable the local proxy.
+- `local-proxy.apex_zone` is daemon-level and defaults to `.localhost`.
 - `gateway.auth` configures optional HTTP Basic Auth for public gateway requests.
 - `gateway.auth` is global (not per project/label).
 - Keep `gateway.auth.password` in daemon config only.

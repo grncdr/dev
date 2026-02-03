@@ -81,4 +81,4 @@ See:
   - Daemon: `<state_root>/logs/daemon.log`
   - Processes: `<state_root>/logs/<project>/<slug>/<process>.log`
 - Certificates: `~/.config/dev-mode/certs/`
-- Proxy apex defaults to `.localhost` via daemon config `proxy.apex_zone`.
+- Proxy apex defaults to `.localhost` via daemon config `local-proxy.apex_zone`.

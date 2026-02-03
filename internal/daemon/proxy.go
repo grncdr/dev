@@ -162,11 +162,11 @@ func proxyListenAddrs(daemonCfg *config.DaemonConfig) (httpAddr, httpsAddr strin
 	httpAddr, httpDisabled := listenFromEnv("DEV_MODE_PROXY_LISTEN_HTTP")
 	httpsAddr, httpsDisabled := listenFromEnv("DEV_MODE_PROXY_LISTEN_HTTPS")
 
-	if httpAddr == "" && !httpDisabled && daemonCfg != nil && daemonCfg.Proxy.ListenHTTP != "" {
-		httpAddr = daemonCfg.Proxy.ListenHTTP
+	if httpAddr == "" && !httpDisabled && daemonCfg != nil && daemonCfg.LocalProxy.ListenHTTP != "" {
+		httpAddr = daemonCfg.LocalProxy.ListenHTTP
 	}
-	if httpsAddr == "" && !httpsDisabled && daemonCfg != nil && daemonCfg.Proxy.ListenHTTPS != "" {
-		httpsAddr = daemonCfg.Proxy.ListenHTTPS
+	if httpsAddr == "" && !httpsDisabled && daemonCfg != nil && daemonCfg.LocalProxy.ListenHTTPS != "" {
+		httpsAddr = daemonCfg.LocalProxy.ListenHTTPS
 	}
 	if httpAddr == "" && !httpDisabled {
 		httpAddr = defaultProxyHTTPListen()
@@ -287,7 +287,7 @@ func proxyCertPaths() (leafCert, leafKey, caKey, caCert string, err error) {
 func (s *Server) checkProxyAllow(r *http.Request) error {
 	allow := ""
 	if s.daemonConfig != nil {
-		allow = strings.TrimSpace(s.daemonConfig.Proxy.Allow)
+		allow = strings.TrimSpace(s.daemonConfig.LocalProxy.Allow)
 	}
 	if allow == "" {
 		allow = "loopback"

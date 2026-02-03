@@ -30,8 +30,8 @@ type ProjectBlock struct {
 }
 
 type DaemonConfig struct {
-	Gateway DaemonGatewayBlock `toml:"gateway" json:"gateway,omitempty"`
-	Proxy   DaemonProxyBlock   `toml:"proxy" json:"proxy,omitempty"`
+	Gateway    DaemonGatewayBlock    `toml:"gateway" json:"gateway,omitempty"`
+	LocalProxy DaemonLocalProxyBlock `toml:"local-proxy" json:"local_proxy,omitempty"`
 }
 
 type DaemonGatewayBlock struct {
@@ -77,11 +77,19 @@ type ProjectProxyBlock struct {
 	// Reserved for future project-level proxy options.
 }
 
-type DaemonProxyBlock struct {
+type DaemonLocalProxyBlock struct {
+	Enabled     *bool  `toml:"enabled" json:"enabled,omitempty"`
 	ListenHTTP  string `toml:"listen_http" json:"listen_http,omitempty"`
 	ListenHTTPS string `toml:"listen_https" json:"listen_https,omitempty"`
 	ApexZone    string `toml:"apex_zone" json:"apex_zone,omitempty"`
 	Allow       string `toml:"allow" json:"allow,omitempty"`
+}
+
+func (b *DaemonLocalProxyBlock) IsEnabled() bool {
+	if b.Enabled == nil {
+		return true // default enabled
+	}
+	return *b.Enabled
 }
 
 type LoadInfo struct {

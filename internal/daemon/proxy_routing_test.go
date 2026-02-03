@@ -9,7 +9,7 @@ import (
 )
 
 func TestParseProxyHost(t *testing.T) {
-	s := &Server{daemonConfig: &config.DaemonConfig{Proxy: config.DaemonProxyBlock{ApexZone: ".localhost"}}}
+	s := &Server{daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}}}
 	slug, subdomain, err := s.parseProxyHost("foo.localhost")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -31,7 +31,7 @@ func TestParseProxyHost(t *testing.T) {
 }
 
 func TestParseProxyHost_UsesDaemonApexZone(t *testing.T) {
-	s := &Server{daemonConfig: &config.DaemonConfig{Proxy: config.DaemonProxyBlock{ApexZone: ".example.test"}}}
+	s := &Server{daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".example.test"}}}
 	slug, subdomain, err := s.parseProxyHost("app.foo.example.test")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -43,7 +43,7 @@ func TestParseProxyHost_UsesDaemonApexZone(t *testing.T) {
 
 func TestLocalProxyHostForTunnelRequest(t *testing.T) {
 	s := &Server{
-		daemonConfig: &config.DaemonConfig{Proxy: config.DaemonProxyBlock{ApexZone: ".localhost"}},
+		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
 		tunnels: map[string]*managedTunnel{
 			"xyzz": {
 				req: TunnelRequest{
@@ -113,7 +113,7 @@ main_slug = "foocorp"
 	s := &Server{
 		mainPath:     repo,
 		config:       cfg,
-		daemonConfig: &config.DaemonConfig{Proxy: config.DaemonProxyBlock{ApexZone: ".localhost"}},
+		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
 		tunnels: map[string]*managedTunnel{
 			"foocorp": {
 				req: TunnelRequest{

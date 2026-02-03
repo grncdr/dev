@@ -390,8 +390,8 @@ func matcherSubdomains(matcher map[string]any) []string {
 }
 
 func proxyApexZone(daemonCfg *config.DaemonConfig) string {
-	if daemonCfg != nil && strings.TrimSpace(daemonCfg.Proxy.ApexZone) != "" {
-		return daemonCfg.Proxy.ApexZone
+	if daemonCfg != nil && strings.TrimSpace(daemonCfg.LocalProxy.ApexZone) != "" {
+		return daemonCfg.LocalProxy.ApexZone
 	}
 	return ".localhost"
 }

@@ -370,7 +370,7 @@ func (s *Server) loadConfig() error {
 
 func (s *Server) projectApexZone() string {
 	if s.daemonConfig != nil {
-		if apex := s.daemonConfig.Proxy.ApexZone; apex != "" {
+		if apex := s.daemonConfig.LocalProxy.ApexZone; apex != "" {
 			return apex
 		}
 	}
