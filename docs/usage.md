@@ -29,6 +29,17 @@ Restarts the daemon.
 ### `dev-mode projects list`
 Lists projects, their main worktree path, and known worktrees per project.
 
+## Worktree Lifecycle
+
+### `dev-mode worktree add project/slug [branch]`
+Creates a managed worktree under daemon `worktree_dir`.
+
+### `dev-mode worktree cleanup [project/slug] [--delete-branch] [--dry-run] [--force]`
+Removes a managed worktree. If `project/slug` is omitted, dev-mode targets the current worktree from cwd.
+
+### `dev-mode worktree list`
+Lists managed worktrees with path, branch, and status flags.
+
 ## Config
 
 ### `dev-mode init`

@@ -70,8 +70,10 @@ priority = 0
 tcp_listen = 15432
 
 [hooks]
-post_create = "bin/setup-worktree"
-pre_cleanup = "bin/teardown-worktree"
+pre_worktree_add = "bin/pre-worktree-add"
+post_worktree_add = "bin/post-worktree-add"
+pre_worktree_cleanup = "bin/pre-worktree-cleanup"
+post_worktree_cleanup = "bin/post-worktree-cleanup"
 pre_start = "bin/pre-start"
 post_start = "bin/post-start"
 pre_stop = "bin/pre-stop"
@@ -82,7 +84,12 @@ Notes:
 - `project.name` is required.
 - `project.main_slug` is optional and only changes the main worktree host slug.
 - All runnable units live under `process.*`; use `singleton = true` for project-wide services.
-- Hooks run in the worktree directory: `post_create` after `worktree new`, `pre_cleanup` before `worktree cleanup`, and `pre/post start/stop` around `worktree start/stop`.
+- Worktree lifecycle hooks are optional:
+  - `pre_worktree_add` and `post_worktree_add`
+  - `pre_worktree_cleanup` and `post_worktree_cleanup`
+- Start/stop hooks are optional:
+  - `pre_start` and `post_start`
+  - `pre_stop` and `post_stop`
 - The `${MAIN_WORKTREE}` and `${WORKTREE_STATE}` variables are expanded by dev-mode at runtime.
 - `port` controls how the process is reached by the proxy:
   - `port = "unix"` uses a unix socket at `${WORKTREE_STATE}/<process>.sock`.
@@ -137,6 +144,8 @@ enabled = false
 hosted_zone_id = ""
 ttl = 60
 
+worktree_dir = "~/.local/state/dev-mode/worktrees"
+
 [local-proxy]
 enabled = true
 apex_zone = ".localhost"
@@ -148,6 +157,7 @@ allow = "loopback"
 Notes:
 - `local-proxy.enabled` defaults to `true`; set to `false` to disable the local proxy.
 - `local-proxy.apex_zone` is daemon-level and defaults to `.localhost`.
+- `worktree_dir` is daemon-level and controls where managed worktrees are created.
 - `gateway.auth` configures optional HTTP Basic Auth for public gateway requests.
 - `gateway.auth` is global (not per project/label).
 - Keep `gateway.auth.password` in daemon config only.
