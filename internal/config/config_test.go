@@ -82,7 +82,6 @@ func TestLoadDaemonConfig_GatewayFields(t *testing.T) {
 	data := `
 [gateway]
 enabled = true
-data_dir = "~/gw"
 listen = ":443"
 http_listen = ":80"
 dns_zone = "tunnels.foocorp.dev"
@@ -113,7 +112,7 @@ ttl = 60
 	if !info.DaemonConfigFound {
 		t.Fatalf("expected DaemonConfigFound=true")
 	}
-	if !cfg.Gateway.Enabled || cfg.Gateway.DataDir != "~/gw" || !cfg.Gateway.Auth.Enabled {
+	if !cfg.Gateway.Enabled || !cfg.Gateway.Auth.Enabled {
 		t.Fatalf("unexpected gateway decode: %#v", cfg.Gateway)
 	}
 	if !cfg.Gateway.Route53.Enabled || cfg.Gateway.Route53.HostedZoneID != "Z123" || cfg.Gateway.DNSZone != "tunnels.foocorp.dev" || cfg.Gateway.Hostname != "gw.foocorp.dev" {
@@ -128,21 +127,11 @@ ttl = 60
 }
 
 func TestResolveGatewayDataDir(t *testing.T) {
-	got, err := ResolveGatewayDataDir(nil)
+	got, err := ResolveGatewayDataDir()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got == "" {
 		t.Fatalf("expected non-empty default data dir")
-	}
-
-	cfg := &DaemonConfig{}
-	cfg.Gateway.DataDir = "~/my-gateway"
-	got, err = ResolveGatewayDataDir(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if filepath.Base(got) != "my-gateway" {
-		t.Fatalf("expected expanded custom dir, got %q", got)
 	}
 }

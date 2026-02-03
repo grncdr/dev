@@ -86,7 +86,7 @@ func runGateway(opts *Options) error {
 	if err != nil {
 		return err
 	}
-	dataDir, err := config.ResolveGatewayDataDir(daemonCfg)
+	dataDir, err := config.ResolveGatewayDataDir()
 	if err != nil {
 		return err
 	}
@@ -230,11 +230,7 @@ func buildGatewayACME(ctx context.Context, daemonCfg *config.DaemonConfig, dataD
 }
 
 func runGatewayInviteCreate(opts *Options, ttl time.Duration, uses int) error {
-	daemonCfg, _, err := config.LoadDaemonConfig(opts.ResolvedPaths.DaemonConfig)
-	if err != nil {
-		return err
-	}
-	dataDir, err := config.ResolveGatewayDataDir(daemonCfg)
+	dataDir, err := config.ResolveGatewayDataDir()
 	if err != nil {
 		return err
 	}
@@ -253,10 +249,6 @@ func runGatewayInviteCreate(opts *Options, ttl time.Duration, uses int) error {
 }
 
 func runGatewayLogin(opts *Options, inviteCode, name, gatewayURL string) error {
-	daemonCfg, _, err := config.LoadDaemonConfig(opts.ResolvedPaths.DaemonConfig)
-	if err != nil {
-		return err
-	}
 	if strings.TrimSpace(name) == "" {
 		name = os.Getenv("USER")
 		if name == "" {
@@ -306,7 +298,7 @@ func runGatewayLogin(opts *Options, inviteCode, name, gatewayURL string) error {
 	if out.CertPEM == "" || out.CAPEM == "" {
 		return errors.New("gateway returned empty certificate material")
 	}
-	credDir, err := gatewayCredentialDir(daemonCfg, gatewayURL)
+	credDir, err := gatewayCredentialDir(gatewayURL)
 	if err != nil {
 		return err
 	}
@@ -366,12 +358,8 @@ func generateGatewayCSR(name string) (*ecdsa.PrivateKey, []byte, error) {
 	return key, csrPEM, nil
 }
 
-func gatewayCredentialDir(daemonCfg *config.DaemonConfig, gatewayURL string) (string, error) {
-	base := "~/.config/dev-mode/gateway/credentials"
-	if daemonCfg != nil && daemonCfg.Gateway.DataDir != "" {
-		base = filepath.Join(daemonCfg.Gateway.DataDir, "agent-credentials")
-	}
-	basePath, err := config.ExpandUserPath(base)
+func gatewayCredentialDir(gatewayURL string) (string, error) {
+	stateDir, err := config.ResolveStateDir()
 	if err != nil {
 		return "", err
 	}
@@ -383,7 +371,7 @@ func gatewayCredentialDir(daemonCfg *config.DaemonConfig, gatewayURL string) (st
 	if host == "" {
 		host = "gateway"
 	}
-	return filepath.Join(basePath, host), nil
+	return filepath.Join(stateDir, "gateway", "agent-credentials", host), nil
 }
 
 func listenLooksTLS(listen string) bool {

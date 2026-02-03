@@ -117,7 +117,6 @@ Override via `DEV_MODE_DAEMON_CONFIG` environment variable or `--daemon-config` 
 ```toml
 [gateway]
 enabled = false
-data_dir = ""
 listen = ":443"
 http_listen = ":80"
 dns_zone = "tunnels.foocorp.dev"
@@ -147,7 +146,6 @@ allow = "loopback"
 
 Notes:
 - `proxy.apex_zone` is daemon-level and defaults to `.localhost`.
-- `gateway.data_dir` is the gateway persistence root; set it in deployed gateway environments and mount it as durable storage.
 - `gateway.auth` configures optional HTTP Basic Auth for public gateway requests.
 - `gateway.auth` is global (not per project/label).
 - Keep `gateway.auth.password` in daemon config only.

@@ -146,9 +146,9 @@ Gateway stores local state files to restore tunnel leases across restarts.
 
 ### Storage location
 
-- Default: `~/.local/state/dev-mode/gateway/` for local/dev setups.
-- For deployed gateway instances, set `gateway.data_dir` and persist that single directory.
-- When `gateway.data_dir` is set, all gateway state/certs/logs/config snapshots live under it.
+- Default: `~/.local/state/dev-mode/gateway/` (override via `DEV_MODE_STATE_DIR`)
+- For deployed gateway instances, set `DEV_MODE_STATE_DIR` and persist that directory.
+- All gateway state/certs/logs/config snapshots live under `<state_dir>/gateway/`.
 
 ### Files
 
@@ -224,7 +224,6 @@ Daemon config (future expansion):
 ```toml
 [gateway]
 enabled = true
-data_dir = "/var/lib/dev-mode-gateway"
 dns_zone = "tunnels.foocorp.dev"
 hostname = "gw.foocorp.dev"
 acme_resolvers = ["1.1.1.1"]
@@ -244,7 +243,6 @@ Notes:
 - `gateway.auth` is global for this gateway instance.
 - When enabled, every public request must pass Basic Auth before forwarding.
 - Credentials live in daemon config so they are not committed to project config.
-- `gateway.data_dir` should be mounted as persistent storage in deployed gateway environments.
 - `gateway.dns_zone` is required; the gateway refuses to start without it.
 - `gateway.hostname` is the DNS CNAME target used for Route53 label records.
 - `gateway.acme_resolvers` sets recursive resolvers for DNS-01 propagation checks (default `1.1.1.1`).

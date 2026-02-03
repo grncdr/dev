@@ -119,8 +119,7 @@ Implemented fixes to enforce mTLS for gateway agents and use issued credentials 
 
 2. **Daemon/agent now loads and presents client certs**
    - Tunnel startup loads credentials from:
-     - `~/.config/dev-mode/gateway/credentials/<host>/...`, or
-     - `<gateway.data_dir>/agent-credentials/<host>/...`
+     - `<state_dir>/gateway/agent-credentials/<host>/...`
    - These credentials are now used for:
      - agent HTTP registration calls (`GatewayClient`)
      - raw TLS CONNECT tunnel dials (`TLSConfig`)

@@ -156,7 +156,7 @@ func gatewayMTLSClient(gatewayURL string, daemonCfg *config.DaemonConfig) (*http
 	if host == "" {
 		return nil, nil, errors.New("gateway URL host is required")
 	}
-	credDir, err := gatewayCredentialDir(host, daemonCfg)
+	credDir, err := gatewayCredentialDir(host)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -197,16 +197,12 @@ func gatewayMTLSClient(gatewayURL string, daemonCfg *config.DaemonConfig) (*http
 	return client, tlsCfg, nil
 }
 
-func gatewayCredentialDir(host string, daemonCfg *config.DaemonConfig) (string, error) {
-	base := "~/.config/dev-mode/gateway/credentials"
-	if daemonCfg != nil && strings.TrimSpace(daemonCfg.Gateway.DataDir) != "" {
-		base = filepath.Join(daemonCfg.Gateway.DataDir, "agent-credentials")
-	}
-	expanded, err := config.ExpandUserPath(base)
+func gatewayCredentialDir(host string) (string, error) {
+	stateDir, err := config.ResolveStateDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(expanded, host), nil
+	return filepath.Join(stateDir, "gateway", "agent-credentials", host), nil
 }
 
 func tunnelHTTPClient(upstream string) *http.Client {

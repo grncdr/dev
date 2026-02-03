@@ -36,7 +36,6 @@ type DaemonConfig struct {
 
 type DaemonGatewayBlock struct {
 	Enabled       bool                 `toml:"enabled" json:"enabled,omitempty"`
-	DataDir       string               `toml:"data_dir" json:"data_dir,omitempty"`
 	Listen        string               `toml:"listen" json:"listen,omitempty"`
 	HTTPListen    string               `toml:"http_listen" json:"http_listen,omitempty"`
 	DNSZone       string               `toml:"dns_zone" json:"dns_zone,omitempty"`
@@ -170,10 +169,7 @@ func ResolveStateDir() (string, error) {
 	return ExpandUserPath(DefaultStateDir)
 }
 
-func ResolveGatewayDataDir(cfg *DaemonConfig) (string, error) {
-	if cfg != nil && cfg.Gateway.DataDir != "" {
-		return ExpandUserPath(cfg.Gateway.DataDir)
-	}
+func ResolveGatewayDataDir() (string, error) {
 	stateDir, err := ResolveStateDir()
 	if err != nil {
 		return "", err
