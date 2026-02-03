@@ -15,22 +15,23 @@ import (
 	"golang.org/x/term"
 
 	"dev-mode/internal/daemon"
+	"dev-mode/internal/worktree"
 )
 
 func newAttachCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "attach <process|slug:process|project/slug:process>",
+		Use:   "attach <process|slug:process|project:slug:process>",
 		Short: "attach to a process PTY",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if runtime.GOOS == "windows" {
 				return errors.New("attach is not supported on windows")
 			}
-			slug, process, _, err := parseAttachTarget(args[0])
+			id, err := worktree.ParseProcessIdentifier(args[0])
 			if err != nil {
 				return err
 			}
-			return runAttach(opts, process, slug)
+			return runAttach(opts, id.Process, id.Slug)
 		},
 	}
 	return cmd
@@ -106,27 +107,3 @@ func runAttach(opts *Options, process, slug string) error {
 	return <-errCh
 }
 
-func parseAttachTarget(arg string) (slug string, process string, project string, err error) {
-	if arg == "" {
-		return "", "", "", errors.New("target is required")
-	}
-	parts := strings.SplitN(arg, ":", 2)
-	if len(parts) == 1 {
-		return "", parts[0], "", nil
-	}
-	if parts[1] == "" {
-		return "", "", "", errors.New("process is required after ':'")
-	}
-	left := parts[0]
-	if left == "" {
-		return "", "", "", errors.New("slug is required before ':'")
-	}
-	if strings.Contains(left, "/") {
-		projectSlug := strings.SplitN(left, "/", 2)
-		if len(projectSlug) != 2 || projectSlug[0] == "" || projectSlug[1] == "" {
-			return "", "", "", errors.New("expected project/slug before ':'")
-		}
-		return projectSlug[1], parts[1], projectSlug[0], nil
-	}
-	return left, parts[1], "", nil
-}

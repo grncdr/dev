@@ -31,11 +31,13 @@ Lists projects, their main worktree path, and known worktrees per project.
 
 ## Worktree Lifecycle
 
-### `dev-mode worktree add project/slug [branch]`
-Creates a managed worktree under daemon `worktree_dir`.
+### `dev-mode worktree add <slug> [branch]`
+Creates a managed worktree under daemon `worktree_dir`. Accepts `slug` or `project:slug` format.
+Slugs can contain slashes (e.g., `feature/my-branch`).
 
-### `dev-mode worktree cleanup [project/slug] [--delete-branch] [--dry-run] [--force]`
-Removes a managed worktree. If `project/slug` is omitted, dev-mode targets the current worktree from cwd.
+### `dev-mode worktree cleanup [slug] [--delete-branch] [--dry-run] [--force]`
+Removes a managed worktree. Accepts `slug` or `project:slug` format.
+If omitted, dev-mode targets the current worktree from cwd.
 
 ### `dev-mode worktree list`
 Lists managed worktrees with path, branch, and status flags.
@@ -55,11 +57,15 @@ Use `--output json` for machine-readable output.
 Many commands accept process identifiers in these forms:
 
 - `process` (current worktree inferred from cwd)
-- `worktree:process`
-- `project/worktree:process`
-- `project/worktree:*` (all processes in that worktree)
+- `slug:process`
+- `project:slug:process`
+- `slug:*` (all processes in that worktree)
+
+Slugs can contain slashes (e.g., `feature/my-branch:rails`).
 
 If no process identifiers are provided to `start`/`stop`/`restart`, dev-mode targets all processes in the current worktree.
+
+See `docs/identifiers.md` for full details on identifier format and resolution.
 
 ## Process Control
 
@@ -77,7 +83,7 @@ Restarts processes. With no args, restarts all processes in the current worktree
 
 ## Attach
 
-### `dev-mode attach <process|slug:process|project/slug:process>`
+### `dev-mode attach <process|slug:process|project:slug:process>`
 Attaches your terminal to a process PTY. Uses the current worktree when only `process` is provided.
 
 ## Tunnels

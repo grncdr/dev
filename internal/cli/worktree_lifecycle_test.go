@@ -12,7 +12,7 @@ import (
 func TestWorktreeLifecycleAddListCleanupDryRun(t *testing.T) {
 	repoDir, daemonConfigPath, opts := setupWorktreeLifecycleRepo(t)
 	mainSlug := filepath.Base(repoDir)
-	target := mainSlug + "/feature"
+	target := mainSlug + ":feature"
 
 	if err := runGitForTest(repoDir, "branch", "feature"); err != nil {
 		t.Fatalf("create branch: %v", err)
@@ -43,7 +43,7 @@ func TestWorktreeLifecycleAddListCleanupDryRun(t *testing.T) {
 	if err := runWorktreeList(opts, &listOut); err != nil {
 		t.Fatalf("runWorktreeList: %v", err)
 	}
-	if !strings.Contains(listOut.String(), mainSlug+"/feature") {
+	if !strings.Contains(listOut.String(), mainSlug+":feature") {
 		t.Fatalf("expected list output to include feature worktree, got %q", listOut.String())
 	}
 

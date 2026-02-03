@@ -33,7 +33,7 @@ type logSource struct {
 func newLogsCmd(opts *Options) *cobra.Command {
 	view := &logViewOptions{}
 	cmd := &cobra.Command{
-		Use:   "logs [process|slug:process|project/slug:process]",
+		Use:   "logs [process|slug:process|project:slug:process]",
 		Short: "view process logs",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -88,12 +88,12 @@ func runLogs(opts *Options, target string, view *logViewOptions) error {
 	slug := ""
 	process := ""
 	if strings.TrimSpace(target) != "" {
-		resolvedSlug, resolvedProcess, _, err := parseAttachTarget(target)
+		id, err := worktree.ParseProcessIdentifier(target)
 		if err != nil {
 			return err
 		}
-		slug = resolvedSlug
-		process = resolvedProcess
+		slug = id.Slug
+		process = id.Process
 	}
 	if slug == "" {
 		resolved, err := resolveSlug("")

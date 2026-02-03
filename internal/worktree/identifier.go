@@ -11,7 +11,10 @@ const (
 	maxIdentifierLen        = 127
 )
 
-var validIdentifierSegmentPattern = regexp.MustCompile(`^[a-z0-9_-]+$`)
+var (
+	validProjectPattern = regexp.MustCompile(`^[a-z0-9_-]+$`)
+	validSlugPattern2   = regexp.MustCompile(`^[a-z0-9/_-]+$`)
+)
 
 type ProjectSlug struct {
 	Project string
@@ -23,39 +26,109 @@ func ParseProjectSlug(input string) (ProjectSlug, error) {
 	if trimmed == "" {
 		return ProjectSlug{}, fmt.Errorf("identifier is required")
 	}
-	parts := strings.Split(trimmed, "/")
+	parts := strings.SplitN(trimmed, ":", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return ProjectSlug{}, fmt.Errorf("invalid identifier %q: expected project/slug", input)
+		return ProjectSlug{}, fmt.Errorf("invalid identifier %q: expected project:slug", input)
 	}
-	project, err := normalizeIdentifierSegment(parts[0], "project")
+	project, err := normalizeProject(parts[0])
 	if err != nil {
 		return ProjectSlug{}, err
 	}
-	slug, err := normalizeIdentifierSegment(parts[1], "slug")
+	slug, err := normalizeSlug(parts[1])
 	if err != nil {
 		return ProjectSlug{}, err
 	}
-	full := project + "/" + slug
+	full := project + ":" + slug
 	if len(full) > maxIdentifierLen {
 		return ProjectSlug{}, fmt.Errorf("invalid identifier %q: max length is %d", input, maxIdentifierLen)
 	}
 	return ProjectSlug{Project: project, Slug: slug}, nil
 }
 
-func NormalizeIdentifierSegment(segment string) (string, error) {
-	return normalizeIdentifierSegment(segment, "segment")
+// SlugDNSLabel returns the DNS label for a slug (the last path segment).
+// Example: "feature/branch" → "branch"
+func SlugDNSLabel(slug string) string {
+	if i := strings.LastIndex(slug, "/"); i >= 0 {
+		return slug[i+1:]
+	}
+	return slug
 }
 
-func normalizeIdentifierSegment(segment, field string) (string, error) {
+// ProcessIdentifier represents a parsed process identifier.
+type ProcessIdentifier struct {
+	Project string
+	Slug    string
+	Process string
+}
+
+// ParseProcessIdentifier parses process identifiers in format:
+// - "process"
+// - "slug:process"
+// - "project:slug:process"
+// The slug can contain slashes (e.g., "feature/branch").
+func ParseProcessIdentifier(input string) (ProcessIdentifier, error) {
+	if input == "" {
+		return ProcessIdentifier{}, fmt.Errorf("target is required")
+	}
+	// Split from the right to find the process (last segment after :)
+	lastColon := strings.LastIndex(input, ":")
+	if lastColon == -1 {
+		// Just a process name
+		return ProcessIdentifier{Process: input}, nil
+	}
+	if lastColon == len(input)-1 {
+		return ProcessIdentifier{}, fmt.Errorf("process is required after ':'")
+	}
+	process := input[lastColon+1:]
+	left := input[:lastColon]
+	if left == "" {
+		return ProcessIdentifier{}, fmt.Errorf("slug is required before ':'")
+	}
+	// Check if there's another colon (project:slug)
+	firstColon := strings.Index(left, ":")
+	if firstColon == -1 {
+		// slug:process
+		return ProcessIdentifier{Slug: left, Process: process}, nil
+	}
+	if firstColon == 0 {
+		return ProcessIdentifier{}, fmt.Errorf("project is required before ':'")
+	}
+	if firstColon == len(left)-1 {
+		return ProcessIdentifier{}, fmt.Errorf("slug is required after project")
+	}
+	project := left[:firstColon]
+	slug := left[firstColon+1:]
+	return ProcessIdentifier{Project: project, Slug: slug, Process: process}, nil
+}
+
+func normalizeProject(segment string) (string, error) {
 	normalized := strings.ToLower(strings.TrimSpace(segment))
 	if normalized == "" {
-		return "", fmt.Errorf("%s is required", field)
+		return "", fmt.Errorf("project is required")
 	}
 	if len(normalized) > maxIdentifierSegmentLen {
-		return "", fmt.Errorf("invalid %s %q: max length is %d", field, segment, maxIdentifierSegmentLen)
+		return "", fmt.Errorf("invalid project %q: max length is %d", segment, maxIdentifierSegmentLen)
 	}
-	if !validIdentifierSegmentPattern.MatchString(normalized) {
-		return "", fmt.Errorf("invalid %s %q: allowed chars are [a-z0-9_-]", field, segment)
+	if !validProjectPattern.MatchString(normalized) {
+		return "", fmt.Errorf("invalid project %q: allowed chars are [a-z0-9_-]", segment)
 	}
 	return normalized, nil
+}
+
+func normalizeSlug(segment string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(segment))
+	if normalized == "" {
+		return "", fmt.Errorf("slug is required")
+	}
+	if len(normalized) > maxIdentifierSegmentLen {
+		return "", fmt.Errorf("invalid slug %q: max length is %d", segment, maxIdentifierSegmentLen)
+	}
+	if !validSlugPattern2.MatchString(normalized) {
+		return "", fmt.Errorf("invalid slug %q: allowed chars are [a-z0-9/_-]", segment)
+	}
+	return normalized, nil
+}
+
+func NormalizeIdentifierSegment(segment string) (string, error) {
+	return normalizeProject(segment)
 }

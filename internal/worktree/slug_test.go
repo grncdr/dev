@@ -14,6 +14,8 @@ func TestValidateSlug(t *testing.T) {
 		"a",
 		"Feature123",
 		"test-branch_v2",
+		"has/slash",
+		"feature/my-branch",
 	}
 	for _, slug := range valid {
 		if err := ValidateSlug(slug); err != nil {
@@ -26,7 +28,6 @@ func TestValidateSlug(t *testing.T) {
 		"-starts-with-dash",
 		"_starts-with-underscore",
 		"has space",
-		"has/slash",
 		"has..dots",
 		"../traversal",
 		"path/../attack",

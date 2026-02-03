@@ -40,9 +40,10 @@ High-level product goals and UX surface for `dev-mode`.
 - `dev-mode stop [process_identifier ...]`
 - `dev-mode restart [process_identifier ...]`
 - `dev-mode status [process_identifier ...]`
-- `dev-mode attach <process|slug:process|project/slug:process>`
+- `dev-mode attach <process|slug:process|project:slug:process>`
 
-Process identifiers also support `project/slug:*` for all processes in a worktree.
+Process identifiers use colon separators (e.g., `project:slug:process`). Slugs can contain slashes (e.g., `feature/my-branch`).
+See `docs/identifiers.md` for full format documentation.
 When omitted, `start|stop|restart|status` operate on all processes in the current worktree.
 
 ### Sharing / Gateway

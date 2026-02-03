@@ -8,9 +8,9 @@ import (
 	"strings"
 )
 
-// validSlugPattern matches slugs containing only alphanumeric characters, hyphens, and underscores.
+// validSlugPattern matches slugs containing alphanumeric characters, hyphens, underscores, and slashes.
 // Must start with an alphanumeric character.
-var validSlugPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+var validSlugPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9/_-]*$`)
 
 // ValidateSlug checks that a slug contains only safe characters.
 func ValidateSlug(slug string) error {
@@ -18,7 +18,7 @@ func ValidateSlug(slug string) error {
 		return errors.New("slug is required")
 	}
 	if !validSlugPattern.MatchString(slug) {
-		return errors.New("invalid slug: must start with alphanumeric and contain only alphanumeric, hyphens, or underscores")
+		return errors.New("invalid slug: must start with alphanumeric and contain only alphanumeric, hyphens, underscores, or slashes")
 	}
 	return nil
 }

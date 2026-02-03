@@ -41,8 +41,9 @@ func newWorktreeCmd(opts *Options) *cobra.Command {
 
 func newWorktreeAddCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "add project/slug [branch]",
+		Use:   "add <slug> [branch]",
 		Short: "create a managed worktree",
+		Long:  "Create a managed worktree. Accepts slug or project:slug format.",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			branch := ""
@@ -58,8 +59,9 @@ func newWorktreeAddCmd(opts *Options) *cobra.Command {
 func newWorktreeCleanupCmd(opts *Options) *cobra.Command {
 	cleanup := &worktreeCleanupOptions{}
 	cmd := &cobra.Command{
-		Use:   "cleanup [project/slug]",
+		Use:   "cleanup [slug]",
 		Short: "cleanup a managed worktree",
+		Long:  "Cleanup a managed worktree. Accepts slug or project:slug format.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := ""
@@ -126,6 +128,19 @@ func runWorktreeAdd(opts *Options, targetArg, branchArg string, out, errOut io.W
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("check worktree path: %w", err)
 	}
+
+	// Check for DNS label conflicts (last path segment must be unique)
+	newLabel := worktree.SlugDNSLabel(target.Slug)
+	projectWorktreeDir := filepath.Join(worktreeDir, target.Project)
+	if dirEntries, err := os.ReadDir(projectWorktreeDir); err == nil {
+		for _, entry := range dirEntries {
+			if entry.IsDir() && entry.Name() == newLabel && entry.Name() != target.Slug {
+				return fmt.Errorf("slug %q conflicts with existing worktree (both use DNS label %q)",
+					target.Slug, newLabel)
+			}
+		}
+	}
+
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		return fmt.Errorf("create worktree parent directory: %w", err)
 	}
@@ -319,7 +334,7 @@ func runWorktreeList(opts *Options, out io.Writer) error {
 			branch = "HEAD"
 		}
 		rows = append(rows, row{
-			id:     project + "/" + slug,
+			id:     project + ":" + slug,
 			path:   entry.Path,
 			branch: branch,
 			flags:  flags,

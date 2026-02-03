@@ -4,9 +4,9 @@ import "testing"
 
 func TestResolveProcessTargetsExplicit(t *testing.T) {
 	targets, err := resolveProcessTargets([]string{
-		"proj/feature:rails",
-		"proj/feature:webpack",
-		"proj/other:*",
+		"proj:feature:rails",
+		"proj:feature:webpack",
+		"proj:other:*",
 	})
 	if err != nil {
 		t.Fatalf("resolveProcessTargets: %v", err)

@@ -397,7 +397,7 @@ func proxyApexZone(daemonCfg *config.DaemonConfig) string {
 }
 
 func effectiveDisplaySlug(slug string, cfg *config.ProjectConfig) string {
-	displaySlug := slug
+	displaySlug := worktree.SlugDNSLabel(slug)
 	if cfg == nil || cfg.Project.MainSlug == "" {
 		return displaySlug
 	}
@@ -652,10 +652,11 @@ func resolveProcessTargets(args []string) (map[string]*processTarget, error) {
 		return targets, nil
 	}
 	for _, arg := range args {
-		slug, process, _, err := parseAttachTarget(arg)
+		id, err := worktree.ParseProcessIdentifier(arg)
 		if err != nil {
 			return nil, err
 		}
+		slug := id.Slug
 		if slug == "" {
 			resolved, err := resolveSlug("")
 			if err != nil {
@@ -668,12 +669,12 @@ func resolveProcessTargets(args []string) (map[string]*processTarget, error) {
 			target = &processTarget{processes: map[string]bool{}}
 			targets[slug] = target
 		}
-		if process == "*" {
+		if id.Process == "*" {
 			target.all = true
 			target.processes = nil
 			continue
 		}
-		target.addProcess(process)
+		target.addProcess(id.Process)
 	}
 	return targets, nil
 }
