@@ -322,9 +322,9 @@ func parseProxyMatchersFromMap(process string, raw map[string]any, singleton boo
 		match = strings.ToLower(strings.TrimSpace(rawMatch))
 	}
 	mode := parseProxyMode(raw["mode"])
-	priority := parsePriority(raw["priority"])
+	priority, _ := config.ParseInt(raw["priority"])
 	tcpListen := 0
-	if val, ok := asInt(raw["tcp_listen"]); ok && val > 0 {
+	if val, ok := config.ParseInt(raw["tcp_listen"]); ok && val > 0 {
 		tcpListen = val
 	}
 	out := make([]proxyMatcher, 0, len(subdomains))
@@ -413,25 +413,6 @@ func dedupeSubdomains(values []parsedSubdomain) []parsedSubdomain {
 		out = append(out, v)
 	}
 	return out
-}
-
-func parsePriority(raw any) int {
-	switch value := raw.(type) {
-	case int:
-		return value
-	case int64:
-		return int(value)
-	case uint:
-		return int(value)
-	case uint64:
-		return int(value)
-	case float64:
-		return int(value)
-	case float32:
-		return int(value)
-	default:
-		return 0
-	}
 }
 
 func selectProxyMatcher(matchers []proxyMatcher, subdomain, path string) (*proxyMatcher, bool) {

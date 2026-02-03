@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"dev-mode/internal/config"
+	"dev-mode/internal/procenv"
 	"dev-mode/internal/worktree"
 )
 
@@ -549,7 +550,7 @@ func runLifecycleHook(command, wrapper, phase, dir string, env map[string]string
 		return nil
 	}
 	if strings.TrimSpace(wrapper) != "" {
-		args, err = applyHookWrapper(wrapper, args)
+		args, err = procenv.ApplyWrapper(wrapper, args)
 		if err != nil {
 			return fmt.Errorf("%s hook wrapper parse failed: %w", phase, err)
 		}
@@ -557,77 +558,15 @@ func runLifecycleHook(command, wrapper, phase, dir string, env map[string]string
 
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Dir = dir
-	hookEnv := cloneEnv(env)
+	hookEnv := procenv.CloneEnv(env)
 	hookEnv["DEV_MODE_HOOK_NAME"] = phase
-	cmd.Env = append(os.Environ(), formatEnv(hookEnv)...)
+	cmd.Env = append(os.Environ(), procenv.FormatEnv(hookEnv)...)
 	cmd.Stdout = &prefixedLineWriter{prefix: "[hook " + phase + "] ", writer: out}
 	cmd.Stderr = &prefixedLineWriter{prefix: "[hook " + phase + "] ", writer: errOut}
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s hook failed: %w", phase, err)
 	}
 	return nil
-}
-
-func applyHookWrapper(wrapper string, command []string) ([]string, error) {
-	wrapperArgs, err := shellwords.Parse(wrapper)
-	if err != nil {
-		return nil, err
-	}
-	if len(wrapperArgs) == 0 {
-		return command, nil
-	}
-	out := make([]string, 0, len(wrapperArgs)+len(command))
-	replaced := false
-	for _, arg := range wrapperArgs {
-		if strings.Contains(arg, "$COMMAND") {
-			replaced = true
-			parts := strings.Split(arg, "$COMMAND")
-			if len(parts) == 2 {
-				if parts[0] != "" {
-					out = append(out, parts[0])
-				}
-				out = append(out, command...)
-				if parts[1] != "" {
-					out = append(out, parts[1])
-				}
-			} else {
-				out = append(out, command...)
-			}
-			continue
-		}
-		out = append(out, arg)
-	}
-	if !replaced {
-		out = append(out, command...)
-	}
-	return out, nil
-}
-
-func formatEnv(values map[string]string) []string {
-	if len(values) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	out := make([]string, 0, len(keys))
-	for _, key := range keys {
-		out = append(out, fmt.Sprintf("%s=%s", key, values[key]))
-	}
-	return out
-}
-
-func cloneEnv(values map[string]string) map[string]string {
-	if len(values) == 0 {
-		return map[string]string{}
-	}
-	out := make(map[string]string, len(values))
-	for k, v := range values {
-		out[k] = v
-	}
-	return out
 }
 
 type prefixedLineWriter struct {

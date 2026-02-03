@@ -331,7 +331,7 @@ func processProxyURLsByProcess(slug, projectPath string, cfg *config.ProjectConf
 			continue
 		}
 		for _, matcher := range flattenProxyMatchers(rawProxy) {
-			if tcpListen, ok := parseInt(rawProxyValue(matcher, "tcp_listen")); ok && tcpListen > 0 {
+			if tcpListen, ok := config.ParseInt(rawProxyValue(matcher, "tcp_listen")); ok && tcpListen > 0 {
 				result[process] = append(result[process], fmt.Sprintf("tcp://127.0.0.1:%d", tcpListen))
 				continue
 			}
@@ -433,25 +433,6 @@ func rawProxyValue(entry map[string]any, key string) any {
 		return nil
 	}
 	return entry[key]
-}
-
-func parseInt(raw any) (int, bool) {
-	switch value := raw.(type) {
-	case int:
-		return value, true
-	case int64:
-		return int(value), true
-	case uint:
-		return int(value), true
-	case uint64:
-		return int(value), true
-	case float64:
-		return int(value), true
-	case float32:
-		return int(value), true
-	default:
-		return 0, false
-	}
 }
 
 func samePath(a, b string) bool {

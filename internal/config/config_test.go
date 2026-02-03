@@ -167,3 +167,31 @@ func TestResolveWorktreeDir_RequiresAbsolutePath(t *testing.T) {
 		t.Fatalf("expected error for relative path")
 	}
 }
+
+func TestParseInt(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  any
+		want   int
+		wantOK bool
+	}{
+		{name: "int", input: 42, want: 42, wantOK: true},
+		{name: "int64", input: int64(100), want: 100, wantOK: true},
+		{name: "uint", input: uint(50), want: 50, wantOK: true},
+		{name: "uint64", input: uint64(200), want: 200, wantOK: true},
+		{name: "float64", input: float64(3.7), want: 3, wantOK: true},
+		{name: "float32", input: float32(2.5), want: 2, wantOK: true},
+		{name: "string", input: "123", want: 0, wantOK: false},
+		{name: "nil", input: nil, want: 0, wantOK: false},
+		{name: "bool", input: true, want: 0, wantOK: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := ParseInt(tt.input)
+			if got != tt.want || ok != tt.wantOK {
+				t.Errorf("ParseInt(%v) = (%d, %v), want (%d, %v)", tt.input, got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}

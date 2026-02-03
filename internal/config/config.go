@@ -254,3 +254,25 @@ func mergeMaps(dst, src map[string]any) {
 		dst[key] = srcVal
 	}
 }
+
+// ParseInt extracts an integer from various numeric types commonly encountered
+// when parsing configuration values (int, int64, uint, uint64, float32, float64).
+// Returns the integer value and true if successful, or 0 and false otherwise.
+func ParseInt(raw any) (int, bool) {
+	switch v := raw.(type) {
+	case int:
+		return v, true
+	case int64:
+		return int(v), true
+	case uint:
+		return int(v), true
+	case uint64:
+		return int(v), true
+	case float64:
+		return int(v), true
+	case float32:
+		return int(v), true
+	default:
+		return 0, false
+	}
+}

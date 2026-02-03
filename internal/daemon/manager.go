@@ -18,6 +18,7 @@ import (
 	"github.com/mattn/go-shellwords"
 
 	"dev-mode/internal/config"
+	"dev-mode/internal/procenv"
 	"dev-mode/internal/worktree"
 )
 
@@ -151,7 +152,7 @@ func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string,
 		if err != nil {
 			return nil, fmt.Errorf("resolve port for %s: %w", name, err)
 		}
-		procVars := cloneVars(templateVars)
+		procVars := procenv.CloneEnv(templateVars)
 		if port != "" {
 			procVars["PORT"] = port
 		}
@@ -177,7 +178,7 @@ func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string,
 			wrapper = cfg.Commands.Wrapper
 		}
 		if wrapper != "" {
-			args, err = applyWrapper(wrapper, args)
+			args, err = procenv.ApplyWrapper(wrapper, args)
 			if err != nil {
 				return nil, fmt.Errorf("apply wrapper for %s: %w", name, err)
 			}
@@ -193,7 +194,7 @@ func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string,
 
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Dir = path
-		cmd.Env = append(os.Environ(), mapEnv(runtimeVars)...)
+		cmd.Env = append(os.Environ(), procenv.FormatEnv(runtimeVars)...)
 
 		if envVars, ok := proc["env"].(map[string]any); ok {
 			for key, raw := range envVars {
@@ -587,21 +588,13 @@ func effectiveWorktreeEnvSlug(cfg *config.ProjectConfig, slug, path, mainPath st
 }
 
 func buildTemplateVars(runtimeVars map[string]string, mainPath, worktreeState string) map[string]string {
-	vars := cloneVars(runtimeVars)
+	vars := procenv.CloneEnv(runtimeVars)
 	vars["MAIN_WORKTREE"] = mainPath
 	vars["WORKTREE_STATE"] = worktreeState
 	vars["WORKTREE_PATH"] = runtimeVars["DEV_MODE_WORKTREE_PATH"]
 	vars["WORKTREE_SLUG"] = runtimeVars["DEV_MODE_WORKTREE_SLUG"]
 	vars["PROJECT_NAME"] = runtimeVars["DEV_MODE_PROJECT"]
 	return vars
-}
-
-func cloneVars(vars map[string]string) map[string]string {
-	out := make(map[string]string, len(vars))
-	for k, v := range vars {
-		out[k] = v
-	}
-	return out
 }
 
 func resolveProcessTarget(proc map[string]any, name, worktreeState string) (network, address, port string, err error) {
@@ -692,42 +685,6 @@ func allocateRandomPort() (string, error) {
 	return fmt.Sprintf("%d", addr.Port), nil
 }
 
-func applyWrapper(wrapper string, command []string) ([]string, error) {
-	wrapperArgs, err := shellwords.Parse(wrapper)
-	if err != nil {
-		return nil, err
-	}
-	if len(wrapperArgs) == 0 {
-		return command, nil
-	}
-
-	out := make([]string, 0, len(wrapperArgs)+len(command))
-	replaced := false
-	for _, arg := range wrapperArgs {
-		if strings.Contains(arg, "$COMMAND") {
-			replaced = true
-			prefix := strings.Split(arg, "$COMMAND")
-			if len(prefix) == 2 {
-				if prefix[0] != "" {
-					out = append(out, prefix[0])
-				}
-				out = append(out, command...)
-				if prefix[1] != "" {
-					out = append(out, prefix[1])
-				}
-			} else {
-				out = append(out, command...)
-			}
-			continue
-		}
-		out = append(out, arg)
-	}
-	if !replaced {
-		out = append(out, command...)
-	}
-	return out, nil
-}
-
 func (p *processInfo) hasExited() bool {
 	select {
 	case <-p.exited:
@@ -799,7 +756,7 @@ func runHook(command, wrapper, hookName, dir string, vars map[string]string) err
 		return nil
 	}
 	if strings.TrimSpace(wrapper) != "" {
-		args, err = applyWrapper(wrapper, args)
+		args, err = procenv.ApplyWrapper(wrapper, args)
 		if err != nil {
 			return fmt.Errorf("apply hook wrapper: %w", err)
 		}
@@ -807,9 +764,9 @@ func runHook(command, wrapper, hookName, dir string, vars map[string]string) err
 
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Dir = dir
-	hookVars := cloneVars(vars)
+	hookVars := procenv.CloneEnv(vars)
 	hookVars["DEV_MODE_HOOK_NAME"] = hookName
-	cmd.Env = append(os.Environ(), mapEnv(hookVars)...)
+	cmd.Env = append(os.Environ(), procenv.FormatEnv(hookVars)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -829,15 +786,4 @@ func resolveWorktreeBranch(path string) (string, error) {
 		return "", fmt.Errorf("resolve worktree branch: %s", strings.TrimSpace(string(output)))
 	}
 	return strings.TrimSpace(string(output)), nil
-}
-
-func mapEnv(vars map[string]string) []string {
-	if len(vars) == 0 {
-		return nil
-	}
-	env := make([]string, 0, len(vars))
-	for key, value := range vars {
-		env = append(env, fmt.Sprintf("%s=%s", key, value))
-	}
-	return env
 }

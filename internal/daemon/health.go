@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"dev-mode/internal/config"
 )
 
 const (
@@ -43,29 +45,16 @@ func parseProcessHealth(raw any) *processHealthCheck {
 	if v, ok := m["path"].(string); ok && strings.TrimSpace(v) != "" {
 		check.Path = strings.TrimSpace(v)
 	}
-	if v, ok := asInt(m["port"]); ok {
+	if v, ok := config.ParseInt(m["port"]); ok {
 		check.Port = v
 	}
-	if v, ok := asInt(m["interval_ms"]); ok && v > 0 {
+	if v, ok := config.ParseInt(m["interval_ms"]); ok && v > 0 {
 		check.Interval = time.Duration(v) * time.Millisecond
 	}
-	if v, ok := asInt(m["timeout_ms"]); ok && v > 0 {
+	if v, ok := config.ParseInt(m["timeout_ms"]); ok && v > 0 {
 		check.Timeout = time.Duration(v) * time.Millisecond
 	}
 	return check
-}
-
-func asInt(raw any) (int, bool) {
-	switch v := raw.(type) {
-	case int:
-		return v, true
-	case int64:
-		return int(v), true
-	case float64:
-		return int(v), true
-	default:
-		return 0, false
-	}
 }
 
 func waitForProcessReady(info *processInfo) error {
