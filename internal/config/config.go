@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -30,8 +31,9 @@ type ProjectBlock struct {
 }
 
 type DaemonConfig struct {
-	Gateway    DaemonGatewayBlock    `toml:"gateway" json:"gateway,omitempty"`
-	LocalProxy DaemonLocalProxyBlock `toml:"local-proxy" json:"local_proxy,omitempty"`
+	Gateway     DaemonGatewayBlock    `toml:"gateway" json:"gateway,omitempty"`
+	LocalProxy  DaemonLocalProxyBlock `toml:"local-proxy" json:"local_proxy,omitempty"`
+	WorktreeDir string                `toml:"worktree_dir" json:"worktree_dir,omitempty"`
 }
 
 type DaemonGatewayBlock struct {
@@ -61,12 +63,14 @@ type DaemonGatewayRoute53 struct {
 }
 
 type HooksBlock struct {
-	PostCreate string `toml:"post_create" json:"post_create,omitempty"`
-	PreCleanup string `toml:"pre_cleanup" json:"pre_cleanup,omitempty"`
-	PreStart   string `toml:"pre_start" json:"pre_start,omitempty"`
-	PostStart  string `toml:"post_start" json:"post_start,omitempty"`
-	PreStop    string `toml:"pre_stop" json:"pre_stop,omitempty"`
-	PostStop   string `toml:"post_stop" json:"post_stop,omitempty"`
+	PreWorktreeAdd      string `toml:"pre_worktree_add" json:"pre_worktree_add,omitempty"`
+	PostWorktreeAdd     string `toml:"post_worktree_add" json:"post_worktree_add,omitempty"`
+	PreWorktreeCleanup  string `toml:"pre_worktree_cleanup" json:"pre_worktree_cleanup,omitempty"`
+	PostWorktreeCleanup string `toml:"post_worktree_cleanup" json:"post_worktree_cleanup,omitempty"`
+	PreStart            string `toml:"pre_start" json:"pre_start,omitempty"`
+	PostStart           string `toml:"post_start" json:"post_start,omitempty"`
+	PreStop             string `toml:"pre_stop" json:"pre_stop,omitempty"`
+	PostStop            string `toml:"post_stop" json:"post_stop,omitempty"`
 }
 
 type CommandsBlock struct {
@@ -183,6 +187,28 @@ func ResolveGatewayDataDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(stateDir, "gateway"), nil
+}
+
+func ResolveWorktreeDir(cfg *DaemonConfig) (string, error) {
+	raw := ""
+	if cfg != nil {
+		raw = filepath.Clean(strings.TrimSpace(cfg.WorktreeDir))
+	}
+	if raw == "" || raw == "." {
+		stateDir, err := ResolveStateDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(stateDir, "worktrees"), nil
+	}
+	expanded, err := ExpandUserPath(raw)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(expanded) {
+		return "", errors.New("daemon.worktree_dir must be an absolute path")
+	}
+	return filepath.Clean(expanded), nil
 }
 
 func ResolveDaemonConfigPath() string {

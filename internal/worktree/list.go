@@ -41,6 +41,10 @@ func parseWorktreeList(output string) ([]Entry, error) {
 				entries = append(entries, current)
 			}
 			current = Entry{Path: strings.TrimSpace(strings.TrimPrefix(line, "worktree "))}
+			continue
+		}
+		if strings.HasPrefix(line, "branch ") {
+			current.Branch = strings.TrimSpace(strings.TrimPrefix(line, "branch "))
 		}
 	}
 	if current.Path != "" {
@@ -50,6 +54,11 @@ func parseWorktreeList(output string) ([]Entry, error) {
 		return nil, errors.New("no worktrees found")
 	}
 	return entries, nil
+}
+
+func BranchName(ref string) string {
+	value := strings.TrimSpace(ref)
+	return strings.TrimPrefix(value, "refs/heads/")
 }
 
 func ResolveMainPathInDir(dir string) (string, error) {

@@ -64,6 +64,9 @@ branch refs/heads/feature-x
 	if entries[1].Path != featurePath {
 		t.Fatalf("unexpected path: %s", entries[1].Path)
 	}
+	if BranchName(entries[1].Branch) != "feature-x" {
+		t.Fatalf("unexpected branch: %q", entries[1].Branch)
+	}
 
 	slug, err := mainSlugFromEntries(entries)
 	if err != nil {
@@ -71,5 +74,19 @@ branch refs/heads/feature-x
 	}
 	if slug != filepath.Base(mainPath) {
 		t.Fatalf("expected main slug %q, got %q", filepath.Base(mainPath), slug)
+	}
+}
+
+func TestMatchWorktree_PathBoundary(t *testing.T) {
+	entries := []Entry{
+		{Path: "/tmp/repo"},
+		{Path: "/tmp/repo-feature"},
+	}
+	entry, err := matchWorktree(entries, "/tmp/repo-feature/subdir")
+	if err != nil {
+		t.Fatalf("matchWorktree: %v", err)
+	}
+	if entry.Path != "/tmp/repo-feature" {
+		t.Fatalf("expected /tmp/repo-feature, got %s", entry.Path)
 	}
 }

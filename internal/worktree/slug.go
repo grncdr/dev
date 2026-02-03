@@ -8,7 +8,8 @@ import (
 )
 
 type Entry struct {
-	Path string
+	Path   string
+	Branch string
 }
 
 func ResolveSlug(cwd string) (string, error) {
@@ -55,7 +56,7 @@ func matchWorktree(entries []Entry, cwd string) (Entry, error) {
 		if err != nil {
 			continue
 		}
-		if strings.HasPrefix(cwd, path) {
+		if pathContains(cwd, path) {
 			if len(path) > bestLen {
 				best = entry
 				bestLen = len(path)
@@ -68,4 +69,11 @@ func matchWorktree(entries []Entry, cwd string) (Entry, error) {
 	}
 
 	return best, nil
+}
+
+func pathContains(path, prefix string) bool {
+	if path == prefix {
+		return true
+	}
+	return strings.HasPrefix(path, prefix+string(filepath.Separator))
 }

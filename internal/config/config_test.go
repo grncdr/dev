@@ -79,7 +79,10 @@ func TestLoadDaemonConfig_MissingFile(t *testing.T) {
 func TestLoadDaemonConfig_GatewayFields(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "daemon.toml")
+	worktreeDir := filepath.Join(dir, "worktrees")
 	data := `
+worktree_dir = "` + worktreeDir + `"
+
 [gateway]
 enabled = true
 listen = ":443"
@@ -124,6 +127,9 @@ ttl = 60
 	if len(cfg.Gateway.ACMEResolvers) != 2 || cfg.Gateway.ACMEResolvers[0] != "1.1.1.1" {
 		t.Fatalf("expected acme resolvers to decode: %#v", cfg.Gateway.ACMEResolvers)
 	}
+	if cfg.WorktreeDir != worktreeDir {
+		t.Fatalf("expected worktree_dir %q, got %q", worktreeDir, cfg.WorktreeDir)
+	}
 }
 
 func TestResolveGatewayDataDir(t *testing.T) {
@@ -133,5 +139,31 @@ func TestResolveGatewayDataDir(t *testing.T) {
 	}
 	if got == "" {
 		t.Fatalf("expected non-empty default data dir")
+	}
+}
+
+func TestResolveWorktreeDir_Default(t *testing.T) {
+	base := t.TempDir()
+	old := os.Getenv("DEV_MODE_STATE_DIR")
+	t.Cleanup(func() {
+		_ = os.Setenv("DEV_MODE_STATE_DIR", old)
+	})
+	if err := os.Setenv("DEV_MODE_STATE_DIR", base); err != nil {
+		t.Fatalf("setenv: %v", err)
+	}
+	got, err := ResolveWorktreeDir(nil)
+	if err != nil {
+		t.Fatalf("ResolveWorktreeDir: %v", err)
+	}
+	want := filepath.Join(base, "worktrees")
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestResolveWorktreeDir_RequiresAbsolutePath(t *testing.T) {
+	_, err := ResolveWorktreeDir(&DaemonConfig{WorktreeDir: "relative/path"})
+	if err == nil {
+		t.Fatalf("expected error for relative path")
 	}
 }
