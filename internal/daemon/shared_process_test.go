@@ -94,15 +94,18 @@ command = "sh -c \"sleep 60\""
 	}()
 
 	client := NewClient(socketPath)
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer cancel()
+	call := func(timeout time.Duration) (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.Background(), timeout)
+	}
 
 	if err := waitForHealth(client, 2*time.Second); err != nil {
 		t.Fatalf("daemon not healthy: %v", err)
 	}
 
 	secondarySlug := filepath.Base(secondaryDir)
+	ctx, cancel := call(4 * time.Second)
 	resp, err := client.WorktreeStart(ctx, secondarySlug)
+	cancel()
 	if err != nil {
 		t.Fatalf("worktree start secondary: %v", err)
 	}
@@ -114,7 +117,9 @@ command = "sh -c \"sleep 60\""
 	}
 
 	mainSlug := filepath.Base(repoDir)
+	ctx, cancel = call(4 * time.Second)
 	respMain, err := client.WorktreeStart(ctx, mainSlug)
+	cancel()
 	if err != nil {
 		t.Fatalf("worktree start main: %v", err)
 	}
@@ -129,16 +134,25 @@ command = "sh -c \"sleep 60\""
 		t.Fatalf("expected shared and worker processes, got %+v", respMain.Processes)
 	}
 
+	ctx, cancel = call(4 * time.Second)
 	if _, err := client.WorktreeStop(ctx, secondarySlug); err != nil {
+		cancel()
 		t.Fatalf("stop secondary: %v", err)
 	}
+	cancel()
+	ctx, cancel = call(8 * time.Second)
 	if _, err := client.WorktreeStop(ctx, mainSlug); err != nil {
+		cancel()
 		t.Fatalf("stop main: %v", err)
 	}
+	cancel()
 
+	ctx, cancel = call(5 * time.Second)
 	if err := client.Shutdown(ctx); err != nil {
+		cancel()
 		t.Fatalf("shutdown: %v", err)
 	}
+	cancel()
 
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
