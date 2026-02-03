@@ -49,6 +49,7 @@ func Execute() error {
 	root.AddCommand(newGatewayCmd(opts))
 	root.AddCommand(newShareCmd(opts))
 	root.AddCommand(newUnshareCmd(opts))
+	root.AddCommand(newWorktreeCmd(opts))
 	root.AddCommand(newWorktreeStartCmd(opts))
 	root.AddCommand(newWorktreeStopCmd(opts))
 	root.AddCommand(newWorktreeRestartCmd(opts))

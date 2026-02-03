@@ -457,15 +457,27 @@ func parseInt(raw any) (int, bool) {
 }
 
 func samePath(a, b string) bool {
-	aa, err := filepath.Abs(a)
+	aa, err := canonicalPath(a)
 	if err != nil {
 		return a == b
 	}
-	bb, err := filepath.Abs(b)
+	bb, err := canonicalPath(b)
 	if err != nil {
 		return a == b
 	}
 	return aa == bb
+}
+
+func canonicalPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return abs, nil
+	}
+	return resolved, nil
 }
 
 func printGatewaySection(cfg *config.ProjectConfig, tunnel *daemon.TunnelStatus, daemonUp bool) {
