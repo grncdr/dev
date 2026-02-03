@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -24,6 +25,7 @@ func TestRandomPortCommandInterpolation(t *testing.T) {
 	}
 
 	configPath := filepath.Join(repoDir, ".dev-mode.toml")
+	portFile := filepath.Join(repoDir, "port.txt")
 	configBody := `
 [project]
 name = "demo"
@@ -31,7 +33,7 @@ name = "demo"
 [process.http]
 singleton = false
 port = "random"
-command = "sh -c \"python3 -m http.server ${PORT}\""
+command = "sh -c \"echo ${PORT} > port.txt; sleep 30\""
 `
 	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {
 		t.Fatal(err)
@@ -111,20 +113,25 @@ command = "sh -c \"python3 -m http.server ${PORT}\""
 	if network != "tcp" {
 		t.Fatalf("expected tcp network, got %s", network)
 	}
-
+	_, targetPort, err := net.SplitHostPort(address)
+	if err != nil {
+		t.Fatalf("split target host port: %v", err)
+	}
 	timeout := time.After(4 * time.Second)
 	for {
-		conn, err := net.DialTimeout(network, address, 200*time.Millisecond)
+		data, err := os.ReadFile(portFile)
 		if err == nil {
-			_ = conn.Close()
+			got := strings.TrimSpace(string(data))
+			if got != targetPort {
+				t.Fatalf("expected interpolated PORT %q, got %q", targetPort, got)
+			}
 			break
 		}
 		select {
 		case <-timeout:
-			t.Fatalf("expected port to accept connections: %v", err)
+			t.Fatalf("timed out waiting for interpolated PORT file: %v", err)
 		default:
 			time.Sleep(100 * time.Millisecond)
-			continue
 		}
 	}
 
