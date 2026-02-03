@@ -26,7 +26,7 @@ type Server struct {
 	once       sync.Once
 	config     *config.ProjectConfig
 	mainPath   string
-	userConfig *config.UserConfig
+	daemonConfig *config.DaemonConfig
 	tunnelMu   sync.Mutex
 	tunnels    map[string]*managedTunnel
 }
@@ -358,19 +358,19 @@ func (s *Server) loadConfig() error {
 	}
 	s.config = cfg
 	s.mainPath = mainPath
-	userPath, err := config.ExpandUserPath(config.DefaultUserConfig)
+	daemonPath, err := config.ExpandUserPath(config.ResolveDaemonConfigPath())
 	if err == nil {
-		userCfg, _, err := config.LoadUserConfig(userPath)
+		daemonCfg, _, err := config.LoadDaemonConfig(daemonPath)
 		if err == nil {
-			s.userConfig = userCfg
+			s.daemonConfig = daemonCfg
 		}
 	}
 	return nil
 }
 
 func (s *Server) projectApexZone() string {
-	if s.userConfig != nil {
-		if apex := s.userConfig.Proxy.ApexZone; apex != "" {
+	if s.daemonConfig != nil {
+		if apex := s.daemonConfig.Proxy.ApexZone; apex != "" {
 			return apex
 		}
 	}

@@ -74,7 +74,7 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 	}
 	s.tunnels[req.Label] = mt
 
-	gatewayClient, gatewayTLS, err := gatewayMTLSClient(req.GatewayURL, s.userConfig)
+	gatewayClient, gatewayTLS, err := gatewayMTLSClient(req.GatewayURL, s.daemonConfig)
 	if err != nil {
 		delete(s.tunnels, req.Label)
 		return nil, err
@@ -144,7 +144,7 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 	}, nil
 }
 
-func gatewayMTLSClient(gatewayURL string, userCfg *config.UserConfig) (*http.Client, *tls.Config, error) {
+func gatewayMTLSClient(gatewayURL string, daemonCfg *config.DaemonConfig) (*http.Client, *tls.Config, error) {
 	parsed, err := url.Parse(strings.TrimSpace(gatewayURL))
 	if err != nil {
 		return nil, nil, err
@@ -156,7 +156,7 @@ func gatewayMTLSClient(gatewayURL string, userCfg *config.UserConfig) (*http.Cli
 	if host == "" {
 		return nil, nil, errors.New("gateway URL host is required")
 	}
-	credDir, err := gatewayCredentialDir(host, userCfg)
+	credDir, err := gatewayCredentialDir(host, daemonCfg)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -197,10 +197,10 @@ func gatewayMTLSClient(gatewayURL string, userCfg *config.UserConfig) (*http.Cli
 	return client, tlsCfg, nil
 }
 
-func gatewayCredentialDir(host string, userCfg *config.UserConfig) (string, error) {
+func gatewayCredentialDir(host string, daemonCfg *config.DaemonConfig) (string, error) {
 	base := "~/.config/dev-mode/gateway/credentials"
-	if userCfg != nil && strings.TrimSpace(userCfg.Gateway.DataDir) != "" {
-		base = filepath.Join(userCfg.Gateway.DataDir, "agent-credentials")
+	if daemonCfg != nil && strings.TrimSpace(daemonCfg.Gateway.DataDir) != "" {
+		base = filepath.Join(daemonCfg.Gateway.DataDir, "agent-credentials")
 	}
 	expanded, err := config.ExpandUserPath(base)
 	if err != nil {
@@ -308,7 +308,7 @@ func (s *Server) runningTunnelsForResume() []TunnelRequest {
 }
 
 func (s *Server) localProxyUpstreamURL() string {
-	httpAddr, httpsAddr := proxyListenAddrs(s.userConfig)
+	httpAddr, httpsAddr := proxyListenAddrs(s.daemonConfig)
 	if httpsAddr != "" {
 		if addr, ok := loopbackAddr(httpsAddr); ok {
 			return "https://" + addr

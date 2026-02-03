@@ -219,7 +219,7 @@ Project config:
 url = "https://tunnels.foocorp.dev"
 ```
 
-User config (future expansion):
+Daemon config (future expansion):
 
 ```toml
 [gateway]
@@ -243,7 +243,7 @@ ttl = 60
 Notes:
 - `gateway.auth` is global for this gateway instance.
 - When enabled, every public request must pass Basic Auth before forwarding.
-- Credentials live in user/global config so they are not committed to project config.
+- Credentials live in daemon config so they are not committed to project config.
 - `gateway.data_dir` should be mounted as persistent storage in deployed gateway environments.
 - `gateway.dns_zone` is required; the gateway refuses to start without it.
 - `gateway.hostname` is the DNS CNAME target used for Route53 label records.

@@ -108,9 +108,11 @@ Path: `.dev-mode.local.toml` in the repo root.
 
 This file overrides `.dev-mode.toml` for your local machine.
 
-## User config
+## Daemon config
 
-Path: `~/.config/dev-mode/config.toml`
+Path: `~/.config/dev-mode/daemon.toml`
+
+Override via `DEV_MODE_DAEMON_CONFIG` environment variable or `--daemon-config` flag.
 
 ```toml
 [gateway]
@@ -144,11 +146,11 @@ allow = "loopback"
 ```
 
 Notes:
-- `proxy.apex_zone` is user-level and defaults to `.localhost`.
+- `proxy.apex_zone` is daemon-level and defaults to `.localhost`.
 - `gateway.data_dir` is the gateway persistence root; set it in deployed gateway environments and mount it as durable storage.
 - `gateway.auth` configures optional HTTP Basic Auth for public gateway requests.
 - `gateway.auth` is global (not per project/label).
-- Keep `gateway.auth.password` in user/global config only.
+- Keep `gateway.auth.password` in daemon config only.
 - `gateway.dns_zone` is the public DNS suffix served by the gateway (for example `tunnels.foocorp.dev`).
 - `gateway.hostname` is the gateway hostname used as the Route53 CNAME target (for example `gw.foocorp.dev`).
 - When `gateway.route53.enabled = true`, the gateway upserts Route53 CNAME records for each label:
@@ -165,6 +167,6 @@ Notes:
 ## CLI overrides
 
 - `--config <path>`: override project config path (default: `.dev-mode.toml`).
-- `--user-config <path>`: override user config path (default: `~/.config/dev-mode/config.toml`).
-- `dev-mode config show`: shows the effective project config (with local override applied) and user config.
+- `--daemon-config <path>`: override daemon config path (default: `~/.config/dev-mode/daemon.toml`).
+- `dev-mode config show`: shows the effective project config (with local override applied) and daemon config.
 - `dev-mode config show --output json`: machine-readable output.

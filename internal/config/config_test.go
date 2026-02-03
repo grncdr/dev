@@ -60,25 +60,25 @@ name = ""
 	}
 }
 
-func TestLoadUserConfig_MissingFile(t *testing.T) {
+func TestLoadDaemonConfig_MissingFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "missing.toml")
 
-	cfg, info, err := LoadUserConfig(path)
+	cfg, info, err := LoadDaemonConfig(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if info.UserConfigFound {
-		t.Fatalf("expected UserConfigFound=false")
+	if info.DaemonConfigFound {
+		t.Fatalf("expected DaemonConfigFound=false")
 	}
 	if cfg == nil {
 		t.Fatalf("expected non-nil config")
 	}
 }
 
-func TestLoadUserConfig_GatewayFields(t *testing.T) {
+func TestLoadDaemonConfig_GatewayFields(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "user.toml")
+	path := filepath.Join(dir, "daemon.toml")
 	data := `
 [gateway]
 enabled = true
@@ -106,12 +106,12 @@ ttl = 60
 		t.Fatal(err)
 	}
 
-	cfg, info, err := LoadUserConfig(path)
+	cfg, info, err := LoadDaemonConfig(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !info.UserConfigFound {
-		t.Fatalf("expected UserConfigFound=true")
+	if !info.DaemonConfigFound {
+		t.Fatalf("expected DaemonConfigFound=true")
 	}
 	if !cfg.Gateway.Enabled || cfg.Gateway.DataDir != "~/gw" || !cfg.Gateway.Auth.Enabled {
 		t.Fatalf("unexpected gateway decode: %#v", cfg.Gateway)
@@ -136,7 +136,7 @@ func TestResolveGatewayDataDir(t *testing.T) {
 		t.Fatalf("expected non-empty default data dir")
 	}
 
-	cfg := &UserConfig{}
+	cfg := &DaemonConfig{}
 	cfg.Gateway.DataDir = "~/my-gateway"
 	got, err = ResolveGatewayDataDir(cfg)
 	if err != nil {

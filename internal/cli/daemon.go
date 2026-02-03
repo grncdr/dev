@@ -108,7 +108,7 @@ func runDaemonStart(opts *Options) error {
 		return err
 	}
 
-	args := []string{"daemon", "run", "--config", opts.ConfigPath, "--user-config", opts.UserConfig}
+	args := []string{"daemon", "run", "--config", opts.ConfigPath, "--daemon-config", opts.DaemonConfig}
 	if opts.Debug {
 		args = append(args, "--debug")
 	}
@@ -297,7 +297,7 @@ func ensureDaemonRunning(opts *Options, socketPath string) error {
 	if err := removeStaleSocket(socketPath); err != nil {
 		return err
 	}
-	args := []string{"daemon", "run", "--config", opts.ConfigPath, "--user-config", opts.UserConfig}
+	args := []string{"daemon", "run", "--config", opts.ConfigPath, "--daemon-config", opts.DaemonConfig}
 	if opts.Debug {
 		args = append(args, "--debug")
 	}

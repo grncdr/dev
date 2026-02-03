@@ -43,7 +43,7 @@ func (f *fakeDNSProvider) RemoveLabel(_ context.Context, label string) error {
 
 func TestServer_RegisterPersistsAcrossRestart(t *testing.T) {
 	dir := t.TempDir()
-	srv, client := startGatewayServer(t, dir, config.UserGatewayAuth{})
+	srv, client := startGatewayServer(t, dir, config.DaemonGatewayAuth{})
 
 	body := bytes.NewBufferString(`{"project":"Foo Corp","slug":"main","label":"alpha","agent_id":"a1"}`)
 	resp, err := client.Post("http://"+srv.Addr()+"/_agent/register", "application/json", body)
@@ -61,7 +61,7 @@ func TestServer_RegisterPersistsAcrossRestart(t *testing.T) {
 		t.Fatalf("shutdown: %v", err)
 	}
 
-	srv2, client2 := startGatewayServer(t, dir, config.UserGatewayAuth{})
+	srv2, client2 := startGatewayServer(t, dir, config.DaemonGatewayAuth{})
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -92,7 +92,7 @@ func TestServer_RegisterPersistsAcrossRestart(t *testing.T) {
 
 func TestServer_BasicAuthAppliesOnlyToPublicRequests(t *testing.T) {
 	dir := t.TempDir()
-	auth := config.UserGatewayAuth{Enabled: true, Username: "u", Password: "p"}
+	auth := config.DaemonGatewayAuth{Enabled: true, Username: "u", Password: "p"}
 	srv, client := startGatewayServer(t, dir, auth)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -133,7 +133,7 @@ func TestServer_ForwardsThroughAgentTunnel(t *testing.T) {
 	defer upstream.Close()
 
 	dir := t.TempDir()
-	srv, client := startGatewayServer(t, dir, config.UserGatewayAuth{})
+	srv, client := startGatewayServer(t, dir, config.DaemonGatewayAuth{})
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -190,7 +190,7 @@ func TestServer_SyncsDNSOnRegisterAndUnregister(t *testing.T) {
 		ListenAddr: "127.0.0.1:0",
 		DataDir:    dir,
 		DNSZone:    "tunnels.example.test",
-		Auth:       config.UserGatewayAuth{},
+		Auth:       config.DaemonGatewayAuth{},
 		DNS:        fakeDNS,
 	})
 	if err != nil {
@@ -246,7 +246,7 @@ func TestServer_IssuesCertFromInvite(t *testing.T) {
 		ListenAddr: "127.0.0.1:0",
 		DataDir:    dir,
 		DNSZone:    "tunnels.example.test",
-		Auth:       config.UserGatewayAuth{},
+		Auth:       config.DaemonGatewayAuth{},
 	})
 	if err != nil {
 		t.Fatalf("new server: %v", err)
@@ -322,14 +322,14 @@ func TestNewServer_RequiresDNSZone(t *testing.T) {
 	_, err := NewServer(ServerOptions{
 		ListenAddr: "127.0.0.1:0",
 		DataDir:    t.TempDir(),
-		Auth:       config.UserGatewayAuth{},
+		Auth:       config.DaemonGatewayAuth{},
 	})
 	if err == nil {
 		t.Fatalf("expected error when dns zone is empty")
 	}
 }
 
-func startGatewayServer(t *testing.T, dataDir string, auth config.UserGatewayAuth) (*Server, *http.Client) {
+func startGatewayServer(t *testing.T, dataDir string, auth config.DaemonGatewayAuth) (*Server, *http.Client) {
 	t.Helper()
 	srv, err := NewServer(ServerOptions{
 		ListenAddr: "127.0.0.1:0",

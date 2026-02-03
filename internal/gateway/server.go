@@ -25,7 +25,7 @@ type Server struct {
 	issuer           *CertIssuer
 	dnsZone          string
 	enforceAgentMTLS bool
-	auth             config.UserGatewayAuth
+	auth             config.DaemonGatewayAuth
 	dns              DNSProvider
 	certs            CertProvisioner
 	tunnels          *tunnelPool
@@ -35,7 +35,7 @@ type ServerOptions struct {
 	ListenAddr string
 	DataDir    string
 	DNSZone    string
-	Auth       config.UserGatewayAuth
+	Auth       config.DaemonGatewayAuth
 	DNS        DNSProvider
 	Certs      CertProvisioner
 	TLSConfig  *tls.Config

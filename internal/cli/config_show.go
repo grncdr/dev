@@ -37,7 +37,7 @@ func newConfigShowCmd(opts *Options) *cobra.Command {
 
 type showPayload struct {
 	ProjectConfig *config.ProjectConfig `json:"project_config"`
-	UserConfig    *config.UserConfig    `json:"user_config"`
+	DaemonConfig  *config.DaemonConfig  `json:"daemon_config"`
 	Paths         showPaths             `json:"paths"`
 }
 
@@ -45,8 +45,8 @@ type showPaths struct {
 	ProjectConfig     string `json:"project_config"`
 	LocalOverride     string `json:"local_override"`
 	LocalOverrideUsed bool   `json:"local_override_used"`
-	UserConfig        string `json:"user_config"`
-	UserConfigFound   bool   `json:"user_config_found"`
+	DaemonConfig      string `json:"daemon_config"`
+	DaemonConfigFound bool   `json:"daemon_config_found"`
 }
 
 func runConfigShow(opts *Options, output string, out io.Writer) error {
@@ -59,7 +59,7 @@ func runConfigShow(opts *Options, output string, out io.Writer) error {
 		return err
 	}
 
-	userCfg, userInfo, err := config.LoadUserConfig(opts.ResolvedPaths.UserConfig)
+	daemonCfg, daemonInfo, err := config.LoadDaemonConfig(opts.ResolvedPaths.DaemonConfig)
 	if err != nil {
 		return err
 	}
@@ -67,13 +67,13 @@ func runConfigShow(opts *Options, output string, out io.Writer) error {
 	if output == "json" {
 		payload := showPayload{
 			ProjectConfig: projectCfg,
-			UserConfig:    userCfg,
+			DaemonConfig:  daemonCfg,
 			Paths: showPaths{
 				ProjectConfig:     projectInfo.ConfigPath,
 				LocalOverride:     projectInfo.LocalOverridePath,
 				LocalOverrideUsed: projectInfo.LocalOverrideUsed,
-				UserConfig:        userInfo.UserConfigPath,
-				UserConfigFound:   userInfo.UserConfigFound,
+				DaemonConfig:      daemonInfo.DaemonConfigPath,
+				DaemonConfigFound: daemonInfo.DaemonConfigFound,
 			},
 		}
 		encoder := json.NewEncoder(out)
@@ -96,15 +96,15 @@ func runConfigShow(opts *Options, output string, out io.Writer) error {
 	}
 	fmt.Fprintln(out, string(projectBytes))
 
-	fmt.Fprintf(out, "User config: %s\n", userInfo.UserConfigPath)
-	if !userInfo.UserConfigFound {
-		fmt.Fprintln(out, "User config not found; using empty config")
+	fmt.Fprintf(out, "Daemon config: %s\n", daemonInfo.DaemonConfigPath)
+	if !daemonInfo.DaemonConfigFound {
+		fmt.Fprintln(out, "Daemon config not found; using empty config")
 	}
-	userBytes, err := toml.Marshal(userCfg)
+	daemonBytes, err := toml.Marshal(daemonCfg)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(out, string(userBytes))
+	fmt.Fprintln(out, string(daemonBytes))
 
 	return nil
 }

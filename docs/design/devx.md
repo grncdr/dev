@@ -14,7 +14,7 @@ High-level product goals and UX surface for `dev-mode`.
 ### Global
 
 - `dev-mode --config <path>`
-- `dev-mode --user-config <path>`
+- `dev-mode --daemon-config <path>`
 - `dev-mode --debug`
 - Commands that talk to the daemon auto-start it by default.
 - Exceptions: `dev-mode daemon status` and `dev-mode daemon stop`.
@@ -64,7 +64,7 @@ When omitted, `start|stop|restart|status` operate on all processes in the curren
 
 - Project config: `.dev-mode.toml`
 - Local overrides: `.dev-mode.local.toml`
-- User config: `~/.config/dev-mode/config.toml`
+- Daemon config: `~/.config/dev-mode/daemon.toml`
 - Process table is `[process.<name>]` (singular section name).
 
 See:
@@ -79,4 +79,4 @@ See:
 - State root: `~/.local/state/dev-mode/`
 - Worktree state: `~/.local/state/dev-mode/<project>/worktrees/<slug>/`
 - Certificates: `~/.config/dev-mode/certs/`
-- Proxy apex defaults to `.localhost` via user config `proxy.apex_zone`.
+- Proxy apex defaults to `.localhost` via daemon config `proxy.apex_zone`.

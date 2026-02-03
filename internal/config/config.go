@@ -12,7 +12,7 @@ import (
 const (
 	DefaultProjectConfig = ".dev-mode.toml"
 	DefaultLocalOverride = ".dev-mode.local.toml"
-	DefaultUserConfig    = "~/.config/dev-mode/config.toml"
+	DefaultDaemonConfig  = "~/.config/dev-mode/daemon.toml"
 )
 
 type ProjectConfig struct {
@@ -29,33 +29,33 @@ type ProjectBlock struct {
 	MainSlug string `toml:"main_slug" json:"main_slug,omitempty"`
 }
 
-type UserConfig struct {
-	Gateway UserGatewayBlock `toml:"gateway" json:"gateway,omitempty"`
-	Proxy   UserProxyBlock   `toml:"proxy" json:"proxy,omitempty"`
+type DaemonConfig struct {
+	Gateway DaemonGatewayBlock `toml:"gateway" json:"gateway,omitempty"`
+	Proxy   DaemonProxyBlock   `toml:"proxy" json:"proxy,omitempty"`
 }
 
-type UserGatewayBlock struct {
-	Enabled       bool               `toml:"enabled" json:"enabled,omitempty"`
-	DataDir       string             `toml:"data_dir" json:"data_dir,omitempty"`
-	Listen        string             `toml:"listen" json:"listen,omitempty"`
-	HTTPListen    string             `toml:"http_listen" json:"http_listen,omitempty"`
-	DNSZone       string             `toml:"dns_zone" json:"dns_zone,omitempty"`
-	Hostname      string             `toml:"hostname" json:"hostname,omitempty"`
-	ACMEEmail     string             `toml:"acme_email" json:"acme_email,omitempty"`
-	ACMEDir       string             `toml:"acme_directory" json:"acme_directory,omitempty"`
-	ACMEStore     string             `toml:"acme_storage" json:"acme_storage,omitempty"`
-	ACMEResolvers []string           `toml:"acme_resolvers" json:"acme_resolvers,omitempty"`
-	Auth          UserGatewayAuth    `toml:"auth" json:"auth,omitempty"`
-	Route53       UserGatewayRoute53 `toml:"route53" json:"route53,omitempty"`
+type DaemonGatewayBlock struct {
+	Enabled       bool                 `toml:"enabled" json:"enabled,omitempty"`
+	DataDir       string               `toml:"data_dir" json:"data_dir,omitempty"`
+	Listen        string               `toml:"listen" json:"listen,omitempty"`
+	HTTPListen    string               `toml:"http_listen" json:"http_listen,omitempty"`
+	DNSZone       string               `toml:"dns_zone" json:"dns_zone,omitempty"`
+	Hostname      string               `toml:"hostname" json:"hostname,omitempty"`
+	ACMEEmail     string               `toml:"acme_email" json:"acme_email,omitempty"`
+	ACMEDir       string               `toml:"acme_directory" json:"acme_directory,omitempty"`
+	ACMEStore     string               `toml:"acme_storage" json:"acme_storage,omitempty"`
+	ACMEResolvers []string             `toml:"acme_resolvers" json:"acme_resolvers,omitempty"`
+	Auth          DaemonGatewayAuth    `toml:"auth" json:"auth,omitempty"`
+	Route53       DaemonGatewayRoute53 `toml:"route53" json:"route53,omitempty"`
 }
 
-type UserGatewayAuth struct {
+type DaemonGatewayAuth struct {
 	Enabled  bool   `toml:"enabled" json:"enabled,omitempty"`
 	Username string `toml:"username" json:"username,omitempty"`
 	Password string `toml:"password" json:"password,omitempty"`
 }
 
-type UserGatewayRoute53 struct {
+type DaemonGatewayRoute53 struct {
 	Enabled      bool   `toml:"enabled" json:"enabled,omitempty"`
 	HostedZoneID string `toml:"hosted_zone_id" json:"hosted_zone_id,omitempty"`
 	TTL          int64  `toml:"ttl" json:"ttl,omitempty"`
@@ -78,7 +78,7 @@ type ProjectProxyBlock struct {
 	// Reserved for future project-level proxy options.
 }
 
-type UserProxyBlock struct {
+type DaemonProxyBlock struct {
 	ListenHTTP  string `toml:"listen_http" json:"listen_http,omitempty"`
 	ListenHTTPS string `toml:"listen_https" json:"listen_https,omitempty"`
 	ApexZone    string `toml:"apex_zone" json:"apex_zone,omitempty"`
@@ -89,8 +89,8 @@ type LoadInfo struct {
 	ConfigPath        string
 	LocalOverridePath string
 	LocalOverrideUsed bool
-	UserConfigPath    string
-	UserConfigFound   bool
+	DaemonConfigPath  string
+	DaemonConfigFound bool
 }
 
 func LoadProjectConfig(configPath string) (*ProjectConfig, *LoadInfo, error) {
@@ -129,24 +129,24 @@ func LoadProjectConfig(configPath string) (*ProjectConfig, *LoadInfo, error) {
 	return &cfg, info, nil
 }
 
-func LoadUserConfig(userConfigPath string) (*UserConfig, *LoadInfo, error) {
-	info := &LoadInfo{UserConfigPath: userConfigPath}
+func LoadDaemonConfig(daemonConfigPath string) (*DaemonConfig, *LoadInfo, error) {
+	info := &LoadInfo{DaemonConfigPath: daemonConfigPath}
 
-	if _, err := os.Stat(userConfigPath); errors.Is(err, os.ErrNotExist) {
-		return &UserConfig{}, info, nil
+	if _, err := os.Stat(daemonConfigPath); errors.Is(err, os.ErrNotExist) {
+		return &DaemonConfig{}, info, nil
 	}
 
-	data, err := os.ReadFile(userConfigPath)
+	data, err := os.ReadFile(daemonConfigPath)
 	if err != nil {
-		return nil, info, fmt.Errorf("read user config: %w", err)
+		return nil, info, fmt.Errorf("read daemon config: %w", err)
 	}
 
-	var cfg UserConfig
+	var cfg DaemonConfig
 	if err := toml.Unmarshal(data, &cfg); err != nil {
-		return nil, info, fmt.Errorf("decode user config: %w", err)
+		return nil, info, fmt.Errorf("decode daemon config: %w", err)
 	}
 
-	info.UserConfigFound = true
+	info.DaemonConfigFound = true
 	return &cfg, info, nil
 }
 
@@ -163,11 +163,18 @@ func ExpandUserPath(path string) (string, error) {
 
 const DefaultGatewayDataDir = "~/.local/state/dev-mode/gateway"
 
-func ResolveGatewayDataDir(cfg *UserConfig) (string, error) {
+func ResolveGatewayDataDir(cfg *DaemonConfig) (string, error) {
 	if cfg != nil && cfg.Gateway.DataDir != "" {
 		return ExpandUserPath(cfg.Gateway.DataDir)
 	}
 	return ExpandUserPath(DefaultGatewayDataDir)
+}
+
+func ResolveDaemonConfigPath() string {
+	if env := os.Getenv("DEV_MODE_DAEMON_CONFIG"); env != "" {
+		return env
+	}
+	return DefaultDaemonConfig
 }
 
 func validateProjectConfig(cfg *ProjectConfig) error {

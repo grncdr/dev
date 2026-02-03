@@ -82,30 +82,30 @@ func newGatewayLoginCmd(opts *Options) *cobra.Command {
 }
 
 func runGateway(opts *Options) error {
-	userCfg, _, err := config.LoadUserConfig(opts.ResolvedPaths.UserConfig)
+	daemonCfg, _, err := config.LoadDaemonConfig(opts.ResolvedPaths.DaemonConfig)
 	if err != nil {
 		return err
 	}
-	dataDir, err := config.ResolveGatewayDataDir(userCfg)
+	dataDir, err := config.ResolveGatewayDataDir(daemonCfg)
 	if err != nil {
 		return err
 	}
 
-	listen := userCfg.Gateway.Listen
+	listen := daemonCfg.Gateway.Listen
 	if listen == "" {
 		listen = ":443"
 	}
-	dnsZone := strings.TrimSpace(userCfg.Gateway.DNSZone)
+	dnsZone := strings.TrimSpace(daemonCfg.Gateway.DNSZone)
 	if dnsZone == "" {
 		return errors.New("gateway.dns_zone is required")
 	}
 
-	dnsProvider, err := buildGatewayDNSProvider(userCfg)
+	dnsProvider, err := buildGatewayDNSProvider(daemonCfg)
 	if err != nil {
 		return err
 	}
 
-	certProvisioner, tlsConfig, err := buildGatewayACME(context.Background(), userCfg, dataDir)
+	certProvisioner, tlsConfig, err := buildGatewayACME(context.Background(), daemonCfg, dataDir)
 	if err != nil {
 		return err
 	}
@@ -114,7 +114,7 @@ func runGateway(opts *Options) error {
 		ListenAddr: listen,
 		DataDir:    dataDir,
 		DNSZone:    dnsZone,
-		Auth:       userCfg.Gateway.Auth,
+		Auth:       daemonCfg.Gateway.Auth,
 		DNS:        dnsProvider,
 		Certs:      certProvisioner,
 		TLSConfig:  tlsConfig,
@@ -129,7 +129,7 @@ func runGateway(opts *Options) error {
 	}()
 
 	fmt.Printf("gateway listening on %s (data dir: %s)\n", srv.Addr(), dataDir)
-	if userCfg.Gateway.Auth.Enabled {
+	if daemonCfg.Gateway.Auth.Enabled {
 		fmt.Println("gateway basic auth enabled")
 	}
 	if dnsProvider != nil {
@@ -163,25 +163,25 @@ func runGateway(opts *Options) error {
 	}
 }
 
-func buildGatewayDNSProvider(userCfg *config.UserConfig) (gateway.DNSProvider, error) {
-	if userCfg == nil || !userCfg.Gateway.Route53.Enabled {
+func buildGatewayDNSProvider(daemonCfg *config.DaemonConfig) (gateway.DNSProvider, error) {
+	if daemonCfg == nil || !daemonCfg.Gateway.Route53.Enabled {
 		return nil, nil
 	}
-	dnsZone := strings.TrimSpace(userCfg.Gateway.DNSZone)
+	dnsZone := strings.TrimSpace(daemonCfg.Gateway.DNSZone)
 	if dnsZone == "" {
 		return nil, errors.New("gateway.dns_zone is required when gateway.route53.enabled=true")
 	}
 	dnsZone = strings.TrimSuffix(dnsZone, ".")
-	hostname := strings.TrimSpace(userCfg.Gateway.Hostname)
+	hostname := strings.TrimSpace(daemonCfg.Gateway.Hostname)
 	if hostname == "" {
 		return nil, errors.New("gateway.hostname is required when gateway.route53.enabled=true")
 	}
 	hostname = strings.TrimSuffix(hostname, ".")
 	opts := gateway.Route53Options{
-		HostedZoneID: userCfg.Gateway.Route53.HostedZoneID,
+		HostedZoneID: daemonCfg.Gateway.Route53.HostedZoneID,
 		Domain:       dnsZone,
 		Target:       hostname,
-		TTL:          userCfg.Gateway.Route53.TTL,
+		TTL:          daemonCfg.Gateway.Route53.TTL,
 	}
 	if _, err := url.Parse("https://" + dnsZone); err != nil {
 		return nil, fmt.Errorf("invalid gateway.dns_zone: %w", err)
@@ -192,22 +192,22 @@ func buildGatewayDNSProvider(userCfg *config.UserConfig) (gateway.DNSProvider, e
 	return gateway.NewRoute53Provider(context.Background(), opts)
 }
 
-func buildGatewayACME(ctx context.Context, userCfg *config.UserConfig, dataDir string) (gateway.CertProvisioner, *tls.Config, error) {
-	if userCfg == nil {
+func buildGatewayACME(ctx context.Context, daemonCfg *config.DaemonConfig, dataDir string) (gateway.CertProvisioner, *tls.Config, error) {
+	if daemonCfg == nil {
 		return nil, nil, nil
 	}
-	if !userCfg.Gateway.Route53.Enabled {
+	if !daemonCfg.Gateway.Route53.Enabled {
 		return nil, nil, nil
 	}
-	dnsZone := strings.TrimSpace(userCfg.Gateway.DNSZone)
+	dnsZone := strings.TrimSpace(daemonCfg.Gateway.DNSZone)
 	if dnsZone == "" {
 		return nil, nil, errors.New("gateway.dns_zone is required for ACME wildcard certificates")
 	}
-	email := strings.TrimSpace(userCfg.Gateway.ACMEEmail)
+	email := strings.TrimSpace(daemonCfg.Gateway.ACMEEmail)
 	if email == "" {
 		return nil, nil, errors.New("gateway.acme_email is required for ACME wildcard certificates")
 	}
-	store := strings.TrimSpace(userCfg.Gateway.ACMEStore)
+	store := strings.TrimSpace(daemonCfg.Gateway.ACMEStore)
 	if store == "" {
 		store = filepath.Join(dataDir, "pki", "acme")
 	}
@@ -218,10 +218,10 @@ func buildGatewayACME(ctx context.Context, userCfg *config.UserConfig, dataDir s
 	manager, tlsConfig, err := gateway.NewACMEManager(ctx, gateway.ACMEOptions{
 		PublicHost:   dnsZone,
 		Email:        email,
-		DirectoryURL: userCfg.Gateway.ACMEDir,
+		DirectoryURL: daemonCfg.Gateway.ACMEDir,
 		StorageDir:   storePath,
-		HostedZoneID: userCfg.Gateway.Route53.HostedZoneID,
-		Resolvers:    userCfg.Gateway.ACMEResolvers,
+		HostedZoneID: daemonCfg.Gateway.Route53.HostedZoneID,
+		Resolvers:    daemonCfg.Gateway.ACMEResolvers,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -230,11 +230,11 @@ func buildGatewayACME(ctx context.Context, userCfg *config.UserConfig, dataDir s
 }
 
 func runGatewayInviteCreate(opts *Options, ttl time.Duration, uses int) error {
-	userCfg, _, err := config.LoadUserConfig(opts.ResolvedPaths.UserConfig)
+	daemonCfg, _, err := config.LoadDaemonConfig(opts.ResolvedPaths.DaemonConfig)
 	if err != nil {
 		return err
 	}
-	dataDir, err := config.ResolveGatewayDataDir(userCfg)
+	dataDir, err := config.ResolveGatewayDataDir(daemonCfg)
 	if err != nil {
 		return err
 	}
@@ -253,7 +253,7 @@ func runGatewayInviteCreate(opts *Options, ttl time.Duration, uses int) error {
 }
 
 func runGatewayLogin(opts *Options, inviteCode, name, gatewayURL string) error {
-	userCfg, _, err := config.LoadUserConfig(opts.ResolvedPaths.UserConfig)
+	daemonCfg, _, err := config.LoadDaemonConfig(opts.ResolvedPaths.DaemonConfig)
 	if err != nil {
 		return err
 	}
@@ -306,7 +306,7 @@ func runGatewayLogin(opts *Options, inviteCode, name, gatewayURL string) error {
 	if out.CertPEM == "" || out.CAPEM == "" {
 		return errors.New("gateway returned empty certificate material")
 	}
-	credDir, err := gatewayCredentialDir(userCfg, gatewayURL)
+	credDir, err := gatewayCredentialDir(daemonCfg, gatewayURL)
 	if err != nil {
 		return err
 	}
@@ -366,10 +366,10 @@ func generateGatewayCSR(name string) (*ecdsa.PrivateKey, []byte, error) {
 	return key, csrPEM, nil
 }
 
-func gatewayCredentialDir(userCfg *config.UserConfig, gatewayURL string) (string, error) {
+func gatewayCredentialDir(daemonCfg *config.DaemonConfig, gatewayURL string) (string, error) {
 	base := "~/.config/dev-mode/gateway/credentials"
-	if userCfg != nil && userCfg.Gateway.DataDir != "" {
-		base = filepath.Join(userCfg.Gateway.DataDir, "agent-credentials")
+	if daemonCfg != nil && daemonCfg.Gateway.DataDir != "" {
+		base = filepath.Join(daemonCfg.Gateway.DataDir, "agent-credentials")
 	}
 	basePath, err := config.ExpandUserPath(base)
 	if err != nil {

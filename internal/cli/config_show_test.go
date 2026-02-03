@@ -10,20 +10,20 @@ import (
 
 type showPayloadTest struct {
 	ProjectConfig map[string]any `json:"project_config"`
-	UserConfig    map[string]any `json:"user_config"`
+	DaemonConfig  map[string]any `json:"daemon_config"`
 	Paths         struct {
 		ProjectConfig     string `json:"project_config"`
 		LocalOverride     string `json:"local_override"`
 		LocalOverrideUsed bool   `json:"local_override_used"`
-		UserConfig        string `json:"user_config"`
-		UserConfigFound   bool   `json:"user_config_found"`
+		DaemonConfig      string `json:"daemon_config"`
+		DaemonConfigFound bool   `json:"daemon_config_found"`
 	} `json:"paths"`
 }
 
 func TestRunConfigShow_JSON(t *testing.T) {
 	dir := t.TempDir()
 	projectPath := filepath.Join(dir, ".dev-mode.toml")
-	userPath := filepath.Join(dir, "user.toml")
+	daemonPath := filepath.Join(dir, "daemon.toml")
 
 	project := `
 [project]
@@ -34,17 +34,17 @@ main_slug = "foocorp"
 		t.Fatal(err)
 	}
 
-	user := `
+	daemon := `
 [proxy]
 apex_zone = ".localhost"
 `
-	if err := os.WriteFile(userPath, []byte(user), 0o600); err != nil {
+	if err := os.WriteFile(daemonPath, []byte(daemon), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	opts := &Options{}
 	opts.ResolvedPaths.ProjectConfig = projectPath
-	opts.ResolvedPaths.UserConfig = userPath
+	opts.ResolvedPaths.DaemonConfig = daemonPath
 
 	var buf bytes.Buffer
 	if err := runConfigShow(opts, "json", &buf); err != nil {
@@ -59,8 +59,8 @@ apex_zone = ".localhost"
 	if payload.Paths.ProjectConfig != projectPath {
 		t.Fatalf("expected project path %q, got %q", projectPath, payload.Paths.ProjectConfig)
 	}
-	if payload.Paths.UserConfig != userPath {
-		t.Fatalf("expected user path %q, got %q", userPath, payload.Paths.UserConfig)
+	if payload.Paths.DaemonConfig != daemonPath {
+		t.Fatalf("expected daemon path %q, got %q", daemonPath, payload.Paths.DaemonConfig)
 	}
 
 	projectBlock, ok := payload.ProjectConfig["project"].(map[string]any)

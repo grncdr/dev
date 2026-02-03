@@ -8,8 +8,8 @@ import (
 )
 
 func TestGatewayMTLSClientMissingCredentials(t *testing.T) {
-	userCfg := &config.UserConfig{}
-	_, _, err := gatewayMTLSClient("https://gw.example.test", userCfg)
+	daemonCfg := &config.DaemonConfig{}
+	_, _, err := gatewayMTLSClient("https://gw.example.test", daemonCfg)
 	if err == nil {
 		t.Fatalf("expected missing credential error")
 	}

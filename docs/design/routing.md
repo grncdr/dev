@@ -12,7 +12,7 @@ This document is the source of truth for local proxy routing and gateway-to-agen
 ## Host Model
 
 - Hostnames are matched case-insensitively.
-- Effective apex zone comes from user config `proxy.apex_zone` (default `.localhost`).
+- Effective apex zone comes from daemon config `proxy.apex_zone` (default `.localhost`).
 - Request hosts are interpreted as:
   - `<slug>.<apex_zone>` (base worktree host)
   - `<subdomain>.<slug>.<apex_zone>` (subdomain-of-slug host)

@@ -71,7 +71,7 @@ url = "http://unused.local"
 		ListenAddr: "127.0.0.1:0",
 		DataDir:    gwDir,
 		DNSZone:    "public.example.dev",
-		Auth:       config.UserGatewayAuth{},
+		Auth:       config.DaemonGatewayAuth{},
 	})
 	if err != nil {
 		t.Fatalf("new gateway: %v", err)

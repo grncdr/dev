@@ -40,7 +40,7 @@ func defaultProxyHTTPSListen() string {
 }
 
 func (s *Server) startProxy() error {
-	httpAddr, httpsAddr := proxyListenAddrs(s.userConfig)
+	httpAddr, httpsAddr := proxyListenAddrs(s.daemonConfig)
 
 	if httpsAddr != "" {
 		cert, key, caKey, caCert, err := proxyCertPaths()
@@ -158,15 +158,15 @@ func (s *Server) handleTCPProxyConn(conn net.Conn, process string) {
 	<-done
 }
 
-func proxyListenAddrs(userCfg *config.UserConfig) (httpAddr, httpsAddr string) {
+func proxyListenAddrs(daemonCfg *config.DaemonConfig) (httpAddr, httpsAddr string) {
 	httpAddr, httpDisabled := listenFromEnv("DEV_MODE_PROXY_LISTEN_HTTP")
 	httpsAddr, httpsDisabled := listenFromEnv("DEV_MODE_PROXY_LISTEN_HTTPS")
 
-	if httpAddr == "" && !httpDisabled && userCfg != nil && userCfg.Proxy.ListenHTTP != "" {
-		httpAddr = userCfg.Proxy.ListenHTTP
+	if httpAddr == "" && !httpDisabled && daemonCfg != nil && daemonCfg.Proxy.ListenHTTP != "" {
+		httpAddr = daemonCfg.Proxy.ListenHTTP
 	}
-	if httpsAddr == "" && !httpsDisabled && userCfg != nil && userCfg.Proxy.ListenHTTPS != "" {
-		httpsAddr = userCfg.Proxy.ListenHTTPS
+	if httpsAddr == "" && !httpsDisabled && daemonCfg != nil && daemonCfg.Proxy.ListenHTTPS != "" {
+		httpsAddr = daemonCfg.Proxy.ListenHTTPS
 	}
 	if httpAddr == "" && !httpDisabled {
 		httpAddr = defaultProxyHTTPListen()
@@ -202,7 +202,7 @@ func (s *Server) handleProxyHTTP(w http.ResponseWriter, r *http.Request) {
 	if strings.Contains(targetHost, ":") {
 		targetHost, _, _ = strings.Cut(targetHost, ":")
 	}
-	_, httpsAddr := proxyListenAddrs(s.userConfig)
+	_, httpsAddr := proxyListenAddrs(s.daemonConfig)
 	if httpsAddr != "" {
 		if _, port, err := net.SplitHostPort(httpsAddr); err == nil && port != "443" {
 			targetHost = net.JoinHostPort(targetHost, port)
@@ -286,8 +286,8 @@ func proxyCertPaths() (leafCert, leafKey, caKey, caCert string, err error) {
 
 func (s *Server) checkProxyAllow(r *http.Request) error {
 	allow := ""
-	if s.userConfig != nil {
-		allow = strings.TrimSpace(s.userConfig.Proxy.Allow)
+	if s.daemonConfig != nil {
+		allow = strings.TrimSpace(s.daemonConfig.Proxy.Allow)
 	}
 	if allow == "" {
 		allow = "loopback"

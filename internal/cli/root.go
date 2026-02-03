@@ -13,14 +13,14 @@ import (
 
 type Options struct {
 	ConfigPath    string
-	UserConfig    string
+	DaemonConfig  string
 	Debug         bool
 	ResolvedPaths ResolvedPaths
 }
 
 type ResolvedPaths struct {
 	ProjectConfig string
-	UserConfig    string
+	DaemonConfig  string
 }
 
 func Execute() error {
@@ -35,7 +35,7 @@ func Execute() error {
 	}
 
 	root.PersistentFlags().StringVar(&opts.ConfigPath, "config", config.DefaultProjectConfig, "override project config path")
-	root.PersistentFlags().StringVar(&opts.UserConfig, "user-config", config.DefaultUserConfig, "override user config path")
+	root.PersistentFlags().StringVar(&opts.DaemonConfig, "daemon-config", config.ResolveDaemonConfigPath(), "override daemon config path")
 	root.PersistentFlags().BoolVar(&opts.Debug, "debug", false, "enable debug logging")
 
 	root.AddCommand(newConfigCmd(opts))
@@ -68,11 +68,11 @@ func resolvePaths(opts *Options) error {
 	}
 	opts.ResolvedPaths.ProjectConfig = projectPath
 
-	userPath, err := config.ExpandUserPath(opts.UserConfig)
+	daemonPath, err := config.ExpandUserPath(opts.DaemonConfig)
 	if err != nil {
-		return fmt.Errorf("resolve user config path: %w", err)
+		return fmt.Errorf("resolve daemon config path: %w", err)
 	}
-	opts.ResolvedPaths.UserConfig = userPath
+	opts.ResolvedPaths.DaemonConfig = daemonPath
 
 	return nil
 }

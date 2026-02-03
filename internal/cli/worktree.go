@@ -169,16 +169,16 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 	for i, slug := range sortedTargetSlugs(targets) {
 		projectPath, _ := worktree.ResolvePathFromSlug(slug)
 		var cfg *config.ProjectConfig
-		var userCfg *config.UserConfig
+		var daemonCfg *config.DaemonConfig
 		if projectPath != "" {
 			cfgPath := filepath.Join(projectPath, config.DefaultProjectConfig)
 			if loaded, _, err := config.LoadProjectConfig(cfgPath); err == nil {
 				cfg = loaded
 			}
 		}
-		if opts != nil && opts.ResolvedPaths.UserConfig != "" {
-			if loaded, _, err := config.LoadUserConfig(opts.ResolvedPaths.UserConfig); err == nil {
-				userCfg = loaded
+		if opts != nil && opts.ResolvedPaths.DaemonConfig != "" {
+			if loaded, _, err := config.LoadDaemonConfig(opts.ResolvedPaths.DaemonConfig); err == nil {
+				daemonCfg = loaded
 			}
 		}
 		if i > 0 {
@@ -188,7 +188,7 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 		fmt.Println()
 
 		if !daemonUp {
-			printProcessesSection(nil, cfg, userCfg, slug, false, targets[slug], nil)
+			printProcessesSection(nil, cfg, daemonCfg, slug, false, targets[slug], nil)
 			fmt.Println()
 			printGatewaySection(cfg, nil, false)
 			continue
@@ -198,14 +198,14 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 		resp, err := client.WorktreeStatus(ctx, slug)
 		cancel()
 		if err != nil {
-			printProcessesSection(nil, cfg, userCfg, slug, false, targets[slug], tunnelForSlug(tunnelBySlug, slug))
+			printProcessesSection(nil, cfg, daemonCfg, slug, false, targets[slug], tunnelForSlug(tunnelBySlug, slug))
 			fmt.Println()
 			printGatewaySection(cfg, tunnelForSlug(tunnelBySlug, slug), true)
 			continue
 		}
 
 		filtered := filterWorktreeStatus(resp, targets[slug])
-		printProcessesSection(filtered, cfg, userCfg, slug, true, targets[slug], tunnelForSlug(tunnelBySlug, slug))
+		printProcessesSection(filtered, cfg, daemonCfg, slug, true, targets[slug], tunnelForSlug(tunnelBySlug, slug))
 		fmt.Println()
 		printGatewaySection(cfg, tunnelForSlug(tunnelBySlug, slug), true)
 	}
@@ -260,7 +260,7 @@ func printProjectSection(slug, path string, cfg *config.ProjectConfig) {
 	fmt.Printf("  main worktree: %s\n", mainPath)
 }
 
-func printProcessesSection(status *daemon.WorktreeStatus, cfg *config.ProjectConfig, userCfg *config.UserConfig, slug string, daemonUp bool, target *processTarget, tunnel *daemon.TunnelStatus) {
+func printProcessesSection(status *daemon.WorktreeStatus, cfg *config.ProjectConfig, daemonCfg *config.DaemonConfig, slug string, daemonUp bool, target *processTarget, tunnel *daemon.TunnelStatus) {
 	fmt.Println(bold("Processes"))
 	if !daemonUp {
 		fmt.Println("  daemon not running")
@@ -270,7 +270,7 @@ func printProcessesSection(status *daemon.WorktreeStatus, cfg *config.ProjectCon
 		fmt.Println("  (no processes)")
 		return
 	}
-	proxyByProcess := processProxyURLsByProcess(slug, cfg, userCfg)
+	proxyByProcess := processProxyURLsByProcess(slug, cfg, daemonCfg)
 	gatewayByProcess := gatewayProxyURLsByProcess(proxyByProcess, cfg, tunnel)
 	processes := append([]daemon.ProcessStatus(nil), status.Processes...)
 	sort.Slice(processes, func(i, j int) bool { return processes[i].Name < processes[j].Name })
@@ -315,12 +315,12 @@ func filterWorktreeStatus(status *daemon.WorktreeStatus, target *processTarget) 
 	return &daemon.WorktreeStatus{Slug: status.Slug, Processes: filtered}
 }
 
-func processProxyURLsByProcess(slug string, cfg *config.ProjectConfig, userCfg *config.UserConfig) map[string][]string {
+func processProxyURLsByProcess(slug string, cfg *config.ProjectConfig, daemonCfg *config.DaemonConfig) map[string][]string {
 	result := map[string][]string{}
 	if cfg == nil {
 		return result
 	}
-	zone := strings.TrimPrefix(proxyApexZone(userCfg), ".")
+	zone := strings.TrimPrefix(proxyApexZone(daemonCfg), ".")
 	if zone == "" {
 		zone = "localhost"
 	}
@@ -389,9 +389,9 @@ func matcherSubdomains(matcher map[string]any) []string {
 	return []string{""}
 }
 
-func proxyApexZone(userCfg *config.UserConfig) string {
-	if userCfg != nil && strings.TrimSpace(userCfg.Proxy.ApexZone) != "" {
-		return userCfg.Proxy.ApexZone
+func proxyApexZone(daemonCfg *config.DaemonConfig) string {
+	if daemonCfg != nil && strings.TrimSpace(daemonCfg.Proxy.ApexZone) != "" {
+		return daemonCfg.Proxy.ApexZone
 	}
 	return ".localhost"
 }

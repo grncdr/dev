@@ -5,7 +5,7 @@ See `docs/config.md` for configuration options and examples. See `docs/logging.m
 ## Global Options
 
 - `--config <path>`: override project config path (default: `.dev-mode.toml`).
-- `--user-config <path>`: override user config (default: `~/.config/dev-mode/config.toml`).
+- `--daemon-config <path>`: override daemon config (default: `~/.config/dev-mode/daemon.toml`).
 - `--debug`
 
 ## Daemon
@@ -36,7 +36,7 @@ Initializes a `.dev-mode.toml` project config in the current directory.
 Defaults `project.name` to the directory basename.
 
 ### `dev-mode config show`
-Shows the effective project config (with local override applied) and user config.
+Shows the effective project config (with local override applied) and daemon config.
 Use `--output json` for machine-readable output.
 
 ## Process Identifiers
