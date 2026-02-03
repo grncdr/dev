@@ -419,11 +419,11 @@ func (m *Manager) StatusWorktreeFromDir(slug, dirHint string) (*WorktreeStatus, 
 }
 
 func resolveWorktreeState(project, slug string) (string, error) {
-	base, err := config.ExpandUserPath("~/.local/state/dev-mode")
+	base, err := config.ResolveStateDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, project, "worktrees", slug), nil
+	return filepath.Join(base, "logs", project, slug), nil
 }
 
 func (m *Manager) TargetFor(slug, process string) (network string, address string, err error) {

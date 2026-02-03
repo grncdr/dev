@@ -161,13 +161,24 @@ func ExpandUserPath(path string) (string, error) {
 	return filepath.Join(home, path[1:]), nil
 }
 
-const DefaultGatewayDataDir = "~/.local/state/dev-mode/gateway"
+const DefaultStateDir = "~/.local/state/dev-mode"
+
+func ResolveStateDir() (string, error) {
+	if env := os.Getenv("DEV_MODE_STATE_DIR"); env != "" {
+		return ExpandUserPath(env)
+	}
+	return ExpandUserPath(DefaultStateDir)
+}
 
 func ResolveGatewayDataDir(cfg *DaemonConfig) (string, error) {
 	if cfg != nil && cfg.Gateway.DataDir != "" {
 		return ExpandUserPath(cfg.Gateway.DataDir)
 	}
-	return ExpandUserPath(DefaultGatewayDataDir)
+	stateDir, err := ResolveStateDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(stateDir, "gateway"), nil
 }
 
 func ResolveDaemonConfigPath() string {

@@ -2,19 +2,27 @@
 
 This document describes where dev-mode writes logs.
 
+## State directory
+
+All logs are stored under the state directory:
+
+- Default: `~/.local/state/dev-mode/logs/`
+- Override via `DEV_MODE_STATE_DIR` environment variable
+
 ## Daemon logs
 
-- The daemon logs to stdout/stderr by default.
-- If run under a service manager, check that manager’s log output.
+- Path: `<state_dir>/logs/daemon.log`
+- The daemon logs to stdout/stderr by default when run in foreground.
+- If run under a service manager, check that manager's log output.
 
 ## Process logs
 
-- Per-process logs are written in the worktree state directory:
-  - `~/.local/state/dev-mode/<project>/worktrees/<slug>/<process>.log`
+- Per-process logs are written at:
+  - `<state_dir>/logs/<project>/<slug>/<process>.log`
 
 ## Proxy logs
 
-- The local proxy uses the daemon’s log output (stdout/stderr).
+- The local proxy uses the daemon's log output (stdout/stderr).
 
 ## Gateway logs
 

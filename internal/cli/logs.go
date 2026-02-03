@@ -54,10 +54,11 @@ func newDaemonLogsCmd() *cobra.Command {
 		Use:   "logs",
 		Short: "view daemon logs",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path, err := config.ExpandUserPath("~/.local/state/dev-mode/daemon.log")
+			stateDir, err := config.ResolveStateDir()
 			if err != nil {
 				return err
 			}
+			path := filepath.Join(stateDir, "logs", "daemon.log")
 			return viewLogs([]logSource{{Name: "daemon", Path: path}}, effectiveFollow(view), view.All, view.Lines)
 		},
 	}
@@ -116,11 +117,11 @@ func runLogs(opts *Options, target string, view *logViewOptions) error {
 	if project == "" {
 		return errors.New("project.name is required")
 	}
-	stateRoot, err := config.ExpandUserPath("~/.local/state/dev-mode")
+	stateRoot, err := config.ResolveStateDir()
 	if err != nil {
 		return err
 	}
-	worktreeDir := filepath.Join(stateRoot, project, "worktrees", slug)
+	worktreeDir := filepath.Join(stateRoot, "logs", project, slug)
 
 	sources := []logSource{}
 	if process != "" {

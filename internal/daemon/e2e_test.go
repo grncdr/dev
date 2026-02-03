@@ -109,7 +109,7 @@ post_stop = "sh -c \"echo post_stop > hook_post_stop.txt\""
 		t.Fatalf("expected running process, got %+v", start.Processes)
 	}
 
-	logPath := filepath.Join(baseDir, ".local", "state", "dev-mode", "demo", "worktrees", slug, "sleeper.log")
+	logPath := filepath.Join(baseDir, ".local", "state", "dev-mode", "logs", "demo", slug, "sleeper.log")
 	if err := waitForLogContains(logPath, "enabled", 2*time.Second); err != nil {
 		t.Fatalf("expected env var in log: %v", err)
 	}

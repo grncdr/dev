@@ -157,14 +157,15 @@ func runDaemonRun() error {
 }
 
 func openDaemonLog() (*os.File, string, error) {
-	dir, err := config.ExpandUserPath("~/.local/state/dev-mode")
+	stateDir, err := config.ResolveStateDir()
 	if err != nil {
 		return nil, "", err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	logsDir := filepath.Join(stateDir, "logs")
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
 		return nil, "", err
 	}
-	path := filepath.Join(dir, "daemon.log")
+	path := filepath.Join(logsDir, "daemon.log")
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, "", err

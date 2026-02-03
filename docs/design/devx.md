@@ -76,7 +76,9 @@ See:
 ## Conventions
 
 - Daemon socket: `~/.config/dev-mode/devd.sock`
-- State root: `~/.local/state/dev-mode/`
-- Worktree state: `~/.local/state/dev-mode/<project>/worktrees/<slug>/`
+- State root: `~/.local/state/dev-mode/` (override via `DEV_MODE_STATE_DIR`)
+- Logs: `<state_root>/logs/`
+  - Daemon: `<state_root>/logs/daemon.log`
+  - Processes: `<state_root>/logs/<project>/<slug>/<process>.log`
 - Certificates: `~/.config/dev-mode/certs/`
 - Proxy apex defaults to `.localhost` via daemon config `proxy.apex_zone`.
