@@ -79,6 +79,10 @@ func (s *InviteStore) Create(ttl time.Duration, uses int) (Invite, error) {
 func (s *InviteStore) Consume(code string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Reload from disk in case invites were created externally
+	if err := s.load(); err != nil {
+		return err
+	}
 	invite, ok := s.invites[code]
 	if !ok {
 		return errors.New("invite not found")

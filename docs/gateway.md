@@ -72,9 +72,9 @@ Example file tree:
 
 ```
 gateway/
+├── acme/                        # ACME certificate storage (Let's Encrypt)
+│   └── ...
 ├── pki/
-│   ├── acme/                    # ACME certificate storage (Let's Encrypt)
-│   │   └── ...
 │   ├── agent-ca.pem             # CA certificate for signing agent certs
 │   └── agent-ca-key.pem         # CA private key
 └── state/

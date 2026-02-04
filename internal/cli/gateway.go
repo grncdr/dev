@@ -209,7 +209,7 @@ func buildGatewayACME(ctx context.Context, daemonCfg *config.DaemonConfig, dataD
 	}
 	store := strings.TrimSpace(daemonCfg.Gateway.ACMEStore)
 	if store == "" {
-		store = filepath.Join(dataDir, "pki", "acme")
+		store = dataDir // certmagic adds its own "acme/" subdirectory
 	}
 	storePath, err := config.ExpandUserPath(store)
 	if err != nil {

@@ -143,10 +143,9 @@ http_listen = ":80"
 dns_zone = "tunnels.foocorp.dev"
 hostname = "gw.foocorp.dev"
 acme_email = "tech@foocorp.dev"
-acme_storage = "~/.config/dev-mode/gateway/acme"
+# acme_storage defaults to <state_dir>/gateway (certmagic creates acme/ subdirectory)
 acme_directory = "https://acme-v02.api.letsencrypt.org/directory"
 acme_resolvers = ["1.1.1.1"]
-dns_provider = "route53"
 
 [gateway.auth]
 enabled = false
