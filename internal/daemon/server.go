@@ -361,17 +361,24 @@ func (s *Server) loadConfig() error {
 		return nil
 	}
 	cfgPath := filepath.Join(mainPath, config.DefaultProjectConfig)
+	if _, err := os.Stat(cfgPath); err != nil {
+		return nil // No project config, nothing to load
+	}
 	cfg, _, err := config.LoadProjectConfig(cfgPath)
 	if err != nil {
 		return err
 	}
 	s.config = cfg
 	s.mainPath = mainPath
-	daemonPath, err := config.ExpandUserPath(config.ResolveDaemonConfigPath())
-	if err == nil {
-		daemonCfg, _, err := config.LoadDaemonConfig(daemonPath)
+	// Skip loading user's daemon config during tests to avoid conflicts
+	// with a locally running daemon.
+	if !runningUnderGoTest() {
+		daemonPath, err := config.ExpandUserPath(config.ResolveDaemonConfigPath())
 		if err == nil {
-			s.daemonConfig = daemonCfg
+			daemonCfg, _, err := config.LoadDaemonConfig(daemonPath)
+			if err == nil {
+				s.daemonConfig = daemonCfg
+			}
 		}
 	}
 	s.manager.SetApexZone(s.projectApexZone())
