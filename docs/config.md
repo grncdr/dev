@@ -30,6 +30,7 @@ port = "random"
 
 [process.rails]
 singleton = false
+gateway_mode = "reverse_proxy"
 command = "rails server"
 port = "unix"
 wrapper = "bundle exec $COMMAND"
@@ -47,7 +48,6 @@ wrapper = "devbox run $COMMAND"
 subdomain = null
 path = "/"
 match = "prefix"
-mode = "reverse"
 priority = 0
 
 [[process.rails.proxy]]
@@ -103,9 +103,9 @@ Notes:
   - `health = { type = "tcp" }` waits for a successful TCP connect (you can also set `port = <int>` inside health to probe a specific port).
 - `startup_timeout` is optional per process (decimal seconds) and overrides health timeout when waiting for startup readiness.
 - Proxy routing uses per-process matchers. Requests are matched by subdomain first (explicit beats `*` wildcard), then longest path match, then highest `priority`, then process name.
-- `mode` controls proxy behavior per matcher:
-  - `mode = "reverse"` (default): sends `X-Forwarded-*` headers and does not rewrite response headers/body.
-  - `mode = "transparent"`: sends `X-Forwarded-Proto`, omits `X-Forwarded-Host`/`X-Forwarded-For`, and rewrites response `Location`/`Set-Cookie`/body links for public host mapping.
+- `process.<name>.gateway_mode` controls behavior only for gateway-tunneled requests for that process:
+  - `gateway_mode = "reverse_proxy"` (default): sends `X-Forwarded-*` headers and does not rewrite response headers/body.
+  - `gateway_mode = "rewrite"`: sends `X-Forwarded-Proto`, omits `X-Forwarded-Host`/`X-Forwarded-For`, rewrites `Location`, rewrites `Set-Cookie Domain`, rewrites RFC cookie `$Domain` on incoming requests, and rewrites text response bodies for local/public host mapping.
 - `subdomain = null` matches `<slug>.<apex_zone>`. `subdomain = "app"` matches `app.<slug>.<apex_zone>`. `subdomain = "*"` matches any subdomain under `<slug>.<apex_zone>`.
 - `subdomains = [...]` is also supported in a matcher to map multiple subdomains in one block.
 - `path` defaults to `/`, `match` defaults to `prefix`, and `priority` defaults to `0`.

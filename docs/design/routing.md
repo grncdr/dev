@@ -130,15 +130,16 @@ If matcher sets `tcp_listen`, daemon opens `127.0.0.1:<tcp_listen>` and forwards
 
 ## Header and Response Handling
 
-Per-matcher `mode` controls request/response behavior:
+Per-process `gateway_mode` controls request/response behavior for gateway-tunneled traffic:
 
-- `mode = "reverse"` (default):
+- `gateway_mode = "reverse_proxy"` (default):
   - sets `X-Forwarded-Proto: https`
   - does not rewrite response headers/body
-- `mode = "transparent"`:
+- `gateway_mode = "rewrite"`:
   - keeps `X-Forwarded-Proto=https` and omits `X-Forwarded-Host` / `X-Forwarded-For`
-  - rewrites absolute `Location` headers to incoming host
-  - rewrites `Set-Cookie` `Domain` values matching apex to request host domain
+  - rewrites absolute `Location` headers by replacing local apex with gateway public apex
+  - rewrites `Set-Cookie` `Domain` values by replacing local apex with gateway public apex
+  - rewrites incoming RFC cookie `$Domain` values from public apex back to local apex
   - rewrites text response bodies for local/public host mapping
 
 ## Gateway → Agent Flow

@@ -11,9 +11,11 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -180,6 +182,324 @@ func TestServer_ForwardsThroughAgentTunnel(t *testing.T) {
 			t.Fatalf("forwarding never became ready; last error=%v", err)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestServer_ForwardsRedirectAndCookieHeadersWithoutFollowing(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/redirect" {
+			w.Header().Set("Location", "https://app.alpha.public.test/final")
+			w.Header().Add("Set-Cookie", "session=abc; Domain=alpha.public.test; Path=/; HttpOnly")
+			w.WriteHeader(http.StatusFound)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer upstream.Close()
+
+	dir := t.TempDir()
+	srv, client := startGatewayServer(t, dir, config.DaemonGatewayAuth{})
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	agent := &Agent{
+		GatewayURL:  "http://" + srv.Addr(),
+		UpstreamURL: upstream.URL,
+		Label:       "alpha",
+		Project:     "Foo Corp",
+		Slug:        "main",
+		AgentID:     "agent-1",
+	}
+	go func() {
+		_ = agent.Run(ctx)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		req, err := http.NewRequest(http.MethodGet, "http://"+srv.Addr()+"/ready", nil)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Host = "alpha.localhost"
+		resp, err := client.Do(req)
+		if err == nil && resp.StatusCode == http.StatusNotFound {
+			resp.Body.Close()
+			break
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("forwarding never became ready; last error=%v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	noRedirectClient := &http.Client{
+		Timeout: 2 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	req, err := http.NewRequest(http.MethodGet, "http://"+srv.Addr()+"/redirect", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Host = "app.alpha.localhost"
+	resp, err := noRedirectClient.Do(req)
+	if err != nil {
+		t.Fatalf("request through gateway: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("expected status %d, got %d", http.StatusFound, resp.StatusCode)
+	}
+	if got := resp.Header.Get("Location"); got != "https://app.alpha.public.test/final" {
+		t.Fatalf("expected location header to pass through, got %q", got)
+	}
+	if got := resp.Header.Get("Set-Cookie"); got != "session=abc; Domain=alpha.public.test; Path=/; HttpOnly" {
+		t.Fatalf("expected Set-Cookie header to pass through, got %q", got)
+	}
+}
+
+func TestServer_ForwardsConcurrentRequestsOverSingleTunnel(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(75 * time.Millisecond)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("ok:" + r.URL.Path))
+	}))
+	defer upstream.Close()
+
+	dir := t.TempDir()
+	srv, client := startGatewayServer(t, dir, config.DaemonGatewayAuth{})
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	agent := &Agent{
+		GatewayURL:  "http://" + srv.Addr(),
+		UpstreamURL: upstream.URL,
+		Label:       "alpha",
+		Project:     "Foo Corp",
+		Slug:        "main",
+		AgentID:     "agent-1",
+	}
+	go func() {
+		_ = agent.Run(ctx)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		req, err := http.NewRequest(http.MethodGet, "http://"+srv.Addr()+"/ready", nil)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Host = "alpha.localhost"
+		resp, err := client.Do(req)
+		if err == nil && resp.StatusCode == http.StatusCreated {
+			resp.Body.Close()
+			break
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("forwarding never became ready; last error=%v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	paths := []string{"/a", "/b", "/c", "/d"}
+	errCh := make(chan error, len(paths))
+	start := make(chan struct{})
+	for _, path := range paths {
+		path := path
+		go func() {
+			<-start
+			req, err := http.NewRequest(http.MethodGet, "http://"+srv.Addr()+path, nil)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			req.Host = "app.alpha.localhost"
+			resp, err := client.Do(req)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusCreated {
+				body, _ := io.ReadAll(resp.Body)
+				errCh <- fmt.Errorf("status=%d body=%s", resp.StatusCode, string(body))
+				return
+			}
+			body, _ := io.ReadAll(resp.Body)
+			if string(body) != "ok:"+path {
+				errCh <- fmt.Errorf("unexpected body for %s: %q", path, string(body))
+				return
+			}
+			errCh <- nil
+		}()
+	}
+	close(start)
+	for range paths {
+		if err := <-errCh; err != nil {
+			t.Fatalf("concurrent forward failed: %v", err)
+		}
+	}
+}
+
+func TestServer_LogsPublicRequestMetadata(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer upstream.Close()
+
+	dir := t.TempDir()
+	var logBuf bytes.Buffer
+	srv, err := NewServer(ServerOptions{
+		ListenAddr: "127.0.0.1:0",
+		DataDir:    dir,
+		DNSZone:    "tunnels.example.test",
+		Auth:       config.DaemonGatewayAuth{},
+		LogWriter:  &logBuf,
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	go func() { _ = srv.Serve() }()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		resp, err := client.Get("http://" + srv.Addr() + "/_registry/labels")
+		if err == nil {
+			_ = resp.Body.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("gateway did not become ready: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	agent := &Agent{
+		GatewayURL:  "http://" + srv.Addr(),
+		UpstreamURL: upstream.URL,
+		Label:       "alpha",
+		Project:     "Foo Corp",
+		Slug:        "main",
+		AgentID:     "agent-1",
+		Name:        "stephen",
+	}
+	go func() {
+		_ = agent.Run(ctx)
+	}()
+
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		req, err := http.NewRequest(http.MethodGet, "http://"+srv.Addr()+"/ready", nil)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Host = "alpha.localhost"
+		resp, err := client.Do(req)
+		if err == nil && resp.StatusCode == http.StatusCreated {
+			resp.Body.Close()
+			break
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("forwarding never became ready; last error=%v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "http://"+srv.Addr()+"/hello", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Host = "app.alpha.localhost"
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	resp.Body.Close()
+
+	lines := bytes.Split(bytes.TrimSpace(logBuf.Bytes()), []byte("\n"))
+	if len(lines) == 0 {
+		t.Fatalf("expected request logs")
+	}
+	var out map[string]any
+	if err := json.Unmarshal(lines[len(lines)-1], &out); err != nil {
+		t.Fatalf("decode log: %v", err)
+	}
+	if out["route_result"] != "forwarded" {
+		t.Fatalf("expected forwarded route result, got %+v", out)
+	}
+	if out["label_extracted"] != "alpha" {
+		t.Fatalf("expected label alpha, got %+v", out)
+	}
+	if out["project"] != "Foo Corp" || out["slug"] != "main" {
+		t.Fatalf("expected project/slug metadata, got %+v", out)
+	}
+	if out["agent_id"] != "agent-1" || out["user"] != "stephen" {
+		t.Fatalf("expected agent/user metadata, got %+v", out)
+	}
+}
+
+func TestServer_PublicErrorsIncludeRequestID(t *testing.T) {
+	dir := t.TempDir()
+	srv, client := startGatewayServer(t, dir, config.DaemonGatewayAuth{})
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
+
+	req, err := http.NewRequest(http.MethodGet, "http://"+srv.Addr()+"/", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Host = "missing-label.localhost"
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d", resp.StatusCode)
+	}
+	hdrRequestID := strings.TrimSpace(resp.Header.Get("X-Request-Id"))
+	if hdrRequestID == "" {
+		t.Fatalf("missing X-Request-Id header")
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if body["request_id"] != hdrRequestID {
+		t.Fatalf("request_id mismatch: header=%q body=%v", hdrRequestID, body["request_id"])
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"compress/zlib"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -13,26 +14,30 @@ import (
 
 const maxRewriteBodyBytes = 5 << 20 // 5 MiB
 
-func rewriteLocation(value, host string) (string, bool) {
+func rewriteLocation(value, localApex, publicApex string) (string, bool) {
 	parsed, err := url.Parse(value)
 	if err != nil {
 		return value, false
 	}
-	if parsed.IsAbs() {
-		parsed.Host = host
+	if !parsed.IsAbs() {
+		return value, false
+	}
+	rewritten, ok := replaceHostApex(parsed.Host, localApex, publicApex)
+	if ok {
+		parsed.Host = rewritten
 		return parsed.String(), true
 	}
 	return value, false
 }
 
-func rewriteSetCookieDomain(header http.Header, apexZone, host string) {
+func rewriteSetCookieDomain(header http.Header, localApex, publicApex string) {
 	cookies := header.Values("Set-Cookie")
 	if len(cookies) == 0 {
 		return
 	}
 	updated := make([]string, 0, len(cookies))
 	for _, cookie := range cookies {
-		updated = append(updated, rewriteCookieDomain(cookie, apexZone, host))
+		updated = append(updated, rewriteCookieDomain(cookie, localApex, publicApex))
 	}
 	header.Del("Set-Cookie")
 	for _, cookie := range updated {
@@ -40,32 +45,122 @@ func rewriteSetCookieDomain(header http.Header, apexZone, host string) {
 	}
 }
 
-func rewriteCookieDomain(value, apexZone, host string) string {
+func rewriteRequestCookieDomain(header http.Header, publicApex, localApex string) {
+	cookies := header.Values("Cookie")
+	if len(cookies) == 0 {
+		return
+	}
+	updated := make([]string, 0, len(cookies))
+	for _, cookie := range cookies {
+		updated = append(updated, rewriteRequestCookieDomainValue(cookie, publicApex, localApex))
+	}
+	header.Del("Cookie")
+	for _, cookie := range updated {
+		header.Add("Cookie", cookie)
+	}
+}
+
+func rewriteRequestCookieDomainValue(value, publicApex, localApex string) string {
+	parts := strings.Split(value, ";")
+	for i, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		lower := strings.ToLower(trimmed)
+		if !strings.HasPrefix(lower, "$domain=") {
+			continue
+		}
+		raw := strings.TrimSpace(trimmed[len("$Domain="):])
+		quoted := strings.HasPrefix(raw, "\"") && strings.HasSuffix(raw, "\"") && len(raw) >= 2
+		domain := raw
+		if quoted {
+			domain = raw[1 : len(raw)-1]
+		}
+		rewritten, ok := replaceDomainApex(domain, publicApex, localApex)
+		if !ok {
+			continue
+		}
+		if quoted {
+			rewritten = `"` + rewritten + `"`
+		}
+		parts[i] = " $Domain=" + rewritten
+	}
+	return strings.Join(parts, ";")
+}
+
+func rewriteCookieDomain(value, localApex, publicApex string) string {
 	parts := strings.Split(value, ";")
 	for i, part := range parts {
 		trimmed := strings.TrimSpace(part)
 		if strings.HasPrefix(strings.ToLower(trimmed), "domain=") {
-			if domainMatches(trimmed, apexZone) {
-				parts[i] = " Domain=" + host
+			domainValue := strings.TrimSpace(trimmed[len("domain="):])
+			if rewritten, ok := replaceDomainApex(domainValue, localApex, publicApex); ok {
+				parts[i] = " Domain=" + rewritten
 			}
 			return strings.Join(parts, ";")
 		}
 	}
-	_ = apexZone
 	return value
 }
 
-func domainMatches(domainAttr, apexZone string) bool {
-	if apexZone == "" {
-		return true
+func replaceHostApex(hostPort, localApex, publicApex string) (string, bool) {
+	host := hostPort
+	port := ""
+	if strings.Contains(hostPort, ":") {
+		if h, p, err := net.SplitHostPort(hostPort); err == nil {
+			host = h
+			port = p
+		}
 	}
-	value := strings.TrimSpace(domainAttr[len("domain="):])
-	value = strings.TrimPrefix(value, ".")
-	apex := strings.TrimPrefix(apexZone, ".")
-	if value == apex {
-		return true
+	rewritten, ok := replaceDomainApex(host, localApex, publicApex)
+	if !ok {
+		return hostPort, false
 	}
-	return strings.HasSuffix(value, "."+apex)
+	if port != "" {
+		return net.JoinHostPort(rewritten, port), true
+	}
+	return rewritten, true
+}
+
+func replaceDomainApex(domain, localApex, publicApex string) (string, bool) {
+	domain = strings.TrimSpace(domain)
+	if domain == "" {
+		return domain, false
+	}
+	prefixDot := strings.HasPrefix(domain, ".")
+	left := strings.TrimPrefix(strings.ToLower(domain), ".")
+	from := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(localApex)), ".")
+	to := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(publicApex)), ".")
+	if from == "" || to == "" {
+		return domain, false
+	}
+	switch {
+	case left == from:
+		left = to
+	case strings.HasSuffix(left, "."+from):
+		left = strings.TrimSuffix(left, "."+from) + "." + to
+	default:
+		return domain, false
+	}
+	if prefixDot {
+		return "." + left, true
+	}
+	return left, true
+}
+
+func derivePublicApex(localHost, publicHost, localApex string) (string, bool) {
+	localLabels := strings.Split(normalizeProxyHost(localHost), ".")
+	publicLabels := strings.Split(normalizeProxyHost(publicHost), ".")
+	localApexLabels := strings.Split(strings.TrimPrefix(strings.ToLower(strings.TrimSpace(localApex)), "."), ".")
+	if len(localLabels) == 0 || len(publicLabels) == 0 || len(localApexLabels) == 0 {
+		return "", false
+	}
+	if len(localLabels) <= len(localApexLabels) {
+		return "", false
+	}
+	prefixCount := len(localLabels) - len(localApexLabels)
+	if prefixCount <= 0 || len(publicLabels) <= prefixCount {
+		return "", false
+	}
+	return strings.Join(publicLabels[prefixCount:], "."), true
 }
 
 func rewriteResponseBody(resp *http.Response, localHost, publicHost string) error {

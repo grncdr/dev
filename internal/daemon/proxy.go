@@ -226,40 +226,50 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 		host, _, _ = strings.Cut(host, ":")
 	}
 	routeHost := host
+	isGatewayTunnel := false
 	if mappedHost, ok := s.localProxyHostForTunnelRequest(host); ok {
 		routeHost = mappedHost
+		isGatewayTunnel = true
 	}
 
-	network, address, mode, err := s.resolveProxyTarget(routeHost, r.URL.Path)
+	network, address, gatewayMode, err := s.resolveProxyTarget(routeHost, r.URL.Path)
 	if err != nil {
 		writeErrorWithCode(w, http.StatusBadGateway, "proxy_target_error", err)
 		return
 	}
+	rewriteMode := isGatewayTunnel && gatewayMode == "rewrite"
 
 	target, _ := url.Parse("http://unix")
 	reverseProxy := httputil.NewSingleHostReverseProxy(target)
+	localApex := s.projectApexZone()
+	publicApex, hasPublicApex := derivePublicApex(routeHost, host, localApex)
 	originalDirector := reverseProxy.Director
 	reverseProxy.Director = func(req *http.Request) {
 		originalDirector(req)
 		req.Host = routeHost
-		applyForwardedHeaders(req, mode)
+		applyForwardedHeaders(req, rewriteMode)
+		if rewriteMode && hasPublicApex {
+			rewriteRequestCookieDomain(req.Header, publicApex, localApex)
+		}
 	}
 	reverseProxy.Transport = &http.Transport{
 		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
 			return net.Dial(network, address)
 		},
 	}
-	rewriteDomain := host
-	apex := s.projectApexZone()
-	if mode == "transparent" {
+	rewriteDomain, rewroteDomain := replaceDomainApex(routeHost, localApex, publicApex)
+	if !rewroteDomain || rewriteDomain == "" {
+		rewriteDomain = host
+	}
+	if rewriteMode {
 		reverseProxy.ModifyResponse = func(resp *http.Response) error {
 			if loc := resp.Header.Get("Location"); loc != "" {
-				if rewritten, ok := rewriteLocation(loc, rewriteDomain); ok {
+				if rewritten, ok := rewriteLocation(loc, localApex, publicApex); ok {
 					resp.Header.Set("Location", rewritten)
 				}
 			}
-			if apex != "" {
-				rewriteSetCookieDomain(resp.Header, apex, rewriteDomain)
+			if localApex != "" && hasPublicApex {
+				rewriteSetCookieDomain(resp.Header, localApex, publicApex)
 			}
 			if err := rewriteResponseBody(resp, routeHost, rewriteDomain); err != nil {
 				return err
@@ -273,9 +283,9 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 	reverseProxy.ServeHTTP(w, r)
 }
 
-func applyForwardedHeaders(req *http.Request, mode string) {
+func applyForwardedHeaders(req *http.Request, rewriteMode bool) {
 	req.Header.Set("X-Forwarded-Proto", "https")
-	if mode != "transparent" {
+	if !rewriteMode {
 		return
 	}
 	req.Header.Del("X-Forwarded-Host")

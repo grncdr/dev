@@ -1,61 +1,58 @@
 package gateway
 
 import (
-	"bufio"
-	"net"
 	"sync"
-)
 
-type tunnelConn struct {
-	conn net.Conn
-	br   *bufio.Reader
-	bw   *bufio.Writer
-}
+	"dev-mode/internal/tunnelmux"
+)
 
 type tunnelPool struct {
 	mu    sync.Mutex
-	pools map[string][]*tunnelConn
+	pools map[string]*tunnelmux.Session
 }
 
 func newTunnelPool() *tunnelPool {
 	return &tunnelPool{
-		pools: map[string][]*tunnelConn{},
+		pools: map[string]*tunnelmux.Session{},
 	}
 }
 
-func (p *tunnelPool) add(label string, conn net.Conn) {
+func (p *tunnelPool) set(label string, sess *tunnelmux.Session) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.pools[label] = append(p.pools[label], &tunnelConn{
-		conn: conn,
-		br:   bufio.NewReader(conn),
-		bw:   bufio.NewWriter(conn),
-	})
+	old := p.pools[label]
+	p.pools[label] = sess
+	p.mu.Unlock()
+
+	if old != nil {
+		_ = old.Close()
+	}
+	go func(expected *tunnelmux.Session) {
+		<-expected.Done()
+		p.mu.Lock()
+		cur, ok := p.pools[label]
+		if ok && cur == expected {
+			delete(p.pools, label)
+		}
+		p.mu.Unlock()
+	}(sess)
 }
 
-func (p *tunnelPool) acquire(label string) *tunnelConn {
+func (p *tunnelPool) get(label string) *tunnelmux.Session {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	list := p.pools[label]
-	if len(list) == 0 {
+	sess := p.pools[label]
+	if sess == nil {
 		return nil
 	}
-	tc := list[len(list)-1]
-	p.pools[label] = list[:len(list)-1]
-	return tc
-}
-
-func (p *tunnelPool) release(label string, tc *tunnelConn) {
-	if tc == nil {
-		return
+	select {
+	case <-sess.Done():
+		delete(p.pools, label)
+		return nil
+	default:
+		return sess
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.pools[label] = append(p.pools[label], tc)
 }
 
 func (p *tunnelPool) has(label string) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return len(p.pools[label]) > 0
+	return p.get(label) != nil
 }

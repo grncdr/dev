@@ -14,6 +14,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"dev-mode/internal/tunnelmux"
 )
 
 type Agent struct {
@@ -66,11 +68,12 @@ func (a *Agent) runOnce(ctx context.Context) (runErr error) {
 	if err := a.register(ctx); err != nil {
 		return err
 	}
-	conn, br, bw, err := a.connectTunnel(ctx)
+	conn, err := a.connectTunnel(ctx)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	session := tunnelmux.NewSession(conn)
+	defer session.Close()
 	if a.OnConnected != nil {
 		a.OnConnected()
 	}
@@ -88,34 +91,46 @@ func (a *Agent) runOnce(ctx context.Context) (runErr error) {
 	}
 
 	for {
-		req, err := http.ReadRequest(br)
+		stream, err := session.AcceptStream()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				return nil
 			}
 			return err
 		}
-		outReq, err := rewriteForUpstream(req, upstreamURL)
-		if err != nil {
-			_ = writeGatewayErrorResponse(bw, http.StatusBadGateway, err)
-			_ = bw.Flush()
-			return err
-		}
-		resp, err := client.Do(outReq.WithContext(ctx))
-		if err != nil {
-			_ = writeGatewayErrorResponse(bw, http.StatusBadGateway, err)
-			_ = bw.Flush()
-			continue
-		}
-		if err := resp.Write(bw); err != nil {
-			resp.Body.Close()
-			return err
-		}
-		resp.Body.Close()
-		if err := bw.Flush(); err != nil {
-			return err
-		}
+		go a.handleStream(ctx, client, upstreamURL, stream)
 	}
+}
+
+func (a *Agent) handleStream(ctx context.Context, client *http.Client, upstreamURL *url.URL, stream net.Conn) {
+	defer stream.Close()
+	req, err := http.ReadRequest(bufio.NewReader(stream))
+	if err != nil {
+		_ = writeGatewayErrorResponse(stream, http.StatusBadGateway, err)
+		return
+	}
+	outReq, err := rewriteForUpstream(req, upstreamURL)
+	if err != nil {
+		_ = writeGatewayErrorResponse(stream, http.StatusBadGateway, err)
+		return
+	}
+	resp, err := doUpstreamRequest(client, outReq.WithContext(ctx))
+	if err != nil {
+		_ = writeGatewayErrorResponse(stream, http.StatusBadGateway, err)
+		return
+	}
+	defer resp.Body.Close()
+	_ = resp.Write(stream)
+}
+
+func doUpstreamRequest(client *http.Client, req *http.Request) (*http.Response, error) {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	// Tunnel forwarding must pass redirect responses through unchanged.
+	singleHop := *client
+	singleHop.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return singleHop.Do(req)
 }
 
 func (a *Agent) register(ctx context.Context) error {
@@ -169,10 +184,10 @@ func (a *Agent) register(ctx context.Context) error {
 	return nil
 }
 
-func (a *Agent) connectTunnel(ctx context.Context) (net.Conn, *bufio.Reader, *bufio.Writer, error) {
+func (a *Agent) connectTunnel(ctx context.Context) (net.Conn, error) {
 	base, err := url.Parse(a.GatewayURL)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	address := base.Host
 	if !strings.Contains(address, ":") {
@@ -209,7 +224,7 @@ func (a *Agent) connectTunnel(ctx context.Context) (net.Conn, *bufio.Reader, *bu
 		conn, err = dialer.DialContext(ctx, "tcp", address)
 	}
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
 	br := bufio.NewReader(conn)
@@ -223,25 +238,25 @@ func (a *Agent) connectTunnel(ctx context.Context) (net.Conn, *bufio.Reader, *bu
 	}
 	if err := req.Write(bw); err != nil {
 		conn.Close()
-		return nil, nil, nil, err
+		return nil, err
 	}
 	if err := bw.Flush(); err != nil {
 		conn.Close()
-		return nil, nil, nil, err
+		return nil, err
 	}
 	resp, err := http.ReadResponse(br, req)
 	if err != nil {
 		conn.Close()
-		return nil, nil, nil, err
+		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
 		conn.Close()
-		return nil, nil, nil, fmt.Errorf("connect tunnel failed: %s %s", resp.Status, strings.TrimSpace(string(b)))
+		return nil, fmt.Errorf("connect tunnel failed: %s %s", resp.Status, strings.TrimSpace(string(b)))
 	}
 	resp.Body.Close()
-	return conn, br, bw, nil
+	return conn, nil
 }
 
 func rewriteForUpstream(req *http.Request, upstream *url.URL) (*http.Request, error) {

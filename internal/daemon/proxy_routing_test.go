@@ -141,11 +141,10 @@ func TestParseProxyMatchers(t *testing.T) {
 			"subdomain": "*",
 			"path":      "/api",
 			"match":     "prefix",
-			"mode":      "transparent",
 			"priority":  int64(5),
 		},
 	}
-	matchers := parseProxyMatchers("rails", raw, true)
+	matchers := parseProxyMatchers("rails", raw, true, "reverse_proxy")
 	if len(matchers) != 2 {
 		t.Fatalf("expected 2 matchers, got %d", len(matchers))
 	}
@@ -158,11 +157,11 @@ func TestParseProxyMatchers(t *testing.T) {
 	if matchers[1].Priority != 5 {
 		t.Fatalf("expected priority 5, got %d", matchers[1].Priority)
 	}
-	if matchers[0].Mode != "reverse" {
-		t.Fatalf("expected default mode reverse, got %q", matchers[0].Mode)
+	if matchers[0].GatewayMode != "reverse_proxy" {
+		t.Fatalf("expected default gateway mode reverse_proxy, got %q", matchers[0].GatewayMode)
 	}
-	if matchers[1].Mode != "transparent" {
-		t.Fatalf("expected transparent mode, got %q", matchers[1].Mode)
+	if matchers[1].GatewayMode != "reverse_proxy" {
+		t.Fatalf("expected default gateway mode reverse_proxy, got %q", matchers[1].GatewayMode)
 	}
 	if !matchers[0].Singleton || !matchers[1].Singleton {
 		t.Fatalf("expected singleton to propagate to matchers")
@@ -174,7 +173,7 @@ func TestParseProxyMatchers_SubdomainsList(t *testing.T) {
 		"subdomains": []any{"app", "api", "*"},
 		"path":       "/",
 	}
-	matchers := parseProxyMatchers("web", raw, false)
+	matchers := parseProxyMatchers("web", raw, false, "reverse_proxy")
 	if len(matchers) != 3 {
 		t.Fatalf("expected 3 matchers, got %d", len(matchers))
 	}
@@ -191,7 +190,7 @@ func TestParseProxyMatchers_InlineStringMap(t *testing.T) {
 	raw := map[string]string{
 		"subdomain": "mailpit",
 	}
-	matchers := parseProxyMatchers("mailpit", raw, true)
+	matchers := parseProxyMatchers("mailpit", raw, true, "rewrite")
 	if len(matchers) != 1 {
 		t.Fatalf("expected 1 matcher, got %d", len(matchers))
 	}
@@ -207,7 +206,7 @@ func TestParseProxyMatchers_TCPListen(t *testing.T) {
 	raw := map[string]any{
 		"tcp_listen": int64(15432),
 	}
-	matchers := parseProxyMatchers("postgres", raw, true)
+	matchers := parseProxyMatchers("postgres", raw, true, "reverse_proxy")
 	if len(matchers) != 1 {
 		t.Fatalf("expected 1 matcher, got %d", len(matchers))
 	}
@@ -225,6 +224,7 @@ name = "foocorp"
 
 [process.mailpit]
 singleton = true
+gateway_mode = "rewrite"
 command = "mailpit"
 proxy = { subdomain = "mailpit" }
 `
@@ -241,6 +241,9 @@ proxy = { subdomain = "mailpit" }
 	}
 	if matchers[0].Process != "mailpit" || matchers[0].Subdomain != "mailpit" {
 		t.Fatalf("unexpected matcher: %+v", matchers[0])
+	}
+	if matchers[0].GatewayMode != "rewrite" {
+		t.Fatalf("expected rewrite gateway_mode, got %q", matchers[0].GatewayMode)
 	}
 }
 

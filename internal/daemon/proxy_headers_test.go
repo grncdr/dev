@@ -10,7 +10,7 @@ func TestApplyForwardedHeadersTransparent(t *testing.T) {
 	req.Header.Set("X-Forwarded-Host", "foo.localhost")
 	req.Header.Set("X-Forwarded-For", "127.0.0.1")
 
-	applyForwardedHeaders(req, "transparent")
+	applyForwardedHeaders(req, true)
 
 	if got := req.Header.Get("X-Forwarded-Proto"); got != "https" {
 		t.Fatalf("expected X-Forwarded-Proto=https, got %q", got)
@@ -28,7 +28,7 @@ func TestApplyForwardedHeadersReverse(t *testing.T) {
 	req.Header.Set("X-Forwarded-Host", "foo.localhost")
 	req.Header.Set("X-Forwarded-For", "127.0.0.1")
 
-	applyForwardedHeaders(req, "reverse")
+	applyForwardedHeaders(req, false)
 
 	if got := req.Header.Get("X-Forwarded-Proto"); got != "https" {
 		t.Fatalf("expected X-Forwarded-Proto=https, got %q", got)

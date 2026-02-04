@@ -35,6 +35,10 @@ The above config configures the gateway to be reachable at `tunnels.example.com`
 
 The gateway terminates TLS itself using certificates from Let's Encrypt. It should **not** be run behind a reverse proxy like nginx or Caddy—run it directly on a server with ports 80 and 443 available.
 
+When traffic is tunneled through the gateway, per-process behavior is controlled by `process.<name>.gateway_mode` in `.dev-mode.toml`:
+- `reverse_proxy` (default): standard reverse proxy headers, no host/cookie/body rewrites. Local processes receive the usual `X-Forwarded-*` headers (`X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Forwarded-For`) so they can detect the public hostname and scheme.
+- `rewrite`: rewrites local apex hosts/cookies to the gateway public apex for browser-facing compatibility. Use this when your app cannot easily support both local `.localhost` hostnames and your public gateway DNS zone at the same time.
+
 To start the gateway:
 
 ```bash

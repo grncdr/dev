@@ -144,6 +144,13 @@ func (s *LeaseStore) hasActive(label string) bool {
 	return ok && lease.Status == LeaseActive
 }
 
+func (s *LeaseStore) get(label string) (Lease, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	lease, ok := s.leases[label]
+	return lease, ok
+}
+
 func (s *LeaseStore) saveLocked() error {
 	snap := leaseSnapshot{Leases: make([]Lease, 0, len(s.leases))}
 	for _, lease := range s.leases {

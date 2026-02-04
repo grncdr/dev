@@ -10,21 +10,40 @@ import (
 )
 
 func TestRewriteLocation(t *testing.T) {
-	value := "https://example.com/path"
-	got, ok := rewriteLocation(value, "app.foo.localhost")
+	value := "https://app.foo.localhost/path"
+	got, ok := rewriteLocation(value, ".localhost", "foocorp.dev")
 	if !ok {
 		t.Fatalf("expected rewrite")
 	}
-	if got != "https://app.foo.localhost/path" {
+	if got != "https://app.foo.foocorp.dev/path" {
 		t.Fatalf("unexpected rewrite: %s", got)
 	}
 }
 
 func TestRewriteCookieDomain(t *testing.T) {
 	cookie := "session=abc; Path=/; Domain=.foo.localhost; HttpOnly"
-	got := rewriteCookieDomain(cookie, ".localhost", "api.feature.localhost")
-	if got != "session=abc; Path=/; Domain=api.feature.localhost; HttpOnly" {
+	got := rewriteCookieDomain(cookie, ".localhost", "foocorp.dev")
+	if got != "session=abc; Path=/; Domain=.foo.foocorp.dev; HttpOnly" {
 		t.Fatalf("unexpected cookie: %s", got)
+	}
+}
+
+func TestDerivePublicApex(t *testing.T) {
+	got, ok := derivePublicApex("app.slug.localhost", "app.share.foocorp.dev", ".localhost")
+	if !ok {
+		t.Fatalf("expected derived apex")
+	}
+	if got != "foocorp.dev" {
+		t.Fatalf("unexpected apex: %s", got)
+	}
+}
+
+func TestRewriteRequestCookieDomainValue(t *testing.T) {
+	in := `$Version=1; session=abc; $Domain=".foo.foocorp.dev"; $Path="/"`
+	got := rewriteRequestCookieDomainValue(in, "foocorp.dev", "localhost")
+	want := `$Version=1; session=abc; $Domain=".foo.localhost"; $Path="/"`
+	if got != want {
+		t.Fatalf("unexpected cookie rewrite:\n got: %s\nwant: %s", got, want)
 	}
 }
 

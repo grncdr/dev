@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bufio"
 	"context"
 	"crypto/subtle"
 	"crypto/tls"
@@ -11,10 +12,14 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"dev-mode/internal/config"
+	"dev-mode/internal/tunnelmux"
 )
 
 type Server struct {
@@ -29,6 +34,9 @@ type Server struct {
 	dns              DNSProvider
 	certs            CertProvisioner
 	tunnels          *tunnelPool
+	logWriter        io.Writer
+	logMu            sync.Mutex
+	requestSeq       uint64
 }
 
 type ServerOptions struct {
@@ -39,6 +47,7 @@ type ServerOptions struct {
 	DNS        DNSProvider
 	Certs      CertProvisioner
 	TLSConfig  *tls.Config
+	LogWriter  io.Writer
 }
 
 type RegisterRequest struct {
@@ -109,6 +118,10 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		dns:              opts.DNS,
 		certs:            opts.Certs,
 		tunnels:          newTunnelPool(),
+		logWriter:        opts.LogWriter,
+	}
+	if s.logWriter == nil {
+		s.logWriter = os.Stdout
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/_agent/register", s.handleAgentRegister)
@@ -400,7 +413,7 @@ func (s *Server) handleAgentTunnel(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close()
 		return
 	}
-	s.tunnels.add(label, conn)
+	s.tunnels.set(label, tunnelmux.NewSession(conn))
 }
 
 func (s *Server) ensureAgentAuth(w http.ResponseWriter, r *http.Request) bool {
@@ -418,27 +431,109 @@ func (s *Server) ensureAgentAuth(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (s *Server) handlePublic(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	requestID := s.nextRequestID()
+	w.Header().Set("X-Request-Id", requestID)
+
+	logEntry := gatewayRequestLog{
+		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
+		RequestID:   requestID,
+		Method:      r.Method,
+		Host:        r.Host,
+		Path:        r.URL.Path,
+		Status:      http.StatusBadGateway,
+		RouteResult: "lease_inactive",
+	}
+	if r.URL.RawQuery != "" {
+		logEntry.Path += "?" + r.URL.RawQuery
+	}
+
 	label := s.extractLabel(r.Host)
-	if label == "" || !s.store.hasActive(label) || !s.tunnels.has(label) {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"code":  "gateway_label_unavailable",
-			"error": "no active agent for label",
+	logEntry.LabelExtracted = label
+	lease, leaseFound := s.store.get(label)
+	if label == "" {
+		logEntry.RouteResult = "no_label"
+		logEntry.ErrorCode = "gateway_label_unavailable"
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"code":       "gateway_label_unavailable",
+			"error":      "no active agent for label",
+			"request_id": requestID,
 		})
+		logEntry.Status = http.StatusBadGateway
+		logEntry.LatencyMs = time.Since(start).Milliseconds()
+		s.logRequest(logEntry)
+		return
+	}
+	if !s.store.hasActive(label) {
+		logEntry.RouteResult = "lease_inactive"
+		logEntry.ErrorCode = "gateway_label_unavailable"
+		if leaseFound {
+			logEntry.Project = lease.Project
+			logEntry.Slug = lease.Slug
+			logEntry.AgentID = lease.AgentID
+			logEntry.AgentName = lease.Name
+			logEntry.User = lease.Name
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"code":       "gateway_label_unavailable",
+			"error":      "no active agent for label",
+			"request_id": requestID,
+		})
+		logEntry.Status = http.StatusBadGateway
+		logEntry.LatencyMs = time.Since(start).Milliseconds()
+		s.logRequest(logEntry)
+		return
+	}
+	logEntry.Project = lease.Project
+	logEntry.Slug = lease.Slug
+	logEntry.AgentID = lease.AgentID
+	logEntry.AgentName = lease.Name
+	logEntry.User = lease.Name
+	if !s.tunnels.has(label) {
+		logEntry.RouteResult = "no_session"
+		logEntry.ErrorCode = "gateway_label_unavailable"
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"code":       "gateway_label_unavailable",
+			"error":      "no active agent for label",
+			"request_id": requestID,
+		})
+		logEntry.Status = http.StatusBadGateway
+		logEntry.LatencyMs = time.Since(start).Milliseconds()
+		s.logRequest(logEntry)
 		return
 	}
 	if isUpgradeRequest(r) {
-		writeJSON(w, http.StatusNotImplemented, map[string]string{
-			"code":  "gateway_websocket_not_implemented",
-			"error": "websocket forwarding is not implemented yet",
+		logEntry.RouteResult = "websocket_not_implemented"
+		logEntry.ErrorCode = "gateway_websocket_not_implemented"
+		writeJSON(w, http.StatusNotImplemented, map[string]any{
+			"code":       "gateway_websocket_not_implemented",
+			"error":      "websocket forwarding is not implemented yet",
+			"request_id": requestID,
 		})
+		logEntry.Status = http.StatusNotImplemented
+		logEntry.LatencyMs = time.Since(start).Milliseconds()
+		s.logRequest(logEntry)
 		return
 	}
-	if err := s.forwardViaTunnel(label, w, r); err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"code":  "gateway_upstream_error",
-			"error": err.Error(),
+	status, err := s.forwardViaTunnel(label, w, r)
+	if err != nil {
+		logEntry.RouteResult = "forward_error"
+		logEntry.ErrorCode = "gateway_upstream_error"
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"code":       "gateway_upstream_error",
+			"error":      err.Error(),
+			"request_id": requestID,
 		})
+		logEntry.Status = http.StatusBadGateway
+		logEntry.Error = err.Error()
+		logEntry.LatencyMs = time.Since(start).Milliseconds()
+		s.logRequest(logEntry)
+		return
 	}
+	logEntry.RouteResult = "forwarded"
+	logEntry.Status = status
+	logEntry.LatencyMs = time.Since(start).Milliseconds()
+	s.logRequest(logEntry)
 }
 
 func (s *Server) extractLabel(host string) string {
@@ -467,41 +562,67 @@ func stripPort(host string) string {
 	return host
 }
 
-func (s *Server) forwardViaTunnel(label string, w http.ResponseWriter, r *http.Request) error {
-	tc := s.tunnels.acquire(label)
-	if tc == nil {
-		return errors.New("no tunnel connection available")
+func (s *Server) forwardViaTunnel(label string, w http.ResponseWriter, r *http.Request) (int, error) {
+	sess := s.tunnels.get(label)
+	if sess == nil {
+		return 0, errors.New("no tunnel connection available")
 	}
-	release := true
-	defer func() {
-		if release {
-			s.tunnels.release(label, tc)
-		}
-	}()
+	stream, err := sess.OpenStream(r.Context())
+	if err != nil {
+		return 0, err
+	}
+	defer stream.Close()
 
 	outReq := cloneRequestForTunnel(r)
-	if err := outReq.Write(tc.bw); err != nil {
-		release = false
-		_ = tc.conn.Close()
-		return err
+	if err := outReq.Write(stream); err != nil {
+		return 0, err
 	}
-	if err := tc.bw.Flush(); err != nil {
-		release = false
-		_ = tc.conn.Close()
-		return err
-	}
-
-	resp, err := http.ReadResponse(tc.br, outReq)
+	resp, err := http.ReadResponse(bufio.NewReader(stream), outReq)
 	if err != nil {
-		release = false
-		_ = tc.conn.Close()
-		return err
+		return 0, err
 	}
 	defer resp.Body.Close()
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	_, err = io.Copy(w, resp.Body)
-	return err
+	return resp.StatusCode, err
+}
+
+type gatewayRequestLog struct {
+	Timestamp      string `json:"ts"`
+	RequestID      string `json:"request_id"`
+	Method         string `json:"method"`
+	Host           string `json:"host"`
+	Path           string `json:"path"`
+	Status         int    `json:"status"`
+	LatencyMs      int64  `json:"latency_ms"`
+	LabelExtracted string `json:"label_extracted,omitempty"`
+	RouteResult    string `json:"route_result"`
+	Project        string `json:"project,omitempty"`
+	Slug           string `json:"slug,omitempty"`
+	User           string `json:"user,omitempty"`
+	AgentID        string `json:"agent_id,omitempty"`
+	AgentName      string `json:"agent_name,omitempty"`
+	ErrorCode      string `json:"error_code,omitempty"`
+	Error          string `json:"error,omitempty"`
+}
+
+func (s *Server) nextRequestID() string {
+	n := atomic.AddUint64(&s.requestSeq, 1)
+	return fmt.Sprintf("req-%d-%d", time.Now().UTC().UnixNano(), n)
+}
+
+func (s *Server) logRequest(entry gatewayRequestLog) {
+	if s.logWriter == nil {
+		return
+	}
+	payload, err := json.Marshal(entry)
+	if err != nil {
+		return
+	}
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
+	_, _ = s.logWriter.Write(append(payload, '\n'))
 }
 
 func cloneRequestForTunnel(in *http.Request) *http.Request {

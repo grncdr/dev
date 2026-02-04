@@ -21,15 +21,15 @@ const (
 )
 
 type proxyMatcher struct {
-	Process   string
-	Subdomain string
-	Kind      subdomainMatchKind
-	Path      string
-	Match     string
-	Mode      string
-	Priority  int
-	TCPListen int
-	Singleton bool
+	Process     string
+	Subdomain   string
+	Kind        subdomainMatchKind
+	Path        string
+	Match       string
+	GatewayMode string
+	Priority    int
+	TCPListen   int
+	Singleton   bool
 }
 
 func (s *Server) parseProxyHost(host string) (slug, subdomain string, err error) {
@@ -144,7 +144,7 @@ func sameResolvedPath(a, b string) bool {
 	return filepath.Clean(resolvedA) == filepath.Clean(resolvedB)
 }
 
-func (s *Server) resolveProxyTarget(host, path string) (network string, address string, mode string, err error) {
+func (s *Server) resolveProxyTarget(host, path string) (network string, address string, gatewayMode string, err error) {
 	requestedSlug, subdomain, err := s.parseProxyHost(host)
 	if err != nil {
 		return "", "", "", err
@@ -179,7 +179,7 @@ func (s *Server) resolveProxyTarget(host, path string) (network string, address 
 	if err != nil {
 		return "", "", "", err
 	}
-	return network, address, best.Mode, nil
+	return network, address, best.GatewayMode, nil
 }
 
 func (s *Server) resolveRequestedSlug(requestedSlug string) (string, error) {
@@ -237,7 +237,8 @@ func processProxyMatchers(cfg *config.ProjectConfig) []proxyMatcher {
 		if rawSingleton, ok := proc["singleton"].(bool); ok {
 			singleton = rawSingleton
 		}
-		matchers = append(matchers, parseProxyMatchers(name, rawProxy, singleton)...)
+		gatewayMode := parseGatewayMode(proc["gateway_mode"])
+		matchers = append(matchers, parseProxyMatchers(name, rawProxy, singleton, gatewayMode)...)
 	}
 	return matchers
 }
@@ -266,17 +267,17 @@ func (s *Server) projectConfigForSlug(slug string) (*config.ProjectConfig, strin
 	return cfg, repoPath, nil
 }
 
-func parseProxyMatchers(process string, raw any, singleton bool) []proxyMatcher {
+func parseProxyMatchers(process string, raw any, singleton bool, gatewayMode string) []proxyMatcher {
 	raw = normalizeProxyConfigValue(raw)
 	switch typed := raw.(type) {
 	case []any:
 		out := []proxyMatcher{}
 		for _, item := range typed {
-			out = append(out, parseProxyMatchers(process, item, singleton)...)
+			out = append(out, parseProxyMatchers(process, item, singleton, gatewayMode)...)
 		}
 		return out
 	case map[string]any:
-		return parseProxyMatchersFromMap(process, typed, singleton)
+		return parseProxyMatchersFromMap(process, typed, singleton, gatewayMode)
 	default:
 		return nil
 	}
@@ -308,7 +309,7 @@ func normalizeProxyConfigValue(raw any) any {
 	}
 }
 
-func parseProxyMatchersFromMap(process string, raw map[string]any, singleton bool) []proxyMatcher {
+func parseProxyMatchersFromMap(process string, raw map[string]any, singleton bool, gatewayMode string) []proxyMatcher {
 	subdomains := parseSubdomainValues(raw["subdomain"], raw["subdomains"])
 	if len(subdomains) == 0 {
 		return nil
@@ -321,7 +322,6 @@ func parseProxyMatchersFromMap(process string, raw map[string]any, singleton boo
 	if rawMatch, ok := raw["match"].(string); ok && rawMatch != "" {
 		match = strings.ToLower(strings.TrimSpace(rawMatch))
 	}
-	mode := parseProxyMode(raw["mode"])
 	priority, _ := config.ParseInt(raw["priority"])
 	tcpListen := 0
 	if val, ok := config.ParseInt(raw["tcp_listen"]); ok && val > 0 {
@@ -330,29 +330,29 @@ func parseProxyMatchersFromMap(process string, raw map[string]any, singleton boo
 	out := make([]proxyMatcher, 0, len(subdomains))
 	for _, sd := range subdomains {
 		out = append(out, proxyMatcher{
-			Process:   process,
-			Subdomain: sd.subdomain,
-			Kind:      sd.kind,
-			Path:      path,
-			Match:     match,
-			Mode:      mode,
-			Priority:  priority,
-			TCPListen: tcpListen,
-			Singleton: singleton,
+			Process:     process,
+			Subdomain:   sd.subdomain,
+			Kind:        sd.kind,
+			Path:        path,
+			Match:       match,
+			GatewayMode: gatewayMode,
+			Priority:    priority,
+			TCPListen:   tcpListen,
+			Singleton:   singleton,
 		})
 	}
 	return out
 }
 
-func parseProxyMode(raw any) string {
+func parseGatewayMode(raw any) string {
 	mode := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", raw)))
 	switch mode {
-	case "transparent":
-		return "transparent"
-	case "reverse", "<nil>", "":
-		return "reverse"
+	case "rewrite":
+		return "rewrite"
+	case "reverse_proxy", "<nil>", "":
+		return "reverse_proxy"
 	default:
-		return "reverse"
+		return "reverse_proxy"
 	}
 }
 
