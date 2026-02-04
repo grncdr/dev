@@ -45,6 +45,7 @@ go install ./cmd/dev-mode
 
 - [Usage guide](docs/usage.md)
 - [Configuration reference](docs/config.md)
+- [Gateway guide](docs/gateway.md)
+- [Logging](docs/logging.md)
 - [Routing design](docs/design/routing.md)
 - [Gateway design](docs/design/gateway.md)
-- [Logging](docs/logging.md)

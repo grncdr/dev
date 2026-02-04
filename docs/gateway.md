@@ -1,0 +1,105 @@
+# Gateway
+
+The gateway is a public-facing server that allows you to share your local development environment with others via stable HTTPS URLs. It accepts incoming requests and forwards them through secure tunnels to connected dev-mode daemons.
+
+## Use cases
+
+- Share work-in-progress with teammates without deploying
+- Test on mobile devices using a real URL
+- Demo features to stakeholders from your local machine
+
+## How it works
+
+1. You run `dev-mode gateway run` on a server with a public IP.
+2. Team members run `dev-mode share <label>` from their local machines to open tunnels
+3. Requests to `<label>.example.com` are forwarded through the tunnel to the local daemon
+4. The local daemon routes the request using the same proxy rules as local development
+
+## Configuring the gateway
+
+The gateway requires configuration in `daemon.toml` (see `docs/config.md`):
+
+```toml
+[gateway]
+dns_zone = "tunnels.example.com"      # Required: apex domain for tunnel URLs
+acme_email = "admin@example.com"      # Required: email for Let's Encrypt
+hostname = "tunnels.example.com"      # CNAME target for DNS records
+dns_zone = "wip.example.com"              # Tunnel domains use this zone
+
+[gateway.route53]
+enabled = true
+hosted_zone_id = "Z1234567890"        # AWS Route53 hosted zone
+```
+
+The above config configures the gateway to be reachable at `tunnels.example.com`, with tunnels domains being created at `<label>.wip.example.com`.
+
+The gateway terminates TLS itself using certificates from Let's Encrypt. It should **not** be run behind a reverse proxy like nginx or Caddy—run it directly on a server with ports 80 and 443 available.
+
+To start the gateway:
+
+```bash
+dev-mode gateway run
+```
+
+## Onboarding team members
+
+Configure the gateway in the project `.dev-mode.toml`:
+
+```toml
+[gateway]
+url = "https://tunnels.example.com"
+```
+
+Create an invite code on the gateway server:
+
+```bash
+dev-mode gateway invite create
+```
+
+Team members redeem the invite to get credentials:
+
+```bash
+dev-mode gateway login <invite-code>
+```
+
+This generates a client certificate stored locally, enabling secure tunnel connections.
+
+## Server state
+
+The gateway stores all persistent data under `<state_dir>/gateway/`. With the default state directory, this is `~/.local/state/dev-mode/gateway/`.
+
+Example file tree:
+
+```
+gateway/
+├── pki/
+│   ├── acme/                    # ACME certificate storage (Let's Encrypt)
+│   │   └── ...
+│   ├── agent-ca.pem             # CA certificate for signing agent certs
+│   └── agent-ca-key.pem         # CA private key
+└── state/
+    ├── leases.json              # Active tunnel registrations
+    └── invites.json             # Pending invite codes
+```
+
+If you running in a container or other ephemeral infrastructure, ensure that this directory is backed up or stored on a persistent filesystem.
+
+## Client state
+
+On local developer machines, the state for gateways is stored like this:
+
+```
+gateway/
+└── agent-credentials/
+    └── tunnels.example.com/
+        ├── client-key.pem
+        ├── client.pem
+        └── ca.pem
+```
+
+If these certs are lost you will need to log in to the gateway again.
+
+## Related documentation
+
+- [Gateway design](design/gateway.md) - architecture and protocol details
+- [Configuration reference](config.md) - full list of gateway config options
