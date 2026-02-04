@@ -157,7 +157,7 @@ func runDaemonRun() error {
 }
 
 func openDaemonLog() (*os.File, string, error) {
-	stateDir, err := config.ResolveStateDir()
+	stateDir, err := config.ResolveStateDir(nil)
 	if err != nil {
 		return nil, "", err
 	}

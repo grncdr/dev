@@ -464,7 +464,7 @@ func (m *Manager) StatusWorktreeFromDir(slug, dirHint string) (*WorktreeStatus, 
 }
 
 func resolveWorktreeState(project, slug string) (string, error) {
-	base, err := config.ResolveStateDir()
+	base, err := config.ResolveStateDir(nil)
 	if err != nil {
 		return "", err
 	}

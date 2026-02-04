@@ -133,7 +133,7 @@ ttl = 60
 }
 
 func TestResolveGatewayDataDir(t *testing.T) {
-	got, err := ResolveGatewayDataDir()
+	got, err := ResolveGatewayDataDir(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -163,6 +163,26 @@ func TestResolveWorktreeDir_Default(t *testing.T) {
 
 func TestResolveWorktreeDir_RequiresAbsolutePath(t *testing.T) {
 	_, err := ResolveWorktreeDir(&DaemonConfig{WorktreeDir: "relative/path"})
+	if err == nil {
+		t.Fatalf("expected error for relative path")
+	}
+}
+
+func TestResolveStateDir_FromConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &DaemonConfig{StateDir: dir}
+	got, err := ResolveStateDir(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != dir {
+		t.Fatalf("expected %q, got %q", dir, got)
+	}
+}
+
+func TestResolveStateDir_RequiresAbsolutePath(t *testing.T) {
+	cfg := &DaemonConfig{StateDir: "relative/path"}
+	_, err := ResolveStateDir(cfg)
 	if err == nil {
 		t.Fatalf("expected error for relative path")
 	}

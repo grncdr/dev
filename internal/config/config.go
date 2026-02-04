@@ -31,6 +31,7 @@ type ProjectBlock struct {
 }
 
 type DaemonConfig struct {
+	StateDir    string                `toml:"state_dir" json:"state_dir,omitempty"`
 	Gateway     DaemonGatewayBlock    `toml:"gateway" json:"gateway,omitempty"`
 	LocalProxy  DaemonLocalProxyBlock `toml:"local-proxy" json:"local_proxy,omitempty"`
 	WorktreeDir string                `toml:"worktree_dir" json:"worktree_dir,omitempty"`
@@ -174,15 +175,25 @@ func ExpandUserPath(path string) (string, error) {
 
 const DefaultStateDir = "~/.local/state/dev-mode"
 
-func ResolveStateDir() (string, error) {
+func ResolveStateDir(cfg *DaemonConfig) (string, error) {
+	if cfg != nil && cfg.StateDir != "" {
+		expanded, err := ExpandUserPath(cfg.StateDir)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(expanded) {
+			return "", errors.New("state_dir must be an absolute path")
+		}
+		return expanded, nil
+	}
 	if env := os.Getenv("DEV_MODE_STATE_DIR"); env != "" {
 		return ExpandUserPath(env)
 	}
 	return ExpandUserPath(DefaultStateDir)
 }
 
-func ResolveGatewayDataDir() (string, error) {
-	stateDir, err := ResolveStateDir()
+func ResolveGatewayDataDir(cfg *DaemonConfig) (string, error) {
+	stateDir, err := ResolveStateDir(cfg)
 	if err != nil {
 		return "", err
 	}
@@ -195,7 +206,7 @@ func ResolveWorktreeDir(cfg *DaemonConfig) (string, error) {
 		raw = filepath.Clean(strings.TrimSpace(cfg.WorktreeDir))
 	}
 	if raw == "" || raw == "." {
-		stateDir, err := ResolveStateDir()
+		stateDir, err := ResolveStateDir(cfg)
 		if err != nil {
 			return "", err
 		}

@@ -54,7 +54,7 @@ func newDaemonLogsCmd() *cobra.Command {
 		Use:   "logs",
 		Short: "view daemon logs",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			stateDir, err := config.ResolveStateDir()
+			stateDir, err := config.ResolveStateDir(nil)
 			if err != nil {
 				return err
 			}
@@ -117,7 +117,7 @@ func runLogs(opts *Options, target string, view *logViewOptions) error {
 	if project == "" {
 		return errors.New("project.name is required")
 	}
-	stateRoot, err := config.ResolveStateDir()
+	stateRoot, err := config.ResolveStateDir(nil)
 	if err != nil {
 		return err
 	}

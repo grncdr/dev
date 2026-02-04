@@ -198,7 +198,7 @@ func gatewayMTLSClient(gatewayURL string, daemonCfg *config.DaemonConfig) (*http
 }
 
 func gatewayCredentialDir(host string) (string, error) {
-	stateDir, err := config.ResolveStateDir()
+	stateDir, err := config.ResolveStateDir(nil)
 	if err != nil {
 		return "", err
 	}

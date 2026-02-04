@@ -86,7 +86,7 @@ func runGateway(opts *Options) error {
 	if err != nil {
 		return err
 	}
-	dataDir, err := config.ResolveGatewayDataDir()
+	dataDir, err := config.ResolveGatewayDataDir(daemonCfg)
 	if err != nil {
 		return err
 	}
@@ -230,7 +230,11 @@ func buildGatewayACME(ctx context.Context, daemonCfg *config.DaemonConfig, dataD
 }
 
 func runGatewayInviteCreate(opts *Options, ttl time.Duration, uses int) error {
-	dataDir, err := config.ResolveGatewayDataDir()
+	daemonCfg, _, err := config.LoadDaemonConfig(opts.ResolvedPaths.DaemonConfig)
+	if err != nil {
+		return err
+	}
+	dataDir, err := config.ResolveGatewayDataDir(daemonCfg)
 	if err != nil {
 		return err
 	}
@@ -359,7 +363,7 @@ func generateGatewayCSR(name string) (*ecdsa.PrivateKey, []byte, error) {
 }
 
 func gatewayCredentialDir(gatewayURL string) (string, error) {
-	stateDir, err := config.ResolveStateDir()
+	stateDir, err := config.ResolveStateDir(nil)
 	if err != nil {
 		return "", err
 	}
