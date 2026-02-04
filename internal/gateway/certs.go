@@ -68,6 +68,12 @@ func NewACMEManager(ctx context.Context, opts ACMEOptions) (*ACMEManager, *tls.C
 						HostedZoneID: opts.HostedZoneID,
 					},
 					Resolvers: resolvers,
+					// PropagationDelay adds wait time after our Resolvers confirm the
+					// TXT record exists, before notifying Let's Encrypt to validate.
+					// This allows time for the record to propagate to Let's Encrypt's
+					// DNS infrastructure, avoiding validation failures that would
+					// otherwise trigger certmagic's retry loop.
+					PropagationDelay: 10 * time.Second,
 				},
 			},
 		}),
