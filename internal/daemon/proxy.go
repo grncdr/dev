@@ -253,6 +253,7 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 		applyForwardedHeaders(req, rewriteMode)
 		if rewriteMode && hasPublicApex {
 			rewriteRequestCookieDomain(req.Header, publicApex, localApex)
+			rewriteRequestOrigin(req.Header, publicApex, localApex)
 		}
 	}
 	reverseProxy.Transport = &http.Transport{

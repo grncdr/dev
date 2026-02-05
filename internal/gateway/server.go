@@ -519,12 +519,17 @@ func (s *Server) handlePublic(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		logEntry.RouteResult = "forward_error"
 		logEntry.ErrorCode = "gateway_upstream_error"
-		writeJSON(w, http.StatusBadGateway, map[string]any{
-			"code":       "gateway_upstream_error",
-			"error":      err.Error(),
-			"request_id": requestID,
-		})
-		logEntry.Status = http.StatusBadGateway
+		if status == 0 {
+			writeJSON(w, http.StatusBadGateway, map[string]any{
+				"code":       "gateway_upstream_error",
+				"error":      err.Error(),
+				"request_id": requestID,
+			})
+			logEntry.Status = http.StatusBadGateway
+		} else {
+			// Upstream headers were already forwarded, so we cannot emit a JSON error response now.
+			logEntry.Status = status
+		}
 		logEntry.Error = err.Error()
 		logEntry.LatencyMs = time.Since(start).Milliseconds()
 		s.logRequest(logEntry)

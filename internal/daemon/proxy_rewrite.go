@@ -60,6 +60,23 @@ func rewriteRequestCookieDomain(header http.Header, publicApex, localApex string
 	}
 }
 
+func rewriteRequestOrigin(header http.Header, publicApex, localApex string) {
+	origin := strings.TrimSpace(header.Get("Origin"))
+	if origin == "" || strings.EqualFold(origin, "null") {
+		return
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || !parsed.IsAbs() || parsed.Host == "" {
+		return
+	}
+	rewrittenHost, ok := replaceHostApex(parsed.Host, publicApex, localApex)
+	if !ok {
+		return
+	}
+	parsed.Host = rewrittenHost
+	header.Set("Origin", parsed.String())
+}
+
 func rewriteRequestCookieDomainValue(value, publicApex, localApex string) string {
 	parts := strings.Split(value, ";")
 	for i, part := range parts {

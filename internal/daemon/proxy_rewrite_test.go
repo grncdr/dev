@@ -47,6 +47,39 @@ func TestRewriteRequestCookieDomainValue(t *testing.T) {
 	}
 }
 
+func TestRewriteRequestOrigin(t *testing.T) {
+	header := make(http.Header)
+	header.Set("Origin", "https://app.slug.foocorp.dev")
+
+	rewriteRequestOrigin(header, "foocorp.dev", "localhost")
+
+	if got := header.Get("Origin"); got != "https://app.slug.localhost" {
+		t.Fatalf("unexpected Origin rewrite: %s", got)
+	}
+}
+
+func TestRewriteRequestOriginNoMatch(t *testing.T) {
+	header := make(http.Header)
+	header.Set("Origin", "https://app.slug.example.com")
+
+	rewriteRequestOrigin(header, "foocorp.dev", "localhost")
+
+	if got := header.Get("Origin"); got != "https://app.slug.example.com" {
+		t.Fatalf("expected Origin unchanged, got: %s", got)
+	}
+}
+
+func TestRewriteRequestOriginInvalidValue(t *testing.T) {
+	header := make(http.Header)
+	header.Set("Origin", "not a url")
+
+	rewriteRequestOrigin(header, "foocorp.dev", "localhost")
+
+	if got := header.Get("Origin"); got != "not a url" {
+		t.Fatalf("expected invalid Origin unchanged, got: %s", got)
+	}
+}
+
 func TestRewriteResponseBody_Text(t *testing.T) {
 	body := []byte(`<a href="https://app.feature.localhost/path">x</a>`)
 	resp := &http.Response{
