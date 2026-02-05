@@ -33,6 +33,7 @@ command = "puma"
 port = "random"                         # "random" | "unix" | integer
 health = { type = "http", path = "/up" } # optional
 startup_timeout = 45.0                  # optional, seconds
+needs = ["postgres"]                    # optional
 
 [[process.rails.proxy]]
 subdomain = null

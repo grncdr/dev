@@ -37,7 +37,7 @@ Hash/input set must include all executable fields in current config model:
 
 Notes:
 
-- `process.<name>.env`, `port`, `proxy`, `health`, `startup_timeout`, `singleton` are not directly executable and are excluded.
+- `process.<name>.env`, `port`, `proxy`, `health`, `startup_timeout`, `singleton`, `needs` are not directly executable and are excluded.
 - Hashing should be deterministic by field name and process key order.
 
 ## Trust Identity and Storage (Proposed)

@@ -24,3 +24,13 @@ func ResolveConfiguredMainSlug(mainPath string) (string, bool, error) {
 	}
 	return slug, true, nil
 }
+
+// ResolveMainSlug returns the configured main slug, falling back to "main".
+func ResolveMainSlug(mainPath string) (string, error) {
+	if configured, ok, err := ResolveConfiguredMainSlug(mainPath); err != nil {
+		return "", err
+	} else if ok {
+		return configured, nil
+	}
+	return "main", nil
+}

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -156,7 +157,35 @@ func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string,
 	m.mu.Unlock()
 
 	selected := selectProcesses(cfg.Processes, processes, all)
-	for name, proc := range selected {
+	needs, err := buildProcessNeeds(cfg.Processes)
+	if err != nil {
+		return nil, err
+	}
+	localSet, mainSet, err := needs.buildStartSets(selected, isMain)
+	if err != nil {
+		return nil, err
+	}
+	if !isMain && len(mainSet) > 0 {
+		mainSlug, err := worktree.ResolveMainSlug(mainPath)
+		if err != nil {
+			return nil, fmt.Errorf("resolve main worktree slug: %w", err)
+		}
+		mainNames := make([]string, 0, len(mainSet))
+		for name := range mainSet {
+			mainNames = append(mainNames, name)
+		}
+		sort.Strings(mainNames)
+		if _, err := m.StartProcessesFromDir(mainSlug, mainPath, mainNames, false); err != nil {
+			return nil, err
+		}
+	}
+
+	localOrder, err := topoSortProcesses(localSet, needs.needs)
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range localOrder {
+		proc := cfg.Processes[name]
 		if singleton, ok := proc["singleton"].(bool); ok && singleton && !isMain {
 			continue
 		}
@@ -334,6 +363,145 @@ func selectProcesses(allProcesses map[string]map[string]any, names []string, all
 		}
 	}
 	return selected
+}
+
+type processNeeds struct {
+	needs       map[string][]string
+	singleton   map[string]bool
+	processes   map[string]map[string]any
+	parsedCache map[string][]string
+}
+
+func buildProcessNeeds(processes map[string]map[string]any) (*processNeeds, error) {
+	out := &processNeeds{
+		needs:     make(map[string][]string, len(processes)),
+		singleton: make(map[string]bool, len(processes)),
+		processes: processes,
+	}
+	for name, proc := range processes {
+		if rawSingleton, ok := proc["singleton"].(bool); ok {
+			out.singleton[name] = rawSingleton
+		}
+		parsed, err := config.ParseProcessNeeds(proc["needs"])
+		if err != nil {
+			return nil, fmt.Errorf("process %s needs: %w", name, err)
+		}
+		out.needs[name] = parsed
+	}
+	return out, nil
+}
+
+func (p *processNeeds) ensureExists(parent, name string) error {
+	if _, ok := p.processes[name]; !ok {
+		if parent == "" {
+			return fmt.Errorf("process needs unknown process %s", name)
+		}
+		return fmt.Errorf("process %s needs unknown process %s", parent, name)
+	}
+	return nil
+}
+
+func (p *processNeeds) buildStartSets(selected map[string]map[string]any, isMain bool) (localSet, mainSet map[string]bool, err error) {
+	localSet = map[string]bool{}
+	mainSet = map[string]bool{}
+	var addMain func(parent, name string) error
+	addMain = func(parent, name string) error {
+		if mainSet[name] {
+			return nil
+		}
+		if err := p.ensureExists(parent, name); err != nil {
+			return err
+		}
+		mainSet[name] = true
+		for _, dep := range p.needs[name] {
+			if err := addMain(name, dep); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	var addLocal func(parent, name string) error
+	addLocal = func(parent, name string) error {
+		if localSet[name] {
+			return nil
+		}
+		if err := p.ensureExists(parent, name); err != nil {
+			return err
+		}
+		if p.singleton[name] && !isMain {
+			return addMain(parent, name)
+		}
+		localSet[name] = true
+		for _, dep := range p.needs[name] {
+			if err := addLocal(name, dep); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for name := range selected {
+		if isMain {
+			if err := addLocal("", name); err != nil {
+				return nil, nil, err
+			}
+			continue
+		}
+		if p.singleton[name] {
+			if err := addMain("", name); err != nil {
+				return nil, nil, err
+			}
+			continue
+		}
+		if err := addLocal("", name); err != nil {
+			return nil, nil, err
+		}
+	}
+	return localSet, mainSet, nil
+}
+
+func topoSortProcesses(startSet map[string]bool, needs map[string][]string) ([]string, error) {
+	if len(startSet) == 0 {
+		return nil, nil
+	}
+	order := []string{}
+	visiting := map[string]bool{}
+	visited := map[string]bool{}
+
+	var visit func(name string, stack []string) error
+	visit = func(name string, stack []string) error {
+		if visited[name] {
+			return nil
+		}
+		if visiting[name] {
+			return fmt.Errorf("process dependency cycle: %s -> %s", strings.Join(stack, " -> "), name)
+		}
+		visiting[name] = true
+		stack = append(stack, name)
+		for _, dep := range needs[name] {
+			if !startSet[dep] {
+				continue
+			}
+			if err := visit(dep, stack); err != nil {
+				return err
+			}
+		}
+		visiting[name] = false
+		visited[name] = true
+		order = append(order, name)
+		return nil
+	}
+
+	names := make([]string, 0, len(startSet))
+	for name := range startSet {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if err := visit(name, nil); err != nil {
+			return nil, err
+		}
+	}
+	return order, nil
 }
 
 func (m *Manager) StopWorktree(slug string) (*WorktreeStatus, error) {
