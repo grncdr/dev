@@ -502,19 +502,6 @@ func (s *Server) handlePublic(w http.ResponseWriter, r *http.Request) {
 		s.logRequest(logEntry)
 		return
 	}
-	if isUpgradeRequest(r) {
-		logEntry.RouteResult = "websocket_not_implemented"
-		logEntry.ErrorCode = "gateway_websocket_not_implemented"
-		writeJSON(w, http.StatusNotImplemented, map[string]any{
-			"code":       "gateway_websocket_not_implemented",
-			"error":      "websocket forwarding is not implemented yet",
-			"request_id": requestID,
-		})
-		logEntry.Status = http.StatusNotImplemented
-		logEntry.LatencyMs = time.Since(start).Milliseconds()
-		s.logRequest(logEntry)
-		return
-	}
 	status, err := s.forwardViaTunnel(label, w, r)
 	if err != nil {
 		logEntry.RouteResult = "forward_error"
@@ -576,21 +563,52 @@ func (s *Server) forwardViaTunnel(label string, w http.ResponseWriter, r *http.R
 	if err != nil {
 		return 0, err
 	}
-	defer stream.Close()
 
 	outReq := cloneRequestForTunnel(r)
 	if err := outReq.Write(stream); err != nil {
+		_ = stream.Close()
 		return 0, err
 	}
-	resp, err := http.ReadResponse(bufio.NewReader(stream), outReq)
+	br := bufio.NewReader(stream)
+	resp, err := http.ReadResponse(br, outReq)
 	if err != nil {
+		_ = stream.Close()
 		return 0, err
 	}
+	if resp.StatusCode == http.StatusSwitchingProtocols {
+		return http.StatusSwitchingProtocols, s.forwardUpgradedResponse(w, stream, br, resp)
+	}
+
+	defer stream.Close()
 	defer resp.Body.Close()
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	_, err = io.Copy(w, resp.Body)
 	return resp.StatusCode, err
+}
+
+func (s *Server) forwardUpgradedResponse(w http.ResponseWriter, stream net.Conn, streamReader *bufio.Reader, resp *http.Response) error {
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		_ = stream.Close()
+		return errors.New("hijack not supported for upgraded request")
+	}
+	clientConn, clientRW, err := hijacker.Hijack()
+	if err != nil {
+		_ = stream.Close()
+		return err
+	}
+	if err := resp.Write(clientRW); err != nil {
+		_ = clientConn.Close()
+		_ = stream.Close()
+		return err
+	}
+	if err := clientRW.Flush(); err != nil {
+		_ = clientConn.Close()
+		_ = stream.Close()
+		return err
+	}
+	return proxyBidirectional(clientConn, clientRW, stream, streamReader)
 }
 
 type gatewayRequestLog struct {

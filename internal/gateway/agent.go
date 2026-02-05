@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -114,6 +115,13 @@ func (a *Agent) handleStream(ctx context.Context, client *http.Client, upstreamU
 		_ = writeGatewayErrorResponse(stream, http.StatusBadGateway, err)
 		return
 	}
+	if isUpgradeRequest(outReq) {
+		if err := forwardUpgradeToUpstream(outReq.WithContext(ctx), upstreamURL, stream, client); err != nil {
+			log.Printf("gateway agent: upgrade forward failed: %v", err)
+			_ = writeGatewayErrorResponse(stream, http.StatusBadGateway, err)
+		}
+		return
+	}
 	resp, err := doUpstreamRequest(client, outReq.WithContext(ctx))
 	if err != nil {
 		_ = writeGatewayErrorResponse(stream, http.StatusBadGateway, err)
@@ -121,6 +129,84 @@ func (a *Agent) handleStream(ctx context.Context, client *http.Client, upstreamU
 	}
 	defer resp.Body.Close()
 	_ = resp.Write(stream)
+}
+
+func forwardUpgradeToUpstream(req *http.Request, upstreamURL *url.URL, stream net.Conn, client *http.Client) error {
+	upstreamConn, err := dialUpgradeUpstream(upstreamURL, client)
+	if err != nil {
+		return err
+	}
+	defer upstreamConn.Close()
+
+	if err := req.Write(upstreamConn); err != nil {
+		return err
+	}
+	upstreamReader := bufio.NewReader(upstreamConn)
+	resp, err := http.ReadResponse(upstreamReader, req)
+	if err != nil {
+		return err
+	}
+	if err := resp.Write(stream); err != nil {
+		_ = resp.Body.Close()
+		return err
+	}
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		defer resp.Body.Close()
+		_, err := io.Copy(stream, resp.Body)
+		return err
+	}
+	return proxyBidirectional(stream, nil, upstreamConn, upstreamReader)
+}
+
+func dialUpgradeUpstream(upstreamURL *url.URL, client *http.Client) (net.Conn, error) {
+	if upstreamURL == nil {
+		return nil, errors.New("upstream URL is required")
+	}
+	address := upstreamURL.Host
+	if !strings.Contains(address, ":") {
+		switch strings.ToLower(upstreamURL.Scheme) {
+		case "https":
+			address += ":443"
+		default:
+			address += ":80"
+		}
+	}
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	switch strings.ToLower(upstreamURL.Scheme) {
+	case "https":
+		tlsCfg := tlsConfigForUpstreamDial(client, upstreamURL.Hostname())
+		return tls.DialWithDialer(dialer, "tcp", address, tlsCfg)
+	case "http", "":
+		return dialer.Dial("tcp", address)
+	default:
+		return nil, fmt.Errorf("unsupported upstream scheme for upgrade: %s", upstreamURL.Scheme)
+	}
+}
+
+func tlsConfigForUpstreamDial(client *http.Client, host string) *tls.Config {
+	base := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		ServerName: host,
+	}
+	if client == nil {
+		return base
+	}
+	transport := client.Transport
+	if transport == nil {
+		return base
+	}
+	httpTransport, ok := transport.(*http.Transport)
+	if !ok || httpTransport.TLSClientConfig == nil {
+		return base
+	}
+	cloned := httpTransport.TLSClientConfig.Clone()
+	if cloned.ServerName == "" {
+		cloned.ServerName = host
+	}
+	if cloned.MinVersion == 0 {
+		cloned.MinVersion = tls.VersionTLS12
+	}
+	return cloned
 }
 
 func doUpstreamRequest(client *http.Client, req *http.Request) (*http.Response, error) {

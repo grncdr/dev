@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/ecdsa"
@@ -13,6 +14,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -356,6 +358,133 @@ func TestServer_ForwardsConcurrentRequestsOverSingleTunnel(t *testing.T) {
 		if err := <-errCh; err != nil {
 			t.Fatalf("concurrent forward failed: %v", err)
 		}
+	}
+}
+
+func TestServer_ForwardsWebsocketUpgradeOverTunnel(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ready" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.URL.Path != "/ws" {
+			http.NotFound(w, r)
+			return
+		}
+		if !isUpgradeRequest(r) {
+			http.Error(w, "expected upgrade request", http.StatusBadRequest)
+			return
+		}
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			http.Error(w, "hijack unsupported", http.StatusInternalServerError)
+			return
+		}
+		conn, rw, err := hijacker.Hijack()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if _, err := rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"); err != nil {
+			return
+		}
+		if err := rw.Flush(); err != nil {
+			return
+		}
+		line, err := rw.ReadString('\n')
+		if err != nil {
+			return
+		}
+		_, _ = rw.WriteString("echo:" + line)
+		_ = rw.Flush()
+	}))
+	defer upstream.Close()
+
+	dir := t.TempDir()
+	srv, client := startGatewayServer(t, dir, config.DaemonGatewayAuth{})
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	agent := &Agent{
+		GatewayURL:  "http://" + srv.Addr(),
+		UpstreamURL: upstream.URL,
+		Label:       "alpha",
+		Project:     "Foo Corp",
+		Slug:        "main",
+		AgentID:     "agent-1",
+	}
+	go func() {
+		_ = agent.Run(ctx)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		req, err := http.NewRequest(http.MethodGet, "http://"+srv.Addr()+"/ready", nil)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Host = "alpha.localhost"
+		resp, err := client.Do(req)
+		if err == nil && resp.StatusCode == http.StatusNoContent {
+			resp.Body.Close()
+			break
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("forwarding never became ready; last error=%v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	conn, err := net.DialTimeout("tcp", srv.Addr(), time.Second)
+	if err != nil {
+		t.Fatalf("dial gateway: %v", err)
+	}
+	defer conn.Close()
+
+	req := "GET /ws HTTP/1.1\r\n" +
+		"Host: app.alpha.localhost\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Sec-WebSocket-Version: 13\r\n" +
+		"Sec-WebSocket-Key: testtesttest=\r\n" +
+		"\r\n"
+	if _, err := conn.Write([]byte(req)); err != nil {
+		t.Fatalf("write upgrade request: %v", err)
+	}
+
+	br := bufio.NewReader(conn)
+	upgradeReq, err := http.NewRequest(http.MethodGet, "http://"+srv.Addr()+"/ws", nil)
+	if err != nil {
+		t.Fatalf("new read response request: %v", err)
+	}
+	resp, err := http.ReadResponse(br, upgradeReq)
+	if err != nil {
+		t.Fatalf("read upgrade response: %v", err)
+	}
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("expected 101, got %d body=%q", resp.StatusCode, string(body))
+	}
+	resp.Body.Close()
+
+	if _, err := conn.Write([]byte("ping\n")); err != nil {
+		t.Fatalf("write upgraded payload: %v", err)
+	}
+	line, err := br.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read upgraded payload: %v", err)
+	}
+	if line != "echo:ping\n" {
+		t.Fatalf("unexpected upgraded payload: %q", line)
 	}
 }
 
