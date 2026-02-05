@@ -503,6 +503,10 @@ func gatewayProxyURLsByProcess(localByProcess map[string][]string, cfg *config.P
 	if tunnel == nil || tunnel.Status != "connected" || cfg == nil {
 		return out
 	}
+	exposed := config.GatewayExposeModes(cfg)
+	if len(exposed) == 0 {
+		return out
+	}
 	gatewayURL, _ := cfg.Gateway["url"].(string)
 	gatewayURL = strings.TrimSpace(gatewayURL)
 	if gatewayURL == "" {
@@ -525,6 +529,9 @@ func gatewayProxyURLsByProcess(localByProcess map[string][]string, cfg *config.P
 		return out
 	}
 	for process, routes := range localByProcess {
+		if _, ok := exposed[process]; !ok {
+			continue
+		}
 		for _, route := range routes {
 			if !strings.HasPrefix(route, "https://") {
 				continue

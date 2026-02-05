@@ -22,6 +22,12 @@ Optional sections:
 [gateway]
 url = "https://gateway.foocorp.dev"
 
+[gateway.expose.rails]
+mode = "reverse_proxy"
+
+[gateway.expose.webpack]
+mode = "rewrite"
+
 [process.postgres]
 singleton = true
 command = "devbox services start postgresql"
@@ -30,7 +36,6 @@ port = "random"
 
 [process.rails]
 singleton = false
-gateway_mode = "reverse_proxy"
 command = "rails server"
 port = "unix"
 wrapper = "bundle exec $COMMAND"
@@ -103,9 +108,10 @@ Notes:
   - `health = { type = "tcp" }` waits for a successful TCP connect (you can also set `port = <int>` inside health to probe a specific port).
 - `startup_timeout` is optional per process (decimal seconds) and overrides health timeout when waiting for startup readiness.
 - Proxy routing uses per-process matchers. Requests are matched by subdomain first (explicit beats `*` wildcard), then longest path match, then highest `priority`, then process name.
-- `process.<name>.gateway_mode` controls behavior only for gateway-tunneled requests for that process:
-  - `gateway_mode = "reverse_proxy"` (default): sends `X-Forwarded-*` headers and does not rewrite response headers/body.
-  - `gateway_mode = "rewrite"`: sends `X-Forwarded-Proto`, omits `X-Forwarded-Host`/`X-Forwarded-For`, rewrites `Location`, rewrites `Set-Cookie Domain`, rewrites RFC cookie `$Domain` on incoming requests, and rewrites text response bodies for local/public host mapping.
+- `gateway.expose` controls which processes accept gateway-tunneled requests.
+  - Only processes listed in `gateway.expose` are reachable from the gateway.
+  - `mode = "reverse_proxy"`: sends `X-Forwarded-*` headers and does not rewrite response headers/body.
+  - `mode = "rewrite"`: sends `X-Forwarded-Proto`, omits `X-Forwarded-Host`/`X-Forwarded-For`, rewrites `Location`, rewrites `Set-Cookie Domain`, rewrites RFC cookie `$Domain` on incoming requests, and rewrites text response bodies for local/public host mapping.
 - `subdomain = null` matches `<slug>.<apex_zone>`. `subdomain = "app"` matches `app.<slug>.<apex_zone>`. `subdomain = "*"` matches any subdomain under `<slug>.<apex_zone>`.
 - `subdomains = [...]` is also supported in a matcher to map multiple subdomains in one block.
 - `path` defaults to `/`, `match` defaults to `prefix`, and `priority` defaults to `0`.

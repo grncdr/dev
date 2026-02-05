@@ -32,6 +32,8 @@ type proxyMatcher struct {
 	Singleton   bool
 }
 
+var errGatewayProcessNotExposed = errors.New("gateway traffic not exposed for matched process")
+
 func (s *Server) parseProxyHost(host string) (slug, subdomain string, err error) {
 	apex := strings.TrimPrefix(strings.ToLower(s.projectApexZone()), ".")
 	if apex == "" {
@@ -145,6 +147,10 @@ func sameResolvedPath(a, b string) bool {
 }
 
 func (s *Server) resolveProxyTarget(host, path string) (network string, address string, gatewayMode string, err error) {
+	return s.resolveProxyTargetForRequest(host, path, false)
+}
+
+func (s *Server) resolveProxyTargetForRequest(host, path string, fromGateway bool) (network string, address string, gatewayMode string, err error) {
 	requestedSlug, subdomain, err := s.parseProxyHost(host)
 	if err != nil {
 		return "", "", "", err
@@ -164,6 +170,9 @@ func (s *Server) resolveProxyTarget(host, path string) (network string, address 
 	best, ok := selectProxyMatcher(matchers, subdomain, path)
 	if !ok {
 		return "", "", "", errors.New("no proxy matcher matched")
+	}
+	if fromGateway && best.GatewayMode == config.GatewayModeDisable {
+		return "", "", "", errGatewayProcessNotExposed
 	}
 
 	targetSlug := slug
@@ -240,6 +249,7 @@ func processProxyMatchers(cfg *config.ProjectConfig) []proxyMatcher {
 		return nil
 	}
 	matchers := []proxyMatcher{}
+	gatewayModes := config.GatewayExposeModes(cfg)
 	for name, proc := range cfg.Processes {
 		rawProxy, ok := proc["proxy"]
 		if !ok || rawProxy == nil {
@@ -249,7 +259,10 @@ func processProxyMatchers(cfg *config.ProjectConfig) []proxyMatcher {
 		if rawSingleton, ok := proc["singleton"].(bool); ok {
 			singleton = rawSingleton
 		}
-		gatewayMode := parseGatewayMode(proc["gateway_mode"])
+		gatewayMode := config.GatewayModeDisable
+		if exposedMode, ok := gatewayModes[name]; ok {
+			gatewayMode = exposedMode
+		}
 		matchers = append(matchers, parseProxyMatchers(name, rawProxy, singleton, gatewayMode)...)
 	}
 	return matchers
@@ -354,18 +367,6 @@ func parseProxyMatchersFromMap(process string, raw map[string]any, singleton boo
 		})
 	}
 	return out
-}
-
-func parseGatewayMode(raw any) string {
-	mode := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", raw)))
-	switch mode {
-	case "rewrite":
-		return "rewrite"
-	case "reverse_proxy", "<nil>", "":
-		return "reverse_proxy"
-	default:
-		return "reverse_proxy"
-	}
 }
 
 type parsedSubdomain struct {

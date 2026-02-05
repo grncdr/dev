@@ -231,12 +231,16 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 		isGatewayTunnel = true
 	}
 
-	network, address, gatewayMode, err := s.resolveProxyTarget(routeHost, r.URL.Path)
+	network, address, gatewayMode, err := s.resolveProxyTargetForRequest(routeHost, r.URL.Path, isGatewayTunnel)
 	if err != nil {
+		if errors.Is(err, errGatewayProcessNotExposed) {
+			writeErrorWithCode(w, http.StatusForbidden, "proxy_gateway_not_exposed", err)
+			return
+		}
 		writeErrorWithCode(w, http.StatusBadGateway, "proxy_target_error", err)
 		return
 	}
-	rewriteMode := isGatewayTunnel && gatewayMode == "rewrite"
+	rewriteMode := isGatewayTunnel && gatewayMode == config.GatewayModeRewrite
 
 	target, _ := url.Parse("http://unix")
 	reverseProxy := httputil.NewSingleHostReverseProxy(target)
