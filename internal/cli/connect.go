@@ -10,6 +10,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -17,6 +18,14 @@ import (
 	"dev-mode/internal/daemon"
 	"dev-mode/internal/worktree"
 )
+
+const (
+	detachPrefixByte  = 0x01 // Ctrl-A
+	detachTriggerByte = 0x04 // Ctrl-D
+	detachTimeout     = time.Second
+)
+
+var errDetachRequested = errors.New("detach requested")
 
 func newAttachCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
@@ -96,7 +105,12 @@ func runAttach(opts *Options, process, slug string) error {
 
 	errCh := make(chan error, 2)
 	go func() {
-		_, err := io.Copy(conn, os.Stdin)
+		err := forwardAttachInput(conn, os.Stdin, detachTimeout)
+		if errors.Is(err, errDetachRequested) {
+			errCh <- nil
+			_ = conn.Close()
+			return
+		}
 		errCh <- err
 	}()
 	go func() {
@@ -105,4 +119,110 @@ func runAttach(opts *Options, process, slug string) error {
 	}()
 
 	return <-errCh
+}
+
+func forwardAttachInput(dst io.Writer, src io.Reader, timeout time.Duration) error {
+	type readEvent struct {
+		b   byte
+		err error
+	}
+	eventCh := make(chan readEvent, 1)
+
+	go func() {
+		buf := make([]byte, 1)
+		for {
+			n, err := src.Read(buf)
+			if n > 0 {
+				eventCh <- readEvent{b: buf[0]}
+			}
+			if err != nil {
+				eventCh <- readEvent{err: err}
+				return
+			}
+		}
+	}()
+
+	var (
+		pendingPrefix bool
+		timer         *time.Timer
+		timerCh       <-chan time.Time
+	)
+
+	stopTimer := func() {
+		if timer == nil {
+			return
+		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer = nil
+		timerCh = nil
+	}
+
+	flushPrefix := func() error {
+		if !pendingPrefix {
+			return nil
+		}
+		pendingPrefix = false
+		_, err := dst.Write([]byte{detachPrefixByte})
+		return err
+	}
+
+	startPendingPrefix := func() {
+		pendingPrefix = true
+		timer = time.NewTimer(timeout)
+		timerCh = timer.C
+	}
+
+	for {
+		select {
+		case event := <-eventCh:
+			if event.err != nil {
+				stopTimer()
+				if err := flushPrefix(); err != nil {
+					return err
+				}
+				if errors.Is(event.err, io.EOF) {
+					return nil
+				}
+				return event.err
+			}
+			b := event.b
+			if !pendingPrefix {
+				if b == detachPrefixByte {
+					startPendingPrefix()
+					continue
+				}
+				if _, err := dst.Write([]byte{b}); err != nil {
+					stopTimer()
+					return err
+				}
+				continue
+			}
+
+			stopTimer()
+			if b == detachTriggerByte {
+				return errDetachRequested
+			}
+			if err := flushPrefix(); err != nil {
+				return err
+			}
+			if b == detachPrefixByte {
+				startPendingPrefix()
+				continue
+			}
+			if _, err := dst.Write([]byte{b}); err != nil {
+				return err
+			}
+
+		case <-timerCh:
+			stopTimer()
+			if err := flushPrefix(); err != nil {
+				return err
+			}
+		}
+	}
 }
