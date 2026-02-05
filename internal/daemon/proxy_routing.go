@@ -168,7 +168,7 @@ func (s *Server) resolveProxyTarget(host, path string) (network string, address 
 
 	targetSlug := slug
 	if best.Singleton {
-		mainSlug, err := worktree.ResolveMainSlugInDir(repoPath)
+		mainSlug, err := resolveMainWorktreeSlug(repoPath)
 		if err != nil {
 			return "", "", "", err
 		}
@@ -186,11 +186,7 @@ func (s *Server) resolveRequestedSlug(requestedSlug string) (string, error) {
 	if requestedSlug == "" {
 		return "", errors.New("missing requested slug")
 	}
-	mainSlug, err := worktree.ResolveMainSlugInDir(s.mainPath)
-	if err != nil {
-		return requestedSlug, nil
-	}
-	mainPath, err := worktree.ResolvePathFromSlugInDir(mainSlug, s.mainPath)
+	mainPath, err := worktree.ResolveMainPathInDir(s.mainPath)
 	if err != nil {
 		return requestedSlug, nil
 	}
@@ -200,10 +196,26 @@ func (s *Server) resolveRequestedSlug(requestedSlug string) (string, error) {
 		return requestedSlug, nil
 	}
 	override := strings.TrimSpace(strings.ToLower(cfg.Project.MainSlug))
+	mainSlug, err := resolveMainWorktreeSlug(mainPath)
+	if err != nil {
+		return requestedSlug, nil
+	}
+	if strings.EqualFold(requestedSlug, "main") {
+		return mainSlug, nil
+	}
 	if override != "" && strings.EqualFold(requestedSlug, override) {
 		return mainSlug, nil
 	}
 	return requestedSlug, nil
+}
+
+func resolveMainWorktreeSlug(mainPath string) (string, error) {
+	if configured, ok, err := worktree.ResolveConfiguredMainSlug(mainPath); err != nil {
+		return "", err
+	} else if ok {
+		return configured, nil
+	}
+	return "main", nil
 }
 
 func prefixMatch(requestPath, prefix string) bool {

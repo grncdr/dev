@@ -97,7 +97,7 @@ command = "sh -c \"echo ${PORT} > port.txt; sleep 30\""
 		t.Fatalf("daemon not healthy: %v", err)
 	}
 
-	slug := filepath.Base(repoDir)
+	slug := defaultSlugForRepo(t, repoDir)
 	status, err := client.WorktreeStart(ctx, slug)
 	if err != nil {
 		t.Fatalf("worktree start: %v", err)
@@ -236,7 +236,7 @@ proxy = { subdomain = "mailpit" }
 		t.Fatalf("daemon not healthy: %v", err)
 	}
 
-	slug := filepath.Base(repoDir)
+	slug := defaultSlugForRepo(t, repoDir)
 	if _, err := client.WorktreeStart(ctx, slug); err != nil {
 		t.Fatalf("worktree start: %v", err)
 	}
@@ -346,7 +346,7 @@ command = "sh -c \"python3 -m http.server ${PORT}\""
 	if err := waitForHealth(client, 2*time.Second); err != nil {
 		t.Fatalf("daemon not healthy: %v", err)
 	}
-	slug := filepath.Base(repoDir)
+	slug := defaultSlugForRepo(t, repoDir)
 	if _, err := client.WorktreeStart(ctx, slug); err != nil {
 		t.Fatalf("worktree start: %v", err)
 	}

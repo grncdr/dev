@@ -106,7 +106,7 @@ url = "http://unused.local"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
-	slug := filepath.Base(repoDir)
+	slug := defaultSlugForRepo(t, repoDir)
 	_, err = client.TunnelOpen(ctx, TunnelRequest{
 		Slug:       slug,
 		Label:      slug,

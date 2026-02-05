@@ -31,6 +31,7 @@ func newWorktreeCmd(opts *Options) *cobra.Command {
 		Short: "manage worktree lifecycle",
 	}
 	cmd.AddCommand(newWorktreeAddCmd(opts))
+	cmd.AddCommand(newWorktreeRegisterCmd(opts))
 	cmd.AddCommand(newWorktreeCleanupCmd(opts))
 	cmd.AddCommand(newWorktreeListCmd(opts))
 	return cmd
@@ -74,6 +75,23 @@ func newWorktreeCleanupCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
+func newWorktreeRegisterCmd(opts *Options) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "register [slug]",
+		Short: "register current git worktree in dev-mode state",
+		Long:  "Register current git worktree so it can be managed outside daemon.worktree_dir. Accepts slug or project:slug format.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target := ""
+			if len(args) == 1 {
+				target = args[0]
+			}
+			return runWorktreeRegister(opts, target, cmd.OutOrStdout(), cmd.ErrOrStderr())
+		},
+	}
+	return cmd
+}
+
 func newWorktreeListCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -83,6 +101,73 @@ func newWorktreeListCmd(opts *Options) *cobra.Command {
 		},
 	}
 	return cmd
+}
+
+func runWorktreeRegister(opts *Options, targetArg string, out, errOut io.Writer) error {
+	cwd := workingDir(opts)
+	entries, err := worktree.ListWorktreesInDir(cwd)
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 || entries[0].Path == "" {
+		return errors.New("main worktree path missing")
+	}
+	mainPath := entries[0].Path
+	current, err := matchCurrentEntry(entries, cwd)
+	if err != nil {
+		return fmt.Errorf("unable to resolve current worktree: %w", err)
+	}
+	if samePath(current.Path, mainPath) {
+		return errors.New("cannot register the main worktree")
+	}
+
+	cfg, err := loadProjectConfigFromDir(mainPath)
+	if err != nil {
+		return err
+	}
+	projectID, err := worktree.NormalizeIdentifierSegment(cfg.Project.Name)
+	if err != nil {
+		return err
+	}
+
+	var target worktree.ProjectSlug
+	if strings.TrimSpace(targetArg) == "" {
+		slug, err := worktree.NormalizeIdentifierSegment(filepath.Base(current.Path))
+		if err != nil {
+			return fmt.Errorf("resolve slug from current worktree path: %w", err)
+		}
+		target = worktree.ProjectSlug{Project: projectID, Slug: slug}
+	} else {
+		target, err = parseProjectSlugWithDefault(targetArg, projectID)
+		if err != nil {
+			return err
+		}
+		if target.Project != projectID {
+			return fmt.Errorf("project mismatch: target %q does not match current repository %q", target.Project, projectID)
+		}
+	}
+
+	daemonCfg, err := loadDaemonConfig(opts)
+	if err != nil {
+		return err
+	}
+	branch := worktree.BranchName(current.Branch)
+	hookEnv := lifecycleHookEnv(target.Project, target.Slug, current.Path, branch, "add", false, proxyApexZone(daemonCfg))
+	if err := worktree.Register(daemonCfg, worktree.Registration{
+		Project:  target.Project,
+		Slug:     target.Slug,
+		Path:     current.Path,
+		MainPath: mainPath,
+		Branch:   branch,
+	}); err != nil {
+		return err
+	}
+	if err := runLifecycleHook(cfg.Hooks.PostWorktreeAdd, cfg.Commands.Wrapper, "post_worktree_add", current.Path, hookEnv, out, errOut); err != nil {
+		return fmt.Errorf("worktree registered at %s, but %w", current.Path, err)
+	}
+
+	fmt.Fprintf(out, "registered %s (%s:%s)\n", current.Path, target.Project, target.Slug)
+	return nil
 }
 
 func runWorktreeAdd(opts *Options, targetArg, branchArg string, out, errOut io.Writer) error {
@@ -171,6 +256,16 @@ func runWorktreeAdd(opts *Options, targetArg, branchArg string, out, errOut io.W
 		return addErr
 	}
 
+	if err := worktree.Register(daemonCfg, worktree.Registration{
+		Project:  target.Project,
+		Slug:     target.Slug,
+		Path:     targetPath,
+		MainPath: mainPath,
+		Branch:   branchName,
+	}); err != nil {
+		return fmt.Errorf("worktree created at %s, but %w", targetPath, err)
+	}
+
 	if err := runLifecycleHook(cfg.Hooks.PostWorktreeAdd, cfg.Commands.Wrapper, "post_worktree_add", targetPath, hookEnv, out, errOut); err != nil {
 		return fmt.Errorf("worktree created at %s, but %w", targetPath, err)
 	}
@@ -187,13 +282,9 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 	if err != nil {
 		return err
 	}
-	worktreeDir, err := config.ResolveWorktreeDir(daemonCfg)
-	if err != nil {
-		return err
-	}
 
 	cwd := workingDir(opts)
-	resolved, err := resolveCleanupTarget(targetArg, worktreeDir, cwd, opts)
+	resolved, err := resolveCleanupTarget(targetArg, daemonCfg, cwd, opts)
 	if err != nil {
 		return err
 	}
@@ -253,6 +344,10 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 		}
 	}
 
+	if err := worktree.Unregister(daemonCfg, resolved.project, resolved.slug); err != nil {
+		return fmt.Errorf("worktree cleaned up at %s, but %w", resolved.path, err)
+	}
+
 	if err := runLifecycleHook(cfg.Hooks.PostWorktreeCleanup, cfg.Commands.Wrapper, "post_worktree_cleanup", resolved.mainPath, hookEnv, out, errOut); err != nil {
 		return fmt.Errorf("worktree cleaned up at %s, but %w", resolved.path, err)
 	}
@@ -266,11 +361,6 @@ func runWorktreeList(opts *Options, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	worktreeDir, err := config.ResolveWorktreeDir(daemonCfg)
-	if err != nil {
-		return err
-	}
-
 	cwd := workingDir(opts)
 	entries, err := worktree.ListWorktreesInDir(cwd)
 	if err != nil {
@@ -285,8 +375,14 @@ func runWorktreeList(opts *Options, out io.Writer) error {
 		return fmt.Errorf("resolve project identifier from repository path: %w", err)
 	}
 	currentEntry, _ := matchCurrentEntry(entries, cwd)
-
-	managedPrefix := filepath.Join(worktreeDir, project)
+	registered, err := worktree.ListRegisteredWorktrees(daemonCfg, project)
+	if err != nil {
+		return err
+	}
+	registeredByID := map[string]worktree.Registration{}
+	for _, entry := range registered {
+		registeredByID[entry.Project+":"+entry.Slug] = entry
+	}
 	type row struct {
 		id     string
 		path   string
@@ -299,11 +395,27 @@ func runWorktreeList(opts *Options, out io.Writer) error {
 			continue
 		}
 		isMain := samePath(entry.Path, mainPath)
-		if !isMain && !containsPath(entry.Path, managedPrefix) {
-			continue
+		var registeredEntry worktree.Registration
+		if !isMain {
+			matched, ok := findRegisteredEntryByPath(registered, entry.Path)
+			if !ok {
+				continue
+			}
+			registeredEntry = matched
 		}
-		slug, err := worktree.NormalizeIdentifierSegment(filepath.Base(entry.Path))
-		if err != nil {
+		slug := ""
+		if isMain {
+			if configuredMainSlug, ok, err := worktree.ResolveConfiguredMainSlug(mainPath); err != nil {
+				return err
+			} else if ok {
+				slug = configuredMainSlug
+			} else {
+				slug = "main"
+			}
+		} else {
+			slug = registeredEntry.Slug
+		}
+		if strings.TrimSpace(slug) == "" {
 			continue
 		}
 		flags := []string{}
@@ -326,6 +438,21 @@ func runWorktreeList(opts *Options, out io.Writer) error {
 			path:   entry.Path,
 			branch: branch,
 			flags:  flags,
+		})
+	}
+	for id, entry := range registeredByID {
+		if _, ok := findGitEntryByPath(entries, entry.Path); ok {
+			continue
+		}
+		branch := strings.TrimSpace(entry.Branch)
+		if branch == "" {
+			branch = "HEAD"
+		}
+		rows = append(rows, row{
+			id:     id,
+			path:   entry.Path,
+			branch: branch,
+			flags:  []string{"missing"},
 		})
 	}
 
@@ -354,7 +481,7 @@ type cleanupTarget struct {
 	exists   bool
 }
 
-func resolveCleanupTarget(arg, worktreeDir, cwd string, opts *Options) (*cleanupTarget, error) {
+func resolveCleanupTarget(arg string, daemonCfg *config.DaemonConfig, cwd string, opts *Options) (*cleanupTarget, error) {
 	if strings.TrimSpace(arg) == "" {
 		entries, err := worktree.ListWorktreesInDir(cwd)
 		if err != nil {
@@ -371,9 +498,17 @@ func resolveCleanupTarget(arg, worktreeDir, cwd string, opts *Options) (*cleanup
 		if err != nil {
 			return nil, err
 		}
-		slug, err := worktree.NormalizeIdentifierSegment(filepath.Base(current.Path))
-		if err != nil {
+		slug := ""
+		if registered, ok, err := worktree.FindRegistrationByPath(daemonCfg, project, current.Path); err != nil {
 			return nil, err
+		} else if ok {
+			slug = registered.Slug
+		} else {
+			if samePath(current.Path, entries[0].Path) {
+				slug = "main"
+			} else {
+				return nil, errors.New("current worktree is not registered (run `dev-mode worktree register` in that worktree)")
+			}
 		}
 		return &cleanupTarget{
 			project:  project,
@@ -394,7 +529,14 @@ func resolveCleanupTarget(arg, worktreeDir, cwd string, opts *Options) (*cleanup
 	if err != nil {
 		return nil, err
 	}
-	targetPath := filepath.Join(worktreeDir, parsed.Project, parsed.Slug)
+	registered, ok, err := worktree.FindRegisteredWorktree(daemonCfg, parsed.Project, parsed.Slug)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("worktree %s:%s is not registered (run `dev-mode worktree register` from that worktree)", parsed.Project, parsed.Slug)
+	}
+	targetPath := registered.Path
 	if _, err := os.Stat(targetPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return &cleanupTarget{project: parsed.Project, slug: parsed.Slug, path: targetPath, implicit: false, exists: false}, nil
@@ -632,6 +774,23 @@ func findEntryByPath(entries []worktree.Entry, path string) worktree.Entry {
 		}
 	}
 	return worktree.Entry{}
+}
+
+func findGitEntryByPath(entries []worktree.Entry, path string) (worktree.Entry, bool) {
+	entry := findEntryByPath(entries, path)
+	if entry.Path == "" {
+		return worktree.Entry{}, false
+	}
+	return entry, true
+}
+
+func findRegisteredEntryByPath(entries []worktree.Registration, path string) (worktree.Registration, bool) {
+	for _, entry := range entries {
+		if samePath(entry.Path, path) {
+			return entry, true
+		}
+	}
+	return worktree.Registration{}, false
 }
 
 func containsPath(path, prefix string) bool {

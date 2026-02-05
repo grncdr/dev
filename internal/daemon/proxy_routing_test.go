@@ -324,8 +324,8 @@ main_slug = "foocorp"
 	if err != nil {
 		t.Fatalf("resolveRequestedSlug: %v", err)
 	}
-	if got != "monorepo" {
-		t.Fatalf("expected monorepo, got %s", got)
+	if got != "foocorp" {
+		t.Fatalf("expected foocorp, got %s", got)
 	}
 }
 

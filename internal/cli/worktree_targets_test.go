@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"dev-mode/internal/config"
+	"dev-mode/internal/worktree"
 )
 
 func TestResolveProcessTargetsExplicit(t *testing.T) {
@@ -86,5 +89,150 @@ func TestResolveSlugProjectQualified(t *testing.T) {
 	}
 	if slug != "feature/x" {
 		t.Fatalf("expected feature/x, got %q", slug)
+	}
+}
+
+func TestResolveSlugUsesRegisteredSlugForCurrentWorktree(t *testing.T) {
+	base := t.TempDir()
+	repoDir := filepath.Join(base, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if err := runGitForTest(repoDir, "init"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev-mode.toml"), []byte("[project]\nname=\"demo\"\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	if err := runGitForTest(repoDir, "add", "."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := runGitForTest(repoDir, "commit", "-m", "init"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	worktreePath := filepath.Join(base, "outside", "feature-dir")
+	if err := os.MkdirAll(filepath.Dir(worktreePath), 0o755); err != nil {
+		t.Fatalf("mkdir parent: %v", err)
+	}
+	if err := runGitForTest(repoDir, "worktree", "add", "-b", "feature/something", worktreePath, "HEAD"); err != nil {
+		t.Fatalf("git worktree add: %v", err)
+	}
+
+	daemonConfigPath := filepath.Join(base, "daemon.toml")
+	stateDir := filepath.Join(base, "state")
+	daemonConfig := "state_dir = \"" + stateDir + "\"\nworktree_dir = \"" + filepath.Join(base, "managed") + "\"\n"
+	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
+		t.Fatalf("write daemon config: %v", err)
+	}
+
+	daemonCfg, _, err := config.LoadDaemonConfig(daemonConfigPath)
+	if err != nil {
+		t.Fatalf("load daemon config: %v", err)
+	}
+	if err := worktree.Register(daemonCfg, worktree.Registration{
+		Project: "demo",
+		Slug:    "feature/something",
+		Path:    worktreePath,
+	}); err != nil {
+		t.Fatalf("register worktree in state: %v", err)
+	}
+
+	slug, err := resolveSlug(&Options{WorkingDir: worktreePath, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}, "")
+	if err != nil {
+		t.Fatalf("resolveSlug: %v", err)
+	}
+	if slug != "feature/something" {
+		t.Fatalf("expected registered slug, got %q", slug)
+	}
+}
+
+func TestResolveSlugDefaultsToMainForMainWorktree(t *testing.T) {
+	base := t.TempDir()
+	repoDir := filepath.Join(base, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if err := runGitForTest(repoDir, "init"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev-mode.toml"), []byte("[project]\nname=\"demo\"\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	if err := runGitForTest(repoDir, "add", "."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := runGitForTest(repoDir, "commit", "-m", "init"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	daemonConfigPath := filepath.Join(base, "daemon.toml")
+	daemonConfig := "state_dir = \"" + filepath.Join(base, "state") + "\"\nworktree_dir = \"" + filepath.Join(base, "managed") + "\"\n"
+	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
+		t.Fatalf("write daemon config: %v", err)
+	}
+
+	slug, err := resolveSlug(&Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}, "")
+	if err != nil {
+		t.Fatalf("resolveSlug: %v", err)
+	}
+	if slug != "main" {
+		t.Fatalf("expected main, got %q", slug)
+	}
+}
+
+func TestResolveSlugUsesConfiguredMainSlugForMainWorktree(t *testing.T) {
+	base := t.TempDir()
+	repoDir := filepath.Join(base, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if err := runGitForTest(repoDir, "init"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	cfg := "[project]\nname=\"demo\"\nmain_slug=\"primary\"\n"
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev-mode.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	if err := runGitForTest(repoDir, "add", "."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := runGitForTest(repoDir, "commit", "-m", "init"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	daemonConfigPath := filepath.Join(base, "daemon.toml")
+	daemonConfig := "state_dir = \"" + filepath.Join(base, "state") + "\"\nworktree_dir = \"" + filepath.Join(base, "managed") + "\"\n"
+	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
+		t.Fatalf("write daemon config: %v", err)
+	}
+
+	slug, err := resolveSlug(&Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}, "")
+	if err != nil {
+		t.Fatalf("resolveSlug: %v", err)
+	}
+	if slug != "primary" {
+		t.Fatalf("expected primary, got %q", slug)
+	}
+
+	daemonCfg, _, err := config.LoadDaemonConfig(daemonConfigPath)
+	if err != nil {
+		t.Fatalf("load daemon config: %v", err)
+	}
+	path, err := worktree.ResolvePathFromSlugWithRegistry("primary", repoDir, daemonCfg)
+	if err != nil {
+		t.Fatalf("ResolvePathFromSlugWithRegistry: %v", err)
+	}
+	if !samePath(path, repoDir) {
+		t.Fatalf("expected path %s, got %s", repoDir, path)
 	}
 }

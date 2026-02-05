@@ -118,7 +118,7 @@ tcp_listen = %d
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	slug := filepath.Base(repoDir)
+	slug := defaultSlugForRepo(t, repoDir)
 	st, err := client.WorktreeStatus(ctx, slug)
 	if err != nil {
 		t.Fatalf("worktree status: %v", err)

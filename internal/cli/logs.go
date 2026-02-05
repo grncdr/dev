@@ -104,7 +104,11 @@ func runLogs(opts *Options, target string, view *logViewOptions) error {
 	}
 
 	cwd := workingDir(opts)
-	path, err := worktree.ResolvePathFromSlug(slug, cwd)
+	daemonCfg, err := loadDaemonConfig(opts)
+	if err != nil {
+		return err
+	}
+	path, err := worktree.ResolvePathFromSlugWithRegistry(slug, cwd, daemonCfg)
 	if err != nil {
 		return err
 	}

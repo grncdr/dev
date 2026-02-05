@@ -71,6 +71,45 @@ func TestWorktreeLifecycleAddListCleanupDryRun(t *testing.T) {
 	}
 }
 
+func TestWorktreeListUsesConfiguredMainSlug(t *testing.T) {
+	base := t.TempDir()
+	repoDir := filepath.Join(base, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if err := runGitForTest(repoDir, "init"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	cfg := "[project]\nname = \"demo\"\nmain_slug = \"primary\"\n"
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev-mode.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	if err := runGitForTest(repoDir, "add", "."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := runGitForTest(repoDir, "commit", "-m", "init"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	daemonConfigPath := filepath.Join(base, "daemon.toml")
+	daemonConfig := "state_dir = \"" + filepath.Join(base, "state") + "\"\nworktree_dir = \"" + filepath.Join(base, "managed") + "\"\n"
+	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
+		t.Fatalf("write daemon config: %v", err)
+	}
+	opts := &Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+
+	var out bytes.Buffer
+	if err := runWorktreeList(opts, &out); err != nil {
+		t.Fatalf("runWorktreeList: %v", err)
+	}
+	if !strings.Contains(out.String(), "demo:primary") {
+		t.Fatalf("expected main slug in list output, got %q", out.String())
+	}
+}
+
 func TestWorktreeCleanupMainFails(t *testing.T) {
 	repoDir, _, opts := setupWorktreeLifecycleRepo(t)
 	origWD := rememberCWD()
@@ -129,7 +168,7 @@ post_worktree_cleanup = "sh -c \"echo ${DEV_MODE_WRAPPED}:${DEV_MODE_WORKTREE_DN
 
 	worktreeRoot := filepath.Join(base, "managed")
 	daemonConfigPath := filepath.Join(base, "daemon.toml")
-	daemonConfig := "worktree_dir = \"" + worktreeRoot + "\"\n\n[local-proxy]\napex_zone = \".dev.test\"\n"
+	daemonConfig := "state_dir = \"" + filepath.Join(base, "state") + "\"\nworktree_dir = \"" + worktreeRoot + "\"\n\n[local-proxy]\napex_zone = \".dev.test\"\n"
 	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
 		t.Fatalf("write daemon config: %v", err)
 	}
@@ -208,7 +247,7 @@ name = "foocorp/monorepo"
 
 	worktreeRoot := filepath.Join(base, "managed")
 	daemonConfigPath := filepath.Join(base, "daemon.toml")
-	daemonConfig := "worktree_dir = \"" + worktreeRoot + "\"\n"
+	daemonConfig := "state_dir = \"" + filepath.Join(base, "state") + "\"\nworktree_dir = \"" + worktreeRoot + "\"\n"
 	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
 		t.Fatalf("write daemon config: %v", err)
 	}
@@ -242,6 +281,82 @@ name = "foocorp/monorepo"
 	}
 }
 
+func TestWorktreeRegisterSupportsNonStandardPath(t *testing.T) {
+	base := t.TempDir()
+	repoDir := filepath.Join(base, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if err := runGitForTest(repoDir, "init"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	projectConfig := `
+[project]
+name = "demo"
+
+[hooks]
+post_worktree_add = "sh -c \"echo ${DEV_MODE_WORKTREE_DNS_NAME} > hook_post_add.txt\""
+`
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev-mode.toml"), []byte(projectConfig), 0o600); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	if err := runGitForTest(repoDir, "add", "."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := runGitForTest(repoDir, "commit", "-m", "init"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	worktreeRoot := filepath.Join(base, "managed")
+	daemonConfigPath := filepath.Join(base, "daemon.toml")
+	daemonConfig := "state_dir = \"" + filepath.Join(base, "state") + "\"\nworktree_dir = \"" + worktreeRoot + "\"\n\n[local-proxy]\napex_zone = \".dev.test\"\n"
+	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
+		t.Fatalf("write daemon config: %v", err)
+	}
+
+	externalPath := filepath.Join(base, "outside", "feature-dir")
+	if err := os.MkdirAll(filepath.Dir(externalPath), 0o755); err != nil {
+		t.Fatalf("mkdir external parent: %v", err)
+	}
+	if err := runGitForTest(repoDir, "worktree", "add", "-b", "feature/something", externalPath, "HEAD"); err != nil {
+		t.Fatalf("git worktree add: %v", err)
+	}
+
+	opts := &Options{WorkingDir: externalPath, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	if err := runWorktreeRegister(opts, "feature/something", &out, &errOut); err != nil {
+		t.Fatalf("runWorktreeRegister: %v", err)
+	}
+	hookPath := filepath.Join(externalPath, "hook_post_add.txt")
+	hookValue, err := os.ReadFile(hookPath)
+	if err != nil {
+		t.Fatalf("read hook output: %v", err)
+	}
+	if strings.TrimSpace(string(hookValue)) != "something.dev.test" {
+		t.Fatalf("unexpected hook output: %q", strings.TrimSpace(string(hookValue)))
+	}
+
+	opts.WorkingDir = repoDir
+	var listOut bytes.Buffer
+	if err := runWorktreeList(opts, &listOut); err != nil {
+		t.Fatalf("runWorktreeList: %v", err)
+	}
+	if !strings.Contains(listOut.String(), "demo:feature/something") || !strings.Contains(listOut.String(), "feature-dir") {
+		t.Fatalf("expected list output to include registered worktree, got %q", listOut.String())
+	}
+
+	if err := runWorktreeCleanup(opts, "feature/something", &worktreeCleanupOptions{Force: true}, &out, &errOut); err != nil {
+		t.Fatalf("runWorktreeCleanup: %v", err)
+	}
+	if _, err := os.Stat(externalPath); !os.IsNotExist(err) {
+		t.Fatalf("expected cleanup to remove %s", externalPath)
+	}
+}
+
 func setupWorktreeLifecycleRepo(t *testing.T) (string, string, *Options) {
 	t.Helper()
 	base := t.TempDir()
@@ -272,7 +387,7 @@ name = "demo"
 
 	worktreeRoot := filepath.Join(base, "managed")
 	daemonConfigPath := filepath.Join(base, "daemon.toml")
-	daemonConfig := "worktree_dir = \"" + worktreeRoot + "\"\n"
+	daemonConfig := "state_dir = \"" + filepath.Join(base, "state") + "\"\nworktree_dir = \"" + worktreeRoot + "\"\n"
 	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
 		t.Fatalf("write daemon config: %v", err)
 	}

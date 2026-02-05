@@ -102,7 +102,8 @@ command = "sh -c \"sleep 60\""
 		t.Fatalf("daemon not healthy: %v", err)
 	}
 
-	secondarySlug := filepath.Base(secondaryDir)
+	secondarySlug := "feature"
+	registerWorktreeForTest(t, nil, "demo", secondarySlug, secondaryDir, repoDir)
 	ctx, cancel := call(4 * time.Second)
 	resp, err := client.WorktreeStart(ctx, secondarySlug)
 	cancel()
@@ -116,7 +117,7 @@ command = "sh -c \"sleep 60\""
 		t.Fatalf("expected worker process, got %+v", resp.Processes)
 	}
 
-	mainSlug := filepath.Base(repoDir)
+	mainSlug := defaultSlugForRepo(t, repoDir)
 	ctx, cancel = call(4 * time.Second)
 	respMain, err := client.WorktreeStart(ctx, mainSlug)
 	cancel()

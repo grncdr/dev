@@ -36,6 +36,10 @@ Creates a managed worktree under daemon `worktree_dir`. Accepts `slug` or `proje
 When only `slug` is provided, project is inferred from the current working directory.
 Slugs can contain slashes (e.g., `feature/my-branch`).
 
+### `dev-mode worktree register [slug]`
+Registers the current git worktree in dev-mode state so it can be managed even when created outside daemon `worktree_dir`.
+Runs `post_worktree_add` after registration. Accepts `slug` or `project:slug` format.
+
 ### `dev-mode worktree cleanup [slug] [--delete-branch] [--dry-run] [--force]`
 Removes a managed worktree. Accepts `slug` or `project:slug` format.
 If omitted, dev-mode targets the current worktree from cwd. When `slug` is provided without project, project is inferred from cwd.

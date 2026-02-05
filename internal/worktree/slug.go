@@ -38,7 +38,7 @@ func matchWorktree(entries []Entry, cwd string) (Entry, error) {
 		return Entry{}, errors.New("cwd is required")
 	}
 
-	cwd, err := filepath.Abs(cwd)
+	cwd, err := canonicalPath(cwd)
 	if err != nil {
 		return Entry{}, err
 	}
@@ -50,7 +50,7 @@ func matchWorktree(entries []Entry, cwd string) (Entry, error) {
 		if path == "" {
 			continue
 		}
-		path, err = filepath.Abs(path)
+		path, err = canonicalPath(path)
 		if err != nil {
 			continue
 		}

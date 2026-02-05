@@ -55,7 +55,7 @@ health = { type = "http", path = "/" }
 	}
 
 	m := NewManager()
-	slug := filepath.Base(repoDir)
+	slug := defaultSlugForRepo(t, repoDir)
 	start := time.Now()
 	network, address, err := m.EnsureProcessForTarget(slug, "web")
 	if err != nil {
@@ -139,7 +139,7 @@ path = "/"
 		config:   cfg,
 		mainPath: repoDir,
 	}
-	slug := filepath.Base(repoDir)
+	slug := defaultSlugForRepo(t, repoDir)
 	start := time.Now()
 	network, address, _, err := s.resolveProxyTarget(slug+".localhost", "/")
 	if err != nil {
@@ -207,7 +207,7 @@ startup_timeout = 0.3
 	}
 
 	m := NewManager()
-	slug := filepath.Base(repoDir)
+	slug := defaultSlugForRepo(t, repoDir)
 	_, _, err := m.EnsureProcessForTarget(slug, "web")
 	if err == nil {
 		t.Fatalf("expected startup timeout error")

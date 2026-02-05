@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"dev-mode/internal/config"
-	"dev-mode/internal/worktree"
 )
 
 // defaultProxyListenHost returns the default listen host for the proxy.
@@ -129,7 +128,7 @@ func (s *Server) serveTCPProxyListener(ln net.Listener, process string) {
 
 func (s *Server) handleTCPProxyConn(conn net.Conn, process string) {
 	defer conn.Close()
-	mainSlug, err := worktree.ResolveMainSlugInDir(s.mainPath)
+	mainSlug, err := resolveMainWorktreeSlug(s.mainPath)
 	if err != nil {
 		logError(http.StatusBadGateway, "tcp_proxy_main_slug_error", err)
 		return

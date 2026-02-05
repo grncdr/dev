@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -151,6 +150,10 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 	if err != nil {
 		return err
 	}
+	daemonCfg, err := loadDaemonConfig(opts)
+	if err != nil {
+		return err
+	}
 	tunnelBySlug := map[string]daemon.TunnelStatus{}
 	if daemonUp {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -167,18 +170,12 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 	cwd := workingDir(opts)
 
 	for i, slug := range sortedTargetSlugs(targets) {
-		projectPath, _ := worktree.ResolvePathFromSlug(slug, cwd)
+		projectPath, _ := worktree.ResolvePathFromSlugWithRegistry(slug, cwd, daemonCfg)
 		var cfg *config.ProjectConfig
-		var daemonCfg *config.DaemonConfig
 		if projectPath != "" {
 			cfgPath := filepath.Join(projectPath, config.DefaultProjectConfig)
 			if loaded, _, err := config.LoadProjectConfig(cfgPath); err == nil {
 				cfg = loaded
-			}
-		}
-		if opts != nil && opts.ResolvedPaths.DaemonConfig != "" {
-			if loaded, _, err := config.LoadDaemonConfig(opts.ResolvedPaths.DaemonConfig); err == nil {
-				daemonCfg = loaded
 			}
 		}
 		if i > 0 {
@@ -591,17 +588,11 @@ func resolveSlug(opts *Options, arg string) (string, error) {
 	}
 
 	cwd := workingDir(opts)
-
-	slug, err := worktree.ResolveSlug(cwd)
+	daemonCfg, err := loadDaemonConfig(opts)
 	if err != nil {
-		return "", fmt.Errorf("slug is required: %w", err)
+		return "", err
 	}
-
-	if strings.Contains(slug, "/") {
-		return "", errors.New("resolved slug contains '/'; expected simple slug")
-	}
-
-	return slug, nil
+	return worktree.ResolveDefaultSlug(cwd, daemonCfg)
 }
 
 type processTarget struct {

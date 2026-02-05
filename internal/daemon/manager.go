@@ -27,6 +27,7 @@ type Manager struct {
 	processes map[string]map[string]*processInfo
 	paths     map[string]string
 	apexZone  string
+	daemonCfg *config.DaemonConfig
 }
 
 func NewManager() *Manager {
@@ -41,6 +42,12 @@ func (m *Manager) SetApexZone(zone string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.apexZone = zone
+}
+
+func (m *Manager) SetDaemonConfig(cfg *config.DaemonConfig) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.daemonCfg = cfg
 }
 
 type WorktreeStatus struct {
@@ -90,7 +97,7 @@ func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string,
 		return nil, errors.New("slug is required")
 	}
 
-	path, err := resolveWorktreePath(slug, dirHint)
+	path, err := m.resolveWorktreePath(slug, dirHint)
 	if err != nil {
 		return nil, err
 	}
@@ -113,8 +120,7 @@ func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string,
 	if err != nil {
 		return nil, err
 	}
-	mainSlug := filepath.Base(mainPath)
-	isMain := slug == mainSlug
+	isMain := sameResolvedPath(path, mainPath)
 
 	worktreeState, err := resolveWorktreeState(cfg.Project.Name, slug)
 	if err != nil {
@@ -289,17 +295,18 @@ func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string,
 	return &WorktreeStatus{Slug: slug, Processes: statuses}, nil
 }
 
-func resolveWorktreePath(slug, dirHint string) (string, error) {
+func (m *Manager) resolveWorktreePath(slug, dirHint string) (string, error) {
+	m.mu.Lock()
+	daemonCfg := m.daemonCfg
+	m.mu.Unlock()
 	if dirHint != "" {
-		if path, err := worktree.ResolvePathFromSlugInDir(slug, dirHint); err == nil {
-			return path, nil
-		}
+		return worktree.ResolvePathFromSlugWithRegistry(slug, dirHint, daemonCfg)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err
 	}
-	return worktree.ResolvePathFromSlug(slug, cwd)
+	return worktree.ResolvePathFromSlugWithRegistry(slug, cwd, daemonCfg)
 }
 
 func resolveProjectIdentifier(cfg *config.ProjectConfig) (string, error) {
@@ -339,7 +346,7 @@ func (m *Manager) stopWorktreeFromDir(slug, dirHint string, processes []string, 
 		return nil, errors.New("slug is required")
 	}
 
-	path, err := resolveWorktreePath(slug, dirHint)
+	path, err := m.resolveWorktreePath(slug, dirHint)
 	if err != nil {
 		return nil, err
 	}
@@ -432,7 +439,7 @@ func (m *Manager) StatusWorktreeFromDir(slug, dirHint string) (*WorktreeStatus, 
 	}
 
 	if _, ok := m.WorktreePath(slug); !ok {
-		if _, err := resolveWorktreePath(slug, dirHint); err != nil {
+		if _, err := m.resolveWorktreePath(slug, dirHint); err != nil {
 			return nil, err
 		}
 	}

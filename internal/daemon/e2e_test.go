@@ -104,7 +104,7 @@ post_stop = "sh -c \"echo ${DEV_MODE_WRAPPED}:${DEV_MODE_WORKTREE_SLUG}:${DEV_MO
 		t.Fatalf("daemon not healthy: %v", err)
 	}
 
-	slug := filepath.Base(repoDir)
+	slug := defaultSlugForRepo(t, repoDir)
 	start, err := client.WorktreeStart(ctx, slug)
 	if err != nil {
 		t.Fatalf("worktree start: %v", err)

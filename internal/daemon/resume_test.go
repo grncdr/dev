@@ -71,7 +71,7 @@ port = "random"
 		socketPath = filepath.Join(os.TempDir(), fmt.Sprintf("devd-resume-test-%d.sock", time.Now().UnixNano()))
 		_ = os.Remove(socketPath)
 	}
-	slug := filepath.Base(repoDir)
+	slug := defaultSlugForRepo(t, repoDir)
 
 	srv1, err := NewServer(socketPath)
 	if err != nil {
