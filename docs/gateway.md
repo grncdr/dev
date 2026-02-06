@@ -35,26 +35,51 @@ The above config configures the gateway to be reachable at `tunnels.example.com`
 
 The gateway terminates TLS itself using certificates from Let's Encrypt. It should **not** be run behind a reverse proxy like nginx or Caddy—run it directly on a server with ports 80 and 443 available.
 
-When traffic is tunneled through the gateway, exposed processes are controlled by `gateway.expose` in `.dev.toml`:
-- only listed processes accept gateway-tunneled traffic
-- `mode = "reverse_proxy"`: standard reverse proxy headers, no host/cookie/body rewrites. Local processes receive the usual `X-Forwarded-*` headers (`X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Forwarded-For`) so they can detect the public hostname and scheme.
-- `mode = "rewrite"`: rewrites local apex hosts/cookies to the gateway public apex for browser-facing compatibility. Use this when your app cannot easily support both local `.localhost` hostnames and your public gateway DNS zone at the same time.
-- `debug_log = "<path>"`: appends full tunneled HTTP request/response transcripts to a file for that process.
-
 To start the gateway:
 
 ```bash
 dev gateway run
 ```
 
-## Onboarding team members
+## Configuring your project
 
-Configure the gateway in the project `.dev.toml`:
+Configure the gateway server in the project `.dev.toml`:
 
 ```toml
 [gateway]
 url = "https://tunnels.example.com"
 ```
+
+Configure the processes that should receive tunneled traffic with `gateway.expose` in `.dev.toml`:
+
+```toml
+[process.my-server]
+command = "..."
+port = "random"
+
+[gateway]
+url = "https://tunnels.example.com"
+
+[gateway.expose.my-server]
+mode = "reverse_proxy" # the default
+debug_log = "/tmp/my-server-gateway-traffic.log"
+```
+
+Only listed processes accept gateway-tunneled traffic
+
+- `mode = "reverse_proxy"`: standard reverse proxy headers, no host/cookie/body rewrites. Local processes receive the usual `X-Forwarded-*` headers (`X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Forwarded-For`) so they can detect the public hostname and scheme.
+- `mode = "rewrite"`: rewrites local apex hosts/cookies to the gateway public apex for browser-facing compatibility. Use this when your app cannot easily support both local `.localhost` hostnames and your public gateway DNS zone at the same time.
+- `debug_log = "<path>"`: appends full HTTP request/response transcripts for traffic tunneled to the process.
+
+To share your locally running server via the gateway:
+
+```
+dev share --label 'cool-feature'
+```
+
+The label is prepended to the gateway servers configured `dns_zone` ("wip.example.com" above) to make your service available at https://cool-feature.wip.example.com
+
+## Onboarding team members
 
 Create an invite code on the gateway server:
 
@@ -88,7 +113,7 @@ gateway/
     └── invites.json             # Pending invite codes
 ```
 
-If you running in a container or other ephemeral infrastructure, ensure that this directory is backed up or stored on a persistent filesystem.
+If running in a container or other ephemeral infrastructure, ensure that this directory is backed up or stored on a persistent filesystem.
 
 ## Client state
 
