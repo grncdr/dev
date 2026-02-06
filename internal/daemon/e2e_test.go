@@ -23,7 +23,7 @@ func TestWorktreeStartStopEndToEnd(t *testing.T) {
 		t.Fatalf("git init: %v", err)
 	}
 
-	configPath := filepath.Join(repoDir, ".dev-mode.toml")
+	configPath := filepath.Join(repoDir, ".dev.toml")
 	configBody := `
 [project]
 name = "demo"
@@ -31,20 +31,20 @@ main_slug = "demo-main"
 
 [process.sleeper]
 singleton = false
-command = "sh -c \"echo ${SLEEPER_FLAG}; echo ${DEV_MODE_WORKTREE_DNS_NAME}; sleep 60\""
+command = "sh -c \"echo ${SLEEPER_FLAG}; echo ${DEV_WORKTREE_DNS_NAME}; sleep 60\""
 port = "unix"
 
 [process.sleeper.env]
 SLEEPER_FLAG = "enabled"
 
 [commands]
-wrapper = "env DEV_MODE_WRAPPED=1 $COMMAND"
+wrapper = "env DEV_WRAPPED=1 $COMMAND"
 
 [hooks]
-pre_start = "sh -c \"echo ${DEV_MODE_WRAPPED}:${DEV_MODE_WORKTREE_SLUG}:${DEV_MODE_WORKTREE_DNS_NAME} > hook_pre_start.txt\""
-post_start = "sh -c \"echo ${DEV_MODE_WRAPPED}:${DEV_MODE_WORKTREE_SLUG}:${DEV_MODE_WORKTREE_DNS_NAME} > hook_post_start.txt\""
-pre_stop = "sh -c \"echo ${DEV_MODE_WRAPPED}:${DEV_MODE_WORKTREE_SLUG}:${DEV_MODE_WORKTREE_DNS_NAME} > hook_pre_stop.txt\""
-post_stop = "sh -c \"echo ${DEV_MODE_WRAPPED}:${DEV_MODE_WORKTREE_SLUG}:${DEV_MODE_WORKTREE_DNS_NAME} > hook_post_stop.txt\""
+pre_start = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_SLUG}:${DEV_WORKTREE_DNS_NAME} > hook_pre_start.txt\""
+post_start = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_SLUG}:${DEV_WORKTREE_DNS_NAME} > hook_post_start.txt\""
+pre_stop = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_SLUG}:${DEV_WORKTREE_DNS_NAME} > hook_pre_stop.txt\""
+post_stop = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_SLUG}:${DEV_WORKTREE_DNS_NAME} > hook_post_stop.txt\""
 `
 	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {
 		t.Fatal(err)
@@ -63,22 +63,22 @@ post_stop = "sh -c \"echo ${DEV_MODE_WRAPPED}:${DEV_MODE_WORKTREE_SLUG}:${DEV_MO
 	}
 
 	oldHome := os.Getenv("HOME")
-	oldProxyListenHTTP := os.Getenv("DEV_MODE_PROXY_LISTEN_HTTP")
-	oldProxyListenHTTPS := os.Getenv("DEV_MODE_PROXY_LISTEN_HTTPS")
+	oldProxyListenHTTP := os.Getenv("DEV_PROXY_LISTEN_HTTP")
+	oldProxyListenHTTPS := os.Getenv("DEV_PROXY_LISTEN_HTTPS")
 	oldCwd, _ := os.Getwd()
 	t.Cleanup(func() {
 		_ = os.Setenv("HOME", oldHome)
-		_ = os.Setenv("DEV_MODE_PROXY_LISTEN_HTTP", oldProxyListenHTTP)
-		_ = os.Setenv("DEV_MODE_PROXY_LISTEN_HTTPS", oldProxyListenHTTPS)
+		_ = os.Setenv("DEV_PROXY_LISTEN_HTTP", oldProxyListenHTTP)
+		_ = os.Setenv("DEV_PROXY_LISTEN_HTTPS", oldProxyListenHTTPS)
 		_ = os.Chdir(oldCwd)
 	})
 	if err := os.Setenv("HOME", baseDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Setenv("DEV_MODE_PROXY_LISTEN_HTTP", "off"); err != nil {
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTP", "off"); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Setenv("DEV_MODE_PROXY_LISTEN_HTTPS", "off"); err != nil {
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTPS", "off"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chdir(repoDir); err != nil {
@@ -113,12 +113,12 @@ post_stop = "sh -c \"echo ${DEV_MODE_WRAPPED}:${DEV_MODE_WORKTREE_SLUG}:${DEV_MO
 		t.Fatalf("expected running process, got %+v", start.Processes)
 	}
 
-	logPath := filepath.Join(baseDir, ".local", "state", "dev-mode", "logs", "demo", slug, "sleeper.log")
+	logPath := filepath.Join(baseDir, ".local", "state", "dev", "logs", "demo", slug, "sleeper.log")
 	if err := waitForLogContains(logPath, "enabled", 2*time.Second); err != nil {
 		t.Fatalf("expected env var in log: %v", err)
 	}
 	if err := waitForLogContains(logPath, "demo-main.localhost", 2*time.Second); err != nil {
-		t.Fatalf("expected DEV_MODE_WORKTREE_DNS_NAME in log: %v", err)
+		t.Fatalf("expected DEV_WORKTREE_DNS_NAME in log: %v", err)
 	}
 
 	status, err := client.WorktreeStatus(ctx, slug)
@@ -188,10 +188,10 @@ func runGit(dir string, args ...string) error {
 	cmd := exec.Command("git", gitArgs...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=dev-mode",
-		"GIT_AUTHOR_EMAIL=dev-mode@example.com",
-		"GIT_COMMITTER_NAME=dev-mode",
-		"GIT_COMMITTER_EMAIL=dev-mode@example.com",
+		"GIT_AUTHOR_NAME=dev",
+		"GIT_AUTHOR_EMAIL=dev@example.com",
+		"GIT_COMMITTER_NAME=dev",
+		"GIT_COMMITTER_EMAIL=dev@example.com",
 	)
 	return cmd.Run()
 }

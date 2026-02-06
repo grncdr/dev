@@ -24,7 +24,7 @@ func TestRandomPortCommandInterpolation(t *testing.T) {
 		t.Fatalf("git init: %v", err)
 	}
 
-	configPath := filepath.Join(repoDir, ".dev-mode.toml")
+	configPath := filepath.Join(repoDir, ".dev.toml")
 	portFile := filepath.Join(repoDir, "port.txt")
 	configBody := `
 [project]
@@ -52,22 +52,22 @@ command = "sh -c \"echo ${PORT} > port.txt; sleep 30\""
 	}
 
 	oldHome := os.Getenv("HOME")
-	oldProxyListenHTTP := os.Getenv("DEV_MODE_PROXY_LISTEN_HTTP")
-	oldProxyListenHTTPS := os.Getenv("DEV_MODE_PROXY_LISTEN_HTTPS")
+	oldProxyListenHTTP := os.Getenv("DEV_PROXY_LISTEN_HTTP")
+	oldProxyListenHTTPS := os.Getenv("DEV_PROXY_LISTEN_HTTPS")
 	oldCwd, _ := os.Getwd()
 	t.Cleanup(func() {
 		_ = os.Setenv("HOME", oldHome)
-		_ = os.Setenv("DEV_MODE_PROXY_LISTEN_HTTP", oldProxyListenHTTP)
-		_ = os.Setenv("DEV_MODE_PROXY_LISTEN_HTTPS", oldProxyListenHTTPS)
+		_ = os.Setenv("DEV_PROXY_LISTEN_HTTP", oldProxyListenHTTP)
+		_ = os.Setenv("DEV_PROXY_LISTEN_HTTPS", oldProxyListenHTTPS)
 		_ = os.Chdir(oldCwd)
 	})
 	if err := os.Setenv("HOME", baseDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Setenv("DEV_MODE_PROXY_LISTEN_HTTP", "off"); err != nil {
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTP", "off"); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Setenv("DEV_MODE_PROXY_LISTEN_HTTPS", "off"); err != nil {
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTPS", "off"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chdir(repoDir); err != nil {
@@ -166,7 +166,7 @@ func TestProxyProcessDefaultsToRandomPortWhenSocketUnset(t *testing.T) {
 		t.Fatalf("git init: %v", err)
 	}
 
-	configPath := filepath.Join(repoDir, ".dev-mode.toml")
+	configPath := filepath.Join(repoDir, ".dev.toml")
 	configBody := `
 [project]
 name = "demo"
@@ -196,22 +196,22 @@ proxy = { subdomain = "mailpit" }
 	}
 
 	oldHome := os.Getenv("HOME")
-	oldProxyListenHTTP := os.Getenv("DEV_MODE_PROXY_LISTEN_HTTP")
-	oldProxyListenHTTPS := os.Getenv("DEV_MODE_PROXY_LISTEN_HTTPS")
+	oldProxyListenHTTP := os.Getenv("DEV_PROXY_LISTEN_HTTP")
+	oldProxyListenHTTPS := os.Getenv("DEV_PROXY_LISTEN_HTTPS")
 	oldCwd, _ := os.Getwd()
 	t.Cleanup(func() {
 		_ = os.Setenv("HOME", oldHome)
-		_ = os.Setenv("DEV_MODE_PROXY_LISTEN_HTTP", oldProxyListenHTTP)
-		_ = os.Setenv("DEV_MODE_PROXY_LISTEN_HTTPS", oldProxyListenHTTPS)
+		_ = os.Setenv("DEV_PROXY_LISTEN_HTTP", oldProxyListenHTTP)
+		_ = os.Setenv("DEV_PROXY_LISTEN_HTTPS", oldProxyListenHTTPS)
 		_ = os.Chdir(oldCwd)
 	})
 	if err := os.Setenv("HOME", baseDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Setenv("DEV_MODE_PROXY_LISTEN_HTTP", "off"); err != nil {
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTP", "off"); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Setenv("DEV_MODE_PROXY_LISTEN_HTTPS", "off"); err != nil {
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTPS", "off"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chdir(repoDir); err != nil {
@@ -283,7 +283,7 @@ func TestFixedPortProcessTarget(t *testing.T) {
 	port := ln.Addr().(*net.TCPAddr).Port
 	_ = ln.Close()
 
-	configPath := filepath.Join(repoDir, ".dev-mode.toml")
+	configPath := filepath.Join(repoDir, ".dev.toml")
 	configBody := fmt.Sprintf(`
 [project]
 name = "demo"
@@ -307,22 +307,22 @@ command = "sh -c \"python3 -m http.server ${PORT}\""
 	}
 
 	oldHome := os.Getenv("HOME")
-	oldProxyListenHTTP := os.Getenv("DEV_MODE_PROXY_LISTEN_HTTP")
-	oldProxyListenHTTPS := os.Getenv("DEV_MODE_PROXY_LISTEN_HTTPS")
+	oldProxyListenHTTP := os.Getenv("DEV_PROXY_LISTEN_HTTP")
+	oldProxyListenHTTPS := os.Getenv("DEV_PROXY_LISTEN_HTTPS")
 	oldCwd, _ := os.Getwd()
 	t.Cleanup(func() {
 		_ = os.Setenv("HOME", oldHome)
-		_ = os.Setenv("DEV_MODE_PROXY_LISTEN_HTTP", oldProxyListenHTTP)
-		_ = os.Setenv("DEV_MODE_PROXY_LISTEN_HTTPS", oldProxyListenHTTPS)
+		_ = os.Setenv("DEV_PROXY_LISTEN_HTTP", oldProxyListenHTTP)
+		_ = os.Setenv("DEV_PROXY_LISTEN_HTTPS", oldProxyListenHTTPS)
 		_ = os.Chdir(oldCwd)
 	})
 	if err := os.Setenv("HOME", baseDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Setenv("DEV_MODE_PROXY_LISTEN_HTTP", "off"); err != nil {
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTP", "off"); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Setenv("DEV_MODE_PROXY_LISTEN_HTTPS", "off"); err != nil {
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTPS", "off"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chdir(repoDir); err != nil {

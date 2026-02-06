@@ -3,26 +3,26 @@ package daemon
 import (
 	"testing"
 
-	"dev-mode/internal/config"
+	"dev/internal/config"
 )
 
 func TestBuildRuntimeVarsCoreNames(t *testing.T) {
 	vars := buildRuntimeVars("myproj", "feature/branch", "/repo/feature/branch", "feature/branch", ".localhost")
 
-	if vars["DEV_MODE_PROJECT"] != "myproj" {
-		t.Fatalf("expected DEV_MODE_PROJECT, got %q", vars["DEV_MODE_PROJECT"])
+	if vars["DEV_PROJECT"] != "myproj" {
+		t.Fatalf("expected DEV_PROJECT, got %q", vars["DEV_PROJECT"])
 	}
-	if vars["DEV_MODE_WORKTREE_SLUG"] != "feature/branch" {
-		t.Fatalf("expected DEV_MODE_WORKTREE_SLUG, got %q", vars["DEV_MODE_WORKTREE_SLUG"])
+	if vars["DEV_WORKTREE_SLUG"] != "feature/branch" {
+		t.Fatalf("expected DEV_WORKTREE_SLUG, got %q", vars["DEV_WORKTREE_SLUG"])
 	}
-	if vars["DEV_MODE_WORKTREE_DNS_NAME"] != "branch.localhost" {
-		t.Fatalf("expected DEV_MODE_WORKTREE_DNS_NAME, got %q", vars["DEV_MODE_WORKTREE_DNS_NAME"])
+	if vars["DEV_WORKTREE_DNS_NAME"] != "branch.localhost" {
+		t.Fatalf("expected DEV_WORKTREE_DNS_NAME, got %q", vars["DEV_WORKTREE_DNS_NAME"])
 	}
-	if vars["DEV_MODE_WORKTREE_PATH"] != "/repo/feature/branch" {
-		t.Fatalf("expected DEV_MODE_WORKTREE_PATH, got %q", vars["DEV_MODE_WORKTREE_PATH"])
+	if vars["DEV_WORKTREE_PATH"] != "/repo/feature/branch" {
+		t.Fatalf("expected DEV_WORKTREE_PATH, got %q", vars["DEV_WORKTREE_PATH"])
 	}
-	if vars["DEV_MODE_WORKTREE_BRANCH"] != "feature/branch" {
-		t.Fatalf("expected DEV_MODE_WORKTREE_BRANCH, got %q", vars["DEV_MODE_WORKTREE_BRANCH"])
+	if vars["DEV_WORKTREE_BRANCH"] != "feature/branch" {
+		t.Fatalf("expected DEV_WORKTREE_BRANCH, got %q", vars["DEV_WORKTREE_BRANCH"])
 	}
 }
 
@@ -40,9 +40,9 @@ func TestBuildRuntimeVarsDNSName(t *testing.T) {
 	}
 	for _, tc := range cases {
 		vars := buildRuntimeVars("proj", tc.slug, "/repo", "main", tc.apexZone)
-		if vars["DEV_MODE_WORKTREE_DNS_NAME"] != tc.expected {
-			t.Errorf("slug=%q apexZone=%q: expected DEV_MODE_WORKTREE_DNS_NAME=%q, got %q",
-				tc.slug, tc.apexZone, tc.expected, vars["DEV_MODE_WORKTREE_DNS_NAME"])
+		if vars["DEV_WORKTREE_DNS_NAME"] != tc.expected {
+			t.Errorf("slug=%q apexZone=%q: expected DEV_WORKTREE_DNS_NAME=%q, got %q",
+				tc.slug, tc.apexZone, tc.expected, vars["DEV_WORKTREE_DNS_NAME"])
 		}
 	}
 }

@@ -18,7 +18,7 @@ And:
 
 > "mTLS required for agent connectivity. Registration auth bound to cert identity."
 
-Agents should authenticate to the gateway using client certificates obtained via `dev-mode gateway login`.
+Agents should authenticate to the gateway using client certificates obtained via `dev gateway login`.
 
 ## Actual Behavior
 
@@ -42,7 +42,7 @@ Agents should authenticate to the gateway using client certificates obtained via
 
 ## Reproduction
 
-1. Start gateway: `dev-mode gateway run`
+1. Start gateway: `dev gateway run`
 2. Without running `gateway login`, directly call:
    ```bash
    curl -X POST https://gateway.example.com/_agent/register \
@@ -67,7 +67,7 @@ tlsConfig.ClientCAs = agentCAPool
 
 ### Agent/Daemon (`internal/daemon/tunnels.go`)
 
-1. Load client credentials from `~/.config/dev-mode/gateway/credentials/<host>/`
+1. Load client credentials from `~/.config/dev/gateway/credentials/<host>/`
 2. Create `GatewayClient` with client certificate:
 
 ```go
@@ -123,7 +123,7 @@ Implemented fixes to enforce mTLS for gateway agents and use issued credentials 
    - These credentials are now used for:
      - agent HTTP registration calls (`GatewayClient`)
      - raw TLS CONNECT tunnel dials (`TLSConfig`)
-   - Missing credentials now produce a clear error telling users to run `dev-mode gateway login`.
+   - Missing credentials now produce a clear error telling users to run `dev gateway login`.
 
 3. **Supporting certificate plumbing**
    - Added agent CA pool helper to provide trusted client CA material to gateway TLS config.

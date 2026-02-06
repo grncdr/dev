@@ -81,7 +81,7 @@ func TestWorktreeListUsesConfiguredMainSlug(t *testing.T) {
 		t.Fatalf("git init: %v", err)
 	}
 	cfg := "[project]\nname = \"demo\"\nmain_slug = \"primary\"\n"
-	if err := os.WriteFile(filepath.Join(repoDir, ".dev-mode.toml"), []byte(cfg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {
@@ -139,19 +139,19 @@ func TestWorktreeLifecycleHooksIncludeLocalDNSName(t *testing.T) {
 	if err := runGitForTest(repoDir, "init"); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-	configPath := filepath.Join(repoDir, ".dev-mode.toml")
+	configPath := filepath.Join(repoDir, ".dev.toml")
 	projectConfig := `
 [project]
 name = "demo"
 
 [commands]
-wrapper = "env DEV_MODE_WRAPPED=1 $COMMAND"
+wrapper = "env DEV_WRAPPED=1 $COMMAND"
 
 [hooks]
-pre_worktree_add = "sh -c \"echo ${DEV_MODE_WRAPPED}:${DEV_MODE_WORKTREE_DNS_NAME} > hook_pre_add.txt\""
-post_worktree_add = "sh -c \"echo ${DEV_MODE_WRAPPED}:${DEV_MODE_WORKTREE_DNS_NAME} > hook_post_add.txt\""
-pre_worktree_cleanup = "sh -c \"echo ${DEV_MODE_WRAPPED}:${DEV_MODE_WORKTREE_DNS_NAME} > hook_pre_cleanup.txt\""
-post_worktree_cleanup = "sh -c \"echo ${DEV_MODE_WRAPPED}:${DEV_MODE_WORKTREE_DNS_NAME} > hook_post_cleanup.txt\""
+pre_worktree_add = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_DNS_NAME} > hook_pre_add.txt\""
+post_worktree_add = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_DNS_NAME} > hook_post_add.txt\""
+pre_worktree_cleanup = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_DNS_NAME} > hook_pre_cleanup.txt\""
+post_worktree_cleanup = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_DNS_NAME} > hook_post_cleanup.txt\""
 `
 	if err := os.WriteFile(configPath, []byte(projectConfig), 0o600); err != nil {
 		t.Fatalf("write project config: %v", err)
@@ -232,7 +232,7 @@ func TestWorktreeLifecycleProjectAndSlugWithSlashes(t *testing.T) {
 [project]
 name = "foocorp/monorepo"
 `
-	if err := os.WriteFile(filepath.Join(repoDir, ".dev-mode.toml"), []byte(projectConfig), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(projectConfig), 0o600); err != nil {
 		t.Fatalf("write project config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {
@@ -295,9 +295,9 @@ func TestWorktreeRegisterSupportsNonStandardPath(t *testing.T) {
 name = "demo"
 
 [hooks]
-post_worktree_add = "sh -c \"echo ${DEV_MODE_WORKTREE_DNS_NAME} > hook_post_add.txt\""
+post_worktree_add = "sh -c \"echo ${DEV_WORKTREE_DNS_NAME} > hook_post_add.txt\""
 `
-	if err := os.WriteFile(filepath.Join(repoDir, ".dev-mode.toml"), []byte(projectConfig), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(projectConfig), 0o600); err != nil {
 		t.Fatalf("write project config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {
@@ -367,7 +367,7 @@ func setupWorktreeLifecycleRepo(t *testing.T) (string, string, *Options) {
 	if err := runGitForTest(repoDir, "init"); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-	configPath := filepath.Join(repoDir, ".dev-mode.toml")
+	configPath := filepath.Join(repoDir, ".dev.toml")
 	projectConfig := `
 [project]
 name = "demo"
@@ -398,10 +398,10 @@ func runGitForTest(dir string, args ...string) error {
 	cmd := exec.Command("git", append([]string{"-c", "commit.gpgsign=false"}, args...)...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=dev-mode",
-		"GIT_AUTHOR_EMAIL=dev-mode@example.com",
-		"GIT_COMMITTER_NAME=dev-mode",
-		"GIT_COMMITTER_EMAIL=dev-mode@example.com",
+		"GIT_AUTHOR_NAME=dev",
+		"GIT_AUTHOR_EMAIL=dev@example.com",
+		"GIT_COMMITTER_NAME=dev",
+		"GIT_COMMITTER_EMAIL=dev@example.com",
 	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

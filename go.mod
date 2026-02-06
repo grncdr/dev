@@ -1,4 +1,4 @@
-module dev-mode
+module dev
 
 go 1.25
 

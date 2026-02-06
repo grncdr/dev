@@ -11,9 +11,9 @@ This causes browser certificate errors for proxied subdomain-of-slug hosts.
 
 ## Design
 
-dev-mode uses a local CA model:
+dev uses a local CA model:
 
-1. `dev-mode cert install` creates and trusts a local root CA.
+1. `dev cert install` creates and trusts a local root CA.
 2. The proxy loads that CA keypair at startup.
 3. During TLS handshake, the proxy reads SNI (`ClientHello.ServerName`).
 4. The proxy issues an in-memory leaf certificate for that exact hostname, signed by the local CA.
@@ -27,7 +27,7 @@ This supports:
 
 ## Files
 
-Certificate assets are stored in `~/.config/dev-mode/certs/`:
+Certificate assets are stored in `~/.config/dev/certs/`:
 
 - `ca.pem` (local root CA cert)
 - `ca-key.pem` (local root CA private key)

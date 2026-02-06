@@ -89,7 +89,7 @@ func createAgentCA(certPath, keyPath string) (*CertIssuer, error) {
 	certTpl := &x509.Certificate{
 		SerialNumber: serial,
 		Subject: pkix.Name{
-			CommonName: "dev-mode gateway agent CA",
+			CommonName: "dev gateway agent CA",
 		},
 		NotBefore:             now.Add(-1 * time.Hour),
 		NotAfter:              now.Add(10 * 365 * 24 * time.Hour),

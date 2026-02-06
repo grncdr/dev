@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"dev-mode/internal/config"
+	"dev/internal/config"
 )
 
 // defaultProxyListenHost returns the default listen host for the proxy.
@@ -49,11 +49,11 @@ func (s *Server) startProxy() error {
 		}
 		certPair, err := tls.LoadX509KeyPair(cert, key)
 		if err != nil {
-			return fmt.Errorf("load proxy cert: %w (run dev-mode cert install)", err)
+			return fmt.Errorf("load proxy cert: %w (run dev cert install)", err)
 		}
 		certProvider, err := newProxyCertProvider(certPair, caKey, caCert)
 		if err != nil {
-			return fmt.Errorf("load proxy CA: %w (run dev-mode cert install)", err)
+			return fmt.Errorf("load proxy CA: %w (run dev cert install)", err)
 		}
 		tlsConfig := &tls.Config{
 			Certificates:   []tls.Certificate{certPair},
@@ -159,8 +159,8 @@ func (s *Server) handleTCPProxyConn(conn net.Conn, process string) {
 }
 
 func proxyListenAddrs(daemonCfg *config.DaemonConfig) (httpAddr, httpsAddr string) {
-	httpAddr, httpDisabled := listenFromEnv("DEV_MODE_PROXY_LISTEN_HTTP")
-	httpsAddr, httpsDisabled := listenFromEnv("DEV_MODE_PROXY_LISTEN_HTTPS")
+	httpAddr, httpDisabled := listenFromEnv("DEV_PROXY_LISTEN_HTTP")
+	httpsAddr, httpsDisabled := listenFromEnv("DEV_PROXY_LISTEN_HTTPS")
 
 	if httpAddr == "" && !httpDisabled && daemonCfg != nil && daemonCfg.LocalProxy.ListenHTTP != "" {
 		httpAddr = daemonCfg.LocalProxy.ListenHTTP
@@ -366,7 +366,7 @@ func applyForwardedHeaders(req *http.Request, rewriteMode bool) {
 }
 
 func proxyCertPaths() (leafCert, leafKey, caKey, caCert string, err error) {
-	dir, err := config.ExpandUserPath("~/.config/dev-mode/certs")
+	dir, err := config.ExpandUserPath("~/.config/dev/certs")
 	if err != nil {
 		return "", "", "", "", err
 	}

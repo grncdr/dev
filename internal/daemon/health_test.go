@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"dev-mode/internal/config"
+	"dev/internal/config"
 )
 
 func TestEnsureProcessForTargetWaitsForHTTPHealth(t *testing.T) {
@@ -30,7 +30,7 @@ command = "sh -c \"sleep 1; python3 -m http.server ${PORT}\""
 port = "random"
 health = { type = "http", path = "/" }
 `
-	if err := os.WriteFile(filepath.Join(repoDir, ".dev-mode.toml"), []byte(cfg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {
@@ -106,7 +106,7 @@ health = { type = "http", path = "/" }
 [[process.server.proxy]]
 path = "/"
 `
-	if err := os.WriteFile(filepath.Join(repoDir, ".dev-mode.toml"), []byte(cfgText), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(cfgText), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {
@@ -130,7 +130,7 @@ path = "/"
 		t.Fatal(err)
 	}
 
-	cfg, _, err := config.LoadProjectConfig(filepath.Join(repoDir, ".dev-mode.toml"))
+	cfg, _, err := config.LoadProjectConfig(filepath.Join(repoDir, ".dev.toml"))
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
@@ -182,7 +182,7 @@ port = "random"
 health = { type = "http", path = "/" }
 startup_timeout = 0.3
 `
-	if err := os.WriteFile(filepath.Join(repoDir, ".dev-mode.toml"), []byte(cfg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {

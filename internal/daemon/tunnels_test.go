@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"dev-mode/internal/config"
-	"dev-mode/internal/gateway"
+	"dev/internal/config"
+	"dev/internal/gateway"
 )
 
 func TestTunnelLifecycle(t *testing.T) {
@@ -24,7 +24,7 @@ func TestTunnelLifecycle(t *testing.T) {
 	if err := runGit(repoDir, "init"); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(repoDir, ".dev-mode.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(`
 [project]
 name = "demo"
 
@@ -45,21 +45,21 @@ url = "http://unused.local"
 
 	oldHome := os.Getenv("HOME")
 	oldCwd, _ := os.Getwd()
-	oldProxyListenHTTP := os.Getenv("DEV_MODE_PROXY_LISTEN_HTTP")
-	oldProxyListenHTTPS := os.Getenv("DEV_MODE_PROXY_LISTEN_HTTPS")
+	oldProxyListenHTTP := os.Getenv("DEV_PROXY_LISTEN_HTTP")
+	oldProxyListenHTTPS := os.Getenv("DEV_PROXY_LISTEN_HTTPS")
 	t.Cleanup(func() {
 		_ = os.Setenv("HOME", oldHome)
-		_ = os.Setenv("DEV_MODE_PROXY_LISTEN_HTTP", oldProxyListenHTTP)
-		_ = os.Setenv("DEV_MODE_PROXY_LISTEN_HTTPS", oldProxyListenHTTPS)
+		_ = os.Setenv("DEV_PROXY_LISTEN_HTTP", oldProxyListenHTTP)
+		_ = os.Setenv("DEV_PROXY_LISTEN_HTTPS", oldProxyListenHTTPS)
 		_ = os.Chdir(oldCwd)
 	})
 	if err := os.Setenv("HOME", baseDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Setenv("DEV_MODE_PROXY_LISTEN_HTTP", "off"); err != nil {
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTP", "off"); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Setenv("DEV_MODE_PROXY_LISTEN_HTTPS", "off"); err != nil {
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTPS", "off"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chdir(repoDir); err != nil {

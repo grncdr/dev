@@ -12,9 +12,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"dev-mode/internal/config"
-	"dev-mode/internal/daemon"
-	"dev-mode/internal/worktree"
+	"dev/internal/config"
+	"dev/internal/daemon"
+	"dev/internal/worktree"
 )
 
 func newShareCmd(opts *Options) *cobra.Command {

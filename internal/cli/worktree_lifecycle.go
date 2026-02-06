@@ -14,9 +14,9 @@ import (
 	"github.com/mattn/go-shellwords"
 	"github.com/spf13/cobra"
 
-	"dev-mode/internal/config"
-	"dev-mode/internal/procenv"
-	"dev-mode/internal/worktree"
+	"dev/internal/config"
+	"dev/internal/procenv"
+	"dev/internal/worktree"
 )
 
 type worktreeCleanupOptions struct {
@@ -78,7 +78,7 @@ func newWorktreeCleanupCmd(opts *Options) *cobra.Command {
 func newWorktreeRegisterCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "register [slug]",
-		Short: "register current git worktree in dev-mode state",
+		Short: "register current git worktree in dev state",
 		Long:  "Register current git worktree so it can be managed outside daemon.worktree_dir. Accepts slug or project:slug format.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -507,7 +507,7 @@ func resolveCleanupTarget(arg string, daemonCfg *config.DaemonConfig, cwd string
 			if samePath(current.Path, entries[0].Path) {
 				slug = "main"
 			} else {
-				return nil, errors.New("current worktree is not registered (run `dev-mode worktree register` in that worktree)")
+				return nil, errors.New("current worktree is not registered (run `dev worktree register` in that worktree)")
 			}
 		}
 		return &cleanupTarget{
@@ -534,7 +534,7 @@ func resolveCleanupTarget(arg string, daemonCfg *config.DaemonConfig, cwd string
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("worktree %s:%s is not registered (run `dev-mode worktree register` from that worktree)", parsed.Project, parsed.Slug)
+		return nil, fmt.Errorf("worktree %s:%s is not registered (run `dev worktree register` from that worktree)", parsed.Project, parsed.Slug)
 	}
 	targetPath := registered.Path
 	if _, err := os.Stat(targetPath); err != nil {
@@ -669,13 +669,13 @@ func lifecycleHookEnv(project, slug, worktreePath, branch, operation string, imp
 	}
 	localDNSName := worktree.SlugDNSLabel(slug) + "." + zone
 	return map[string]string{
-		"DEV_MODE_PROJECT":           project,
-		"DEV_MODE_WORKTREE_SLUG":     slug,
-		"DEV_MODE_WORKTREE_PATH":     worktreePath,
-		"DEV_MODE_WORKTREE_BRANCH":   branch,
-		"DEV_MODE_WORKTREE_DNS_NAME": localDNSName,
-		"DEV_MODE_OPERATION":         operation,
-		"DEV_MODE_IMPLICIT_TARGET":   fmt.Sprintf("%t", implicit),
+		"DEV_PROJECT":           project,
+		"DEV_WORKTREE_SLUG":     slug,
+		"DEV_WORKTREE_PATH":     worktreePath,
+		"DEV_WORKTREE_BRANCH":   branch,
+		"DEV_WORKTREE_DNS_NAME": localDNSName,
+		"DEV_OPERATION":         operation,
+		"DEV_IMPLICIT_TARGET":   fmt.Sprintf("%t", implicit),
 	}
 }
 
@@ -701,7 +701,7 @@ func runLifecycleHook(command, wrapper, phase, dir string, env map[string]string
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Dir = dir
 	hookEnv := procenv.CloneEnv(env)
-	hookEnv["DEV_MODE_HOOK_NAME"] = phase
+	hookEnv["DEV_HOOK_NAME"] = phase
 	cmd.Env = append(os.Environ(), procenv.FormatEnv(hookEnv)...)
 	cmd.Stdout = &prefixedLineWriter{prefix: "[hook " + phase + "] ", writer: out}
 	cmd.Stderr = &prefixedLineWriter{prefix: "[hook " + phase + "] ", writer: errOut}

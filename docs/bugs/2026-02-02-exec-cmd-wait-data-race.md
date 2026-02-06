@@ -12,13 +12,13 @@ WARNING: DATA RACE
 Read at 0x00c00007b328 by goroutine 51:
   os/exec.(*Cmd).awaitGoroutines()
   os/exec.(*Cmd).Wait()
-  dev-mode/internal/daemon.(*Manager).stopWorktreeFromDir.func1()
+  dev/internal/daemon.(*Manager).stopWorktreeFromDir.func1()
       manager.go:347
 
 Previous write at 0x00c00007b328 by goroutine 46:
   os/exec.(*Cmd).awaitGoroutines.func1()
   os/exec.(*Cmd).Wait()
-  dev-mode/internal/daemon.(*Manager).startWorktreeFromDir.func1()
+  dev/internal/daemon.(*Manager).startWorktreeFromDir.func1()
       manager.go:242
 ```
 

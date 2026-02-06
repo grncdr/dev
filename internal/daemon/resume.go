@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"dev-mode/internal/config"
+	"dev/internal/config"
 )
 
 const resumeFileName = "resume.json"
@@ -55,7 +55,7 @@ func resumeStatePath() (string, error) {
 }
 
 func daemonStateDir() (string, error) {
-	return config.ExpandUserPath("~/.local/state/dev-mode")
+	return config.ExpandUserPath("~/.local/state/dev")
 }
 
 func saveResumeState(state resumeState) error {

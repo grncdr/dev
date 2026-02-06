@@ -1,6 +1,6 @@
 # Identifier Format
 
-dev-mode uses structured identifiers to reference worktrees and processes.
+dev uses structured identifiers to reference worktrees and processes.
 
 ## Project:Slug Format
 
@@ -15,7 +15,7 @@ myproject:feature/my-branch
 
 The colon `:` separates project from slug.
 
-For commands that take a worktree slug directly (for example `worktree add` and `worktree cleanup`), you may pass just `slug`; dev-mode infers `project` from the current working directory.
+For commands that take a worktree slug directly (for example `worktree add` and `worktree cleanup`), you may pass just `slug`; dev infers `project` from the current working directory.
 
 ## Process Identifiers
 
@@ -42,7 +42,7 @@ Since slugs can contain slashes (e.g., `feature/my-branch`), the DNS label is de
 
 ## Resolution
 
-When resolving slugs, dev-mode accepts either:
+When resolving slugs, dev accepts either:
 
 1. The full slug: `feature/my-branch`
 2. Just the last segment: `my-branch`
@@ -53,28 +53,28 @@ Both resolve to the same worktree due to the uniqueness constraint.
 
 ```bash
 # Create a worktree (project inferred from cwd)
-dev-mode worktree add feature/auth-rewrite
+dev worktree add feature/auth-rewrite
 
 # Create a worktree (explicit project:slug format)
-dev-mode worktree add myapp:feature/auth-rewrite
+dev worktree add myapp:feature/auth-rewrite
 
 # Start all processes in current worktree
-dev-mode start
+dev start
 
 # Start specific process
-dev-mode start rails
+dev start rails
 
 # Start process in another worktree (by last segment)
-dev-mode start auth-rewrite:rails
+dev start auth-rewrite:rails
 
 # Fully qualified
-dev-mode start myapp:feature/auth-rewrite:rails
+dev start myapp:feature/auth-rewrite:rails
 
 # Attach to process
-dev-mode attach feature/auth-rewrite:rails
+dev attach feature/auth-rewrite:rails
 
 # View logs
-dev-mode logs feature/auth-rewrite:sidekiq
+dev logs feature/auth-rewrite:sidekiq
 ```
 
 ## Filesystem Layout
@@ -82,7 +82,7 @@ dev-mode logs feature/auth-rewrite:sidekiq
 Worktrees are created in nested directories mirroring the slug structure:
 
 ```
-~/.local/share/dev-mode/worktrees/
+~/.local/share/dev/worktrees/
 └── org/
     └── repo/
         └── feature/

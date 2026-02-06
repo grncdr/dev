@@ -1,11 +1,11 @@
 # Logging and Retention
 
-This document specifies logging behavior and retention for dev-mode.
+This document specifies logging behavior and retention for dev.
 
 ## Log Locations
 
-- Daemon log: `~/.local/state/dev-mode/daemon.log`
-- Process logs: `~/.local/state/dev-mode/<project>/worktrees/<slug>/<process>.log`
+- Daemon log: `~/.local/state/dev/daemon.log`
+- Process logs: `~/.local/state/dev/<project>/worktrees/<slug>/<process>.log`
 
 ## Retention Policy
 
@@ -15,9 +15,9 @@ This document specifies logging behavior and retention for dev-mode.
 
 ## Viewing logs
 
-- `dev-mode logs` tail logs from all processes for current worktree
-- `dev-mode logs <process_identifier>` tail logs from specific process (identifier can be qualified with project/worktree:process)
-- `dev-mode daemon logs` tail daemon logs.
+- `dev logs` tail logs from all processes for current worktree
+- `dev logs <process_identifier>` tail logs from specific process (identifier can be qualified with project/worktree:process)
+- `dev daemon logs` tail daemon logs.
 
 All of the logs commands should accept these arguments:
 

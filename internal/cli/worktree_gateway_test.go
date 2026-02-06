@@ -3,8 +3,8 @@ package cli
 import (
 	"testing"
 
-	"dev-mode/internal/config"
-	"dev-mode/internal/daemon"
+	"dev/internal/config"
+	"dev/internal/daemon"
 )
 
 func TestGatewayProxyURLsByProcess_OnlyExposedProcesses(t *testing.T) {

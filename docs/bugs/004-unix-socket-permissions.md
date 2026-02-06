@@ -43,10 +43,10 @@ On multi-user systems, other users could:
 
 ```bash
 # Start daemon as user A
-dev-mode daemon
+dev daemon
 
 # As user B, check socket permissions
-ls -la ~/.local/state/dev-mode/daemon.sock
+ls -la ~/.local/state/dev/daemon.sock
 # If permissions are 0755 or 0777, user B can connect
 ```
 

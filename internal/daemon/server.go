@@ -15,8 +15,8 @@ import (
 
 	mdns "github.com/miekg/dns"
 
-	"dev-mode/internal/config"
-	"dev-mode/internal/worktree"
+	"dev/internal/config"
+	"dev/internal/worktree"
 )
 
 type Server struct {

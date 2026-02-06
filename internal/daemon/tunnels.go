@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"dev-mode/internal/config"
-	"dev-mode/internal/gateway"
+	"dev/internal/config"
+	"dev/internal/gateway"
 )
 
 type managedTunnel struct {
@@ -86,7 +86,7 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 		Project:        req.Project,
 		Slug:           req.Slug,
 		Label:          req.Label,
-		AgentID:        fmt.Sprintf("dev-mode-%d", time.Now().UnixNano()),
+		AgentID:        fmt.Sprintf("dev-%d", time.Now().UnixNano()),
 		Name:           req.Name,
 		RetryDelay:     500 * time.Millisecond,
 		GatewayClient:  gatewayClient,
@@ -164,7 +164,7 @@ func gatewayMTLSClient(gatewayURL string, daemonCfg *config.DaemonConfig) (*http
 	certPath := filepath.Join(credDir, "client.pem")
 	caPath := filepath.Join(credDir, "ca.pem")
 	if _, err := os.Stat(keyPath); err != nil {
-		return nil, nil, fmt.Errorf("missing gateway credentials for %s (run dev-mode gateway login --gateway-url %s)", host, gatewayURL)
+		return nil, nil, fmt.Errorf("missing gateway credentials for %s (run dev gateway login --gateway-url %s)", host, gatewayURL)
 	}
 	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {

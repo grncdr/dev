@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"dev-mode/internal/config"
+	"dev/internal/config"
 )
 
 func ResolveConfiguredMainSlug(mainPath string) (string, bool, error) {

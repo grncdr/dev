@@ -1,6 +1,6 @@
-# dev-mode: Dev Experience
+# dev: Dev Experience
 
-High-level product goals and UX surface for `dev-mode`.
+High-level product goals and UX surface for `dev`.
 
 ## Goals
 
@@ -13,34 +13,34 @@ High-level product goals and UX surface for `dev-mode`.
 
 ### Global
 
-- `dev-mode --config <path>`
-- `dev-mode --daemon-config <path>`
-- `dev-mode --debug`
+- `dev --config <path>`
+- `dev --daemon-config <path>`
+- `dev --debug`
 - Commands that talk to the daemon auto-start it by default.
-- Exceptions: `dev-mode daemon status` and `dev-mode daemon stop`.
+- Exceptions: `dev daemon status` and `dev daemon stop`.
 
 ### Daemon
 
-- `dev-mode daemon run`
-- `dev-mode daemon start`
-- `dev-mode daemon stop`
-- `dev-mode daemon status`
-- `dev-mode daemon restart`
+- `dev daemon run`
+- `dev daemon start`
+- `dev daemon stop`
+- `dev daemon status`
+- `dev daemon restart`
 
 ### Project and Config
 
-- `dev-mode projects list`
-- `dev-mode init`
-- `dev-mode config show`
-- `dev-mode config show --output json`
+- `dev projects list`
+- `dev init`
+- `dev config show`
+- `dev config show --output json`
 
 ### Process Lifecycle
 
-- `dev-mode start [process_identifier ...]`
-- `dev-mode stop [process_identifier ...]`
-- `dev-mode restart [process_identifier ...]`
-- `dev-mode status [process_identifier ...]`
-- `dev-mode attach <process|slug:process|project:slug:process>`
+- `dev start [process_identifier ...]`
+- `dev stop [process_identifier ...]`
+- `dev restart [process_identifier ...]`
+- `dev status [process_identifier ...]`
+- `dev attach <process|slug:process|project:slug:process>`
 
 Process identifiers use colon separators (e.g., `project:slug:process`). Slugs can contain slashes (e.g., `feature/my-branch`).
 See `docs/identifiers.md` for full format documentation.
@@ -48,24 +48,24 @@ When omitted, `start|stop|restart|status` operate on all processes in the curren
 
 ### Sharing / Gateway
 
-- `dev-mode share [slug] [--label <label>]`
-- `dev-mode unshare [slug]`
-- `dev-mode gateway run`
-- `dev-mode gateway invite create`
-- `dev-mode gateway login <invite-code> [--name <name>] [--gateway-url <url>]`
+- `dev share [slug] [--label <label>]`
+- `dev unshare [slug]`
+- `dev gateway run`
+- `dev gateway invite create`
+- `dev gateway login <invite-code> [--name <name>] [--gateway-url <url>]`
 
 ### Local Machine Setup
 
-- `dev-mode dns install`
-- `dev-mode dns uninstall`
-- `dev-mode cert install`
-- `dev-mode install`
+- `dev dns install`
+- `dev dns uninstall`
+- `dev cert install`
+- `dev install`
 
 ## Config Model
 
-- Project config: `.dev-mode.toml`
-- Local overrides: `.dev-mode.local.toml`
-- Daemon config: `~/.config/dev-mode/daemon.toml`
+- Project config: `.dev.toml`
+- Local overrides: `.dev.local.toml`
+- Daemon config: `~/.config/dev/daemon.toml`
 - Process table is `[process.<name>]` (singular section name).
 
 See:
@@ -76,10 +76,10 @@ See:
 
 ## Conventions
 
-- Daemon socket: `~/.config/dev-mode/devd.sock`
-- State root: `~/.local/state/dev-mode/` (override via `DEV_MODE_STATE_DIR`)
+- Daemon socket: `~/.config/dev/devd.sock`
+- State root: `~/.local/state/dev/` (override via `DEV_STATE_DIR`)
 - Logs: `<state_root>/logs/`
   - Daemon: `<state_root>/logs/daemon.log`
   - Processes: `<state_root>/logs/<project>/<slug>/<process>.log`
-- Certificates: `~/.config/dev-mode/certs/`
+- Certificates: `~/.config/dev/certs/`
 - Proxy apex defaults to `.localhost` via daemon config `local-proxy.apex_zone`.

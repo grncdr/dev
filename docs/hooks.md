@@ -1,6 +1,6 @@
-# dev-mode Hooks
+# dev Hooks
 
-This document describes all user-configurable hooks in `.dev-mode.toml`.
+This document describes all user-configurable hooks in `.dev.toml`.
 
 ```toml
 [hooks]
@@ -16,13 +16,13 @@ post_stop = "bin/post-stop"
 
 ## Available Hooks
 
-- `pre_worktree_add`: runs before `dev-mode worktree add` mutates git/worktree state.
-- `post_worktree_add`: runs after `dev-mode worktree add` succeeds.
-- `pre_worktree_cleanup`: runs before `dev-mode worktree cleanup` mutates git/worktree state.
-- `post_worktree_cleanup`: runs after `dev-mode worktree cleanup` succeeds.
-- `pre_start`: runs before `dev-mode start`/`dev-mode worktree start` launches processes.
+- `pre_worktree_add`: runs before `dev worktree add` mutates git/worktree state.
+- `post_worktree_add`: runs after `dev worktree add` succeeds.
+- `pre_worktree_cleanup`: runs before `dev worktree cleanup` mutates git/worktree state.
+- `post_worktree_cleanup`: runs after `dev worktree cleanup` succeeds.
+- `pre_start`: runs before `dev start`/`dev worktree start` launches processes.
 - `post_start`: runs after process start flow completes.
-- `pre_stop`: runs before `dev-mode stop`/`dev-mode worktree stop` stops processes.
+- `pre_stop`: runs before `dev stop`/`dev worktree stop` stops processes.
 - `post_stop`: runs after process stop flow completes.
 
 ## Working Directory
@@ -45,25 +45,25 @@ If `[commands].wrapper` is configured, hook commands are executed through that w
 
 The following variables are injected for worktree lifecycle hooks (`pre/post_worktree_add`, `pre/post_worktree_cleanup`):
 
-- `DEV_MODE_PROJECT`: normalized project identifier.
-- `DEV_MODE_WORKTREE_SLUG`: normalized worktree slug.
-- `DEV_MODE_WORKTREE_DNS_NAME`: DNS-normalized worktree name + apex zone.
-- `DEV_MODE_WORKTREE_PATH`: target worktree path.
-- `DEV_MODE_WORKTREE_BRANCH`: target branch name.
-- `DEV_MODE_HOOK_NAME`: hook currently executing (for example `pre_worktree_add`).
-- `DEV_MODE_OPERATION`: `add` or `cleanup`.
-- `DEV_MODE_IMPLICIT_TARGET`: `true` when cleanup target was inferred from cwd, otherwise `false`.
+- `DEV_PROJECT`: normalized project identifier.
+- `DEV_WORKTREE_SLUG`: normalized worktree slug.
+- `DEV_WORKTREE_DNS_NAME`: DNS-normalized worktree name + apex zone.
+- `DEV_WORKTREE_PATH`: target worktree path.
+- `DEV_WORKTREE_BRANCH`: target branch name.
+- `DEV_HOOK_NAME`: hook currently executing (for example `pre_worktree_add`).
+- `DEV_OPERATION`: `add` or `cleanup`.
+- `DEV_IMPLICIT_TARGET`: `true` when cleanup target was inferred from cwd, otherwise `false`.
 
 ### Start/stop hooks
 
-For `pre_start`, `post_start`, `pre_stop`, and `post_stop`, dev-mode provides the same core worktree variables used for process runtime:
+For `pre_start`, `post_start`, `pre_stop`, and `post_stop`, dev provides the same core worktree variables used for process runtime:
 
-- `DEV_MODE_PROJECT`
-- `DEV_MODE_WORKTREE_SLUG`
-- `DEV_MODE_WORKTREE_DNS_NAME`
-- `DEV_MODE_WORKTREE_PATH`
-- `DEV_MODE_WORKTREE_BRANCH`
-- `DEV_MODE_HOOK_NAME`
+- `DEV_PROJECT`
+- `DEV_WORKTREE_SLUG`
+- `DEV_WORKTREE_DNS_NAME`
+- `DEV_WORKTREE_PATH`
+- `DEV_WORKTREE_BRANCH`
+- `DEV_HOOK_NAME`
 
 ## Failure behavior
 

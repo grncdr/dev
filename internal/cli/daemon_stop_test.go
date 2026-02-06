@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"dev-mode/internal/daemon"
+	"dev/internal/daemon"
 )
 
 func TestRunDaemonStop(t *testing.T) {
@@ -19,16 +19,16 @@ func TestRunDaemonStop(t *testing.T) {
 	if err := os.Setenv("HOME", homeDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Setenv("DEV_MODE_PROXY_LISTEN_HTTP", "off"); err != nil {
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTP", "off"); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Setenv("DEV_MODE_PROXY_LISTEN_HTTPS", "off"); err != nil {
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTPS", "off"); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		_ = os.Unsetenv("HOME")
-		_ = os.Unsetenv("DEV_MODE_PROXY_LISTEN_HTTP")
-		_ = os.Unsetenv("DEV_MODE_PROXY_LISTEN_HTTPS")
+		_ = os.Unsetenv("DEV_PROXY_LISTEN_HTTP")
+		_ = os.Unsetenv("DEV_PROXY_LISTEN_HTTPS")
 		_ = os.RemoveAll(homeDir)
 	}()
 
@@ -75,16 +75,16 @@ func TestRunDaemonStopWhenNotRunning(t *testing.T) {
 	if err := os.Setenv("HOME", homeDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Setenv("DEV_MODE_PROXY_LISTEN_HTTP", "off"); err != nil {
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTP", "off"); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Setenv("DEV_MODE_PROXY_LISTEN_HTTPS", "off"); err != nil {
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTPS", "off"); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		_ = os.Unsetenv("HOME")
-		_ = os.Unsetenv("DEV_MODE_PROXY_LISTEN_HTTP")
-		_ = os.Unsetenv("DEV_MODE_PROXY_LISTEN_HTTPS")
+		_ = os.Unsetenv("DEV_PROXY_LISTEN_HTTP")
+		_ = os.Unsetenv("DEV_PROXY_LISTEN_HTTPS")
 		_ = os.RemoveAll(homeDir)
 	}()
 

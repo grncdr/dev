@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"dev-mode/internal/config"
+	"dev/internal/config"
 )
 
 type Options struct {
@@ -33,8 +33,8 @@ func Execute() error {
 	opts := &Options{WorkingDir: cwd}
 
 	root := &cobra.Command{
-		Use:   "dev-mode",
-		Short: "dev-mode",
+		Use:   "dev",
+		Short: "dev",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			return resolvePaths(opts)
 		},

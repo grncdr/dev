@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"dev-mode/internal/tunnelmux"
+	"dev/internal/tunnelmux"
 )
 
 type Agent struct {

@@ -12,15 +12,15 @@ import (
 
 func TestServerHealthAndWorktree(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "devd.sock")
-	if err := os.Setenv("DEV_MODE_PROXY_LISTEN_HTTP", "off"); err != nil {
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTP", "off"); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Setenv("DEV_MODE_PROXY_LISTEN_HTTPS", "off"); err != nil {
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTPS", "off"); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
-		_ = os.Unsetenv("DEV_MODE_PROXY_LISTEN_HTTP")
-		_ = os.Unsetenv("DEV_MODE_PROXY_LISTEN_HTTPS")
+		_ = os.Unsetenv("DEV_PROXY_LISTEN_HTTP")
+		_ = os.Unsetenv("DEV_PROXY_LISTEN_HTTPS")
 	}()
 
 	srv, err := NewServer(socketPath)

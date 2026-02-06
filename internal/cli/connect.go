@@ -15,8 +15,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"dev-mode/internal/daemon"
-	"dev-mode/internal/worktree"
+	"dev/internal/daemon"
+	"dev/internal/worktree"
 )
 
 const (

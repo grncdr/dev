@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const daemonLogPathEnv = "DEV_MODE_DAEMON_LOG"
+const daemonLogPathEnv = "DEV_DAEMON_LOG"
 
 func writeDaemonLogLine(line string) {
 	if strings.TrimSpace(line) == "" {

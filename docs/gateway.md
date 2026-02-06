@@ -1,6 +1,6 @@
 # Gateway
 
-The gateway is a public-facing server that allows you to share your local development environment with others via stable HTTPS URLs. It accepts incoming requests and forwards them through secure tunnels to connected dev-mode daemons.
+The gateway is a public-facing server that allows you to share your local development environment with others via stable HTTPS URLs. It accepts incoming requests and forwards them through secure tunnels to connected dev daemons.
 
 ## Use cases
 
@@ -10,8 +10,8 @@ The gateway is a public-facing server that allows you to share your local develo
 
 ## How it works
 
-1. You run `dev-mode gateway run` on a server with a public IP.
-2. Team members run `dev-mode share <label>` from their local machines to open tunnels
+1. You run `dev gateway run` on a server with a public IP.
+2. Team members run `dev share <label>` from their local machines to open tunnels
 3. Requests to `<label>.example.com` are forwarded through the tunnel to the local daemon
 4. The local daemon routes the request using the same proxy rules as local development
 
@@ -35,7 +35,7 @@ The above config configures the gateway to be reachable at `tunnels.example.com`
 
 The gateway terminates TLS itself using certificates from Let's Encrypt. It should **not** be run behind a reverse proxy like nginx or Caddy—run it directly on a server with ports 80 and 443 available.
 
-When traffic is tunneled through the gateway, exposed processes are controlled by `gateway.expose` in `.dev-mode.toml`:
+When traffic is tunneled through the gateway, exposed processes are controlled by `gateway.expose` in `.dev.toml`:
 - only listed processes accept gateway-tunneled traffic
 - `mode = "reverse_proxy"`: standard reverse proxy headers, no host/cookie/body rewrites. Local processes receive the usual `X-Forwarded-*` headers (`X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Forwarded-For`) so they can detect the public hostname and scheme.
 - `mode = "rewrite"`: rewrites local apex hosts/cookies to the gateway public apex for browser-facing compatibility. Use this when your app cannot easily support both local `.localhost` hostnames and your public gateway DNS zone at the same time.
@@ -44,12 +44,12 @@ When traffic is tunneled through the gateway, exposed processes are controlled b
 To start the gateway:
 
 ```bash
-dev-mode gateway run
+dev gateway run
 ```
 
 ## Onboarding team members
 
-Configure the gateway in the project `.dev-mode.toml`:
+Configure the gateway in the project `.dev.toml`:
 
 ```toml
 [gateway]
@@ -59,20 +59,20 @@ url = "https://tunnels.example.com"
 Create an invite code on the gateway server:
 
 ```bash
-dev-mode gateway invite create
+dev gateway invite create
 ```
 
 Team members redeem the invite to get credentials:
 
 ```bash
-dev-mode gateway login <invite-code>
+dev gateway login <invite-code>
 ```
 
 This generates a client certificate stored locally, enabling secure tunnel connections.
 
 ## Server state
 
-The gateway stores all persistent data under `<state_dir>/gateway/`. With the default state directory, this is `~/.local/state/dev-mode/gateway/`.
+The gateway stores all persistent data under `<state_dir>/gateway/`. With the default state directory, this is `~/.local/state/dev/gateway/`.
 
 Example file tree:
 

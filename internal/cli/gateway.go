@@ -24,8 +24,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"dev-mode/internal/config"
-	"dev-mode/internal/gateway"
+	"dev/internal/config"
+	"dev/internal/gateway"
 )
 
 func newGatewayCmd(opts *Options) *cobra.Command {
@@ -256,7 +256,7 @@ func runGatewayLogin(opts *Options, inviteCode, name, gatewayURL string) error {
 	if strings.TrimSpace(name) == "" {
 		name = os.Getenv("USER")
 		if name == "" {
-			name = "dev-mode-user"
+			name = "dev-user"
 		}
 	}
 	gatewayURL = resolveGatewayURLForLogin(opts, gatewayURL)

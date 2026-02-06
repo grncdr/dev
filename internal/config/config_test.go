@@ -8,8 +8,8 @@ import (
 
 func TestLoadProjectConfig_OverridesAndValidation(t *testing.T) {
 	dir := t.TempDir()
-	basePath := filepath.Join(dir, ".dev-mode.toml")
-	overridePath := filepath.Join(dir, ".dev-mode.local.toml")
+	basePath := filepath.Join(dir, ".dev.toml")
+	overridePath := filepath.Join(dir, ".dev.local.toml")
 
 	base := `
 [project]
@@ -44,7 +44,7 @@ name = "override"
 
 func TestLoadProjectConfig_RequiresFields(t *testing.T) {
 	dir := t.TempDir()
-	basePath := filepath.Join(dir, ".dev-mode.toml")
+	basePath := filepath.Join(dir, ".dev.toml")
 
 	base := `
 [project]
@@ -144,11 +144,11 @@ func TestResolveGatewayDataDir(t *testing.T) {
 
 func TestResolveWorktreeDir_Default(t *testing.T) {
 	base := t.TempDir()
-	old := os.Getenv("DEV_MODE_STATE_DIR")
+	old := os.Getenv("DEV_STATE_DIR")
 	t.Cleanup(func() {
-		_ = os.Setenv("DEV_MODE_STATE_DIR", old)
+		_ = os.Setenv("DEV_STATE_DIR", old)
 	})
-	if err := os.Setenv("DEV_MODE_STATE_DIR", base); err != nil {
+	if err := os.Setenv("DEV_STATE_DIR", base); err != nil {
 		t.Fatalf("setenv: %v", err)
 	}
 	got, err := ResolveWorktreeDir(nil)

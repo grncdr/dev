@@ -15,19 +15,19 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"dev-mode/internal/config"
-	"dev-mode/internal/daemon"
+	"dev/internal/config"
+	"dev/internal/daemon"
 )
 
 const (
-	daemonLogPathEnv = "DEV_MODE_DAEMON_LOG"
+	daemonLogPathEnv = "DEV_DAEMON_LOG"
 	maxLogBytes      = 20 * 1024 * 1024
 )
 
 func newDaemonCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
-		Short: "manage the dev-mode daemon",
+		Short: "manage the dev daemon",
 	}
 
 	cmd.AddCommand(newDaemonStartCmd(opts))

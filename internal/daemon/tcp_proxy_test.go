@@ -47,7 +47,7 @@ health = { type = "http", path = "/" }
 [[process.db.proxy]]
 tcp_listen = %d
 `, tcpListenPort)
-	if err := os.WriteFile(filepath.Join(repoDir, ".dev-mode.toml"), []byte(configBody), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(configBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {
@@ -61,18 +61,18 @@ tcp_listen = %d
 	}
 
 	oldHome := os.Getenv("HOME")
-	oldHTTP := os.Getenv("DEV_MODE_PROXY_LISTEN_HTTP")
-	oldHTTPS := os.Getenv("DEV_MODE_PROXY_LISTEN_HTTPS")
+	oldHTTP := os.Getenv("DEV_PROXY_LISTEN_HTTP")
+	oldHTTPS := os.Getenv("DEV_PROXY_LISTEN_HTTPS")
 	oldCwd, _ := os.Getwd()
 	t.Cleanup(func() {
 		_ = os.Setenv("HOME", oldHome)
-		_ = os.Setenv("DEV_MODE_PROXY_LISTEN_HTTP", oldHTTP)
-		_ = os.Setenv("DEV_MODE_PROXY_LISTEN_HTTPS", oldHTTPS)
+		_ = os.Setenv("DEV_PROXY_LISTEN_HTTP", oldHTTP)
+		_ = os.Setenv("DEV_PROXY_LISTEN_HTTPS", oldHTTPS)
 		_ = os.Chdir(oldCwd)
 	})
 	_ = os.Setenv("HOME", baseDir)
-	_ = os.Setenv("DEV_MODE_PROXY_LISTEN_HTTP", "off")
-	_ = os.Setenv("DEV_MODE_PROXY_LISTEN_HTTPS", "off")
+	_ = os.Setenv("DEV_PROXY_LISTEN_HTTP", "off")
+	_ = os.Setenv("DEV_PROXY_LISTEN_HTTPS", "off")
 	if err := os.Chdir(repoDir); err != nil {
 		t.Fatal(err)
 	}

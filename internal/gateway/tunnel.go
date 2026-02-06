@@ -3,7 +3,7 @@ package gateway
 import (
 	"sync"
 
-	"dev-mode/internal/tunnelmux"
+	"dev/internal/tunnelmux"
 )
 
 type tunnelPool struct {

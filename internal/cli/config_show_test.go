@@ -22,7 +22,7 @@ type showPayloadTest struct {
 
 func TestRunConfigShow_JSON(t *testing.T) {
 	dir := t.TempDir()
-	projectPath := filepath.Join(dir, ".dev-mode.toml")
+	projectPath := filepath.Join(dir, ".dev.toml")
 	daemonPath := filepath.Join(dir, "daemon.toml")
 
 	project := `

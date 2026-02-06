@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"dev-mode/internal/config"
+	"dev/internal/config"
 )
 
 func TestGatewayMTLSClientMissingCredentials(t *testing.T) {

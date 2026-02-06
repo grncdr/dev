@@ -70,7 +70,7 @@ func TestStatusAndStopUseDirHint(t *testing.T) {
 [project]
 name = "foocorp/monorepo"
 `
-	if err := os.WriteFile(filepath.Join(repoA, ".dev-mode.toml"), []byte(cfg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repoA, ".dev.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -110,7 +110,7 @@ func TestResolveWorktreePathSupportsMainAliases(t *testing.T) {
 name = "foocorp/monorepo"
 main_slug = "primary"
 `
-	if err := os.WriteFile(filepath.Join(repo, ".dev-mode.toml"), []byte(cfg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, ".dev.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

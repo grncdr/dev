@@ -8,7 +8,7 @@ import (
 )
 
 func TestResolvePagerCommandOrder(t *testing.T) {
-	t.Setenv("DEV_MODE_PAGER", "")
+	t.Setenv("DEV_PAGER", "")
 	t.Setenv("PAGER", "less -R")
 	pager, err := resolvePagerCommand(func(name string) (string, error) {
 		if name == "bat" {
@@ -25,7 +25,7 @@ func TestResolvePagerCommandOrder(t *testing.T) {
 }
 
 func TestResolvePagerCommandUsesDevModePagerFirst(t *testing.T) {
-	t.Setenv("DEV_MODE_PAGER", "less -R")
+	t.Setenv("DEV_PAGER", "less -R")
 	t.Setenv("PAGER", "cat")
 	pager, err := resolvePagerCommand(func(string) (string, error) {
 		return "", errors.New("missing")
@@ -39,7 +39,7 @@ func TestResolvePagerCommandUsesDevModePagerFirst(t *testing.T) {
 }
 
 func TestRunDocsFallsBackToStdout(t *testing.T) {
-	t.Setenv("DEV_MODE_PAGER", "")
+	t.Setenv("DEV_PAGER", "")
 	t.Setenv("PAGER", "")
 	var out bytes.Buffer
 	var errOut bytes.Buffer
@@ -49,13 +49,13 @@ func TestRunDocsFallsBackToStdout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runDocs: %v", err)
 	}
-	if !strings.Contains(out.String(), "# dev-mode Config") {
+	if !strings.Contains(out.String(), "# dev Config") {
 		t.Fatalf("expected config markdown in output")
 	}
 }
 
 func TestRunDocsWithDevModePager(t *testing.T) {
-	t.Setenv("DEV_MODE_PAGER", "cat")
+	t.Setenv("DEV_PAGER", "cat")
 	t.Setenv("PAGER", "")
 	var out bytes.Buffer
 	var errOut bytes.Buffer
@@ -65,7 +65,7 @@ func TestRunDocsWithDevModePager(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runDocs: %v", err)
 	}
-	if !strings.Contains(out.String(), "# dev-mode Usage") {
+	if !strings.Contains(out.String(), "# dev Usage") {
 		t.Fatalf("expected usage markdown in output")
 	}
 }

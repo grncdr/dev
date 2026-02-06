@@ -101,7 +101,7 @@ func resolverContent() string {
 }
 
 func linuxResolverPath() string {
-	return filepath.Join("/etc/systemd/resolved.conf.d", "dev-mode-localhost.conf")
+	return filepath.Join("/etc/systemd/resolved.conf.d", "dev-localhost.conf")
 }
 
 func linuxResolverContent() string {

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"dev-mode/internal/config"
+	"dev/internal/config"
 )
 
 func TestParseProxyHost(t *testing.T) {
@@ -93,7 +93,7 @@ func TestLocalProxyHostForTunnelRequest_UsesMainSlugOverride(t *testing.T) {
 name = "foocorp"
 main_slug = "foocorp"
 `
-	cfgPath := filepath.Join(repo, ".dev-mode.toml")
+	cfgPath := filepath.Join(repo, ".dev.toml")
 	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestParseProxyMatchers_TCPListen(t *testing.T) {
 
 func TestProcessProxyMatchers_FromLoadedInlineProxyConfig(t *testing.T) {
 	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, ".dev-mode.toml")
+	cfgPath := filepath.Join(dir, ".dev.toml")
 	body := `
 [project]
 name = "foocorp"
@@ -258,7 +258,7 @@ proxy = { subdomain = "mailpit" }
 
 func TestProcessProxyMatchers_DefaultsToGatewayDisabledWhenNotExposed(t *testing.T) {
 	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, ".dev-mode.toml")
+	cfgPath := filepath.Join(dir, ".dev.toml")
 	body := `
 [project]
 name = "foocorp"
@@ -285,7 +285,7 @@ proxy = { subdomain = "app" }
 
 func TestResolveProxyTargetForRequest_BlocksGatewayWhenProcessNotExposed(t *testing.T) {
 	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, ".dev-mode.toml")
+	cfgPath := filepath.Join(dir, ".dev.toml")
 	body := `
 [project]
 name = "foocorp"
@@ -307,7 +307,7 @@ proxy = { path = "/" }
 
 func TestProjectConfigForSlug_UsesManagerWorktreePath(t *testing.T) {
 	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, ".dev-mode.toml")
+	cfgPath := filepath.Join(dir, ".dev.toml")
 	body := `
 [project]
 name = "foocorp"
@@ -364,7 +364,7 @@ func TestResolveRequestedSlug_MapsMainSlugOverride(t *testing.T) {
 name = "foocorp"
 main_slug = "foocorp"
 `
-	if err := os.WriteFile(filepath.Join(repo, ".dev-mode.toml"), []byte(cfg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, ".dev.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("demo"), 0o600); err != nil {

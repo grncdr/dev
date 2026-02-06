@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"dev-mode/internal/config"
-	"dev-mode/internal/worktree"
+	"dev/internal/config"
+	"dev/internal/worktree"
 )
 
 func TestResolveProcessTargetsExplicit(t *testing.T) {
@@ -65,7 +65,7 @@ func TestResolveSlugProjectQualified(t *testing.T) {
 	if err := runGitForTest(repoDir, "init"); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(repoDir, ".dev-mode.toml"), []byte("[project]\nname=\"demo\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte("[project]\nname=\"demo\"\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {
@@ -101,7 +101,7 @@ func TestResolveSlugUsesRegisteredSlugForCurrentWorktree(t *testing.T) {
 	if err := runGitForTest(repoDir, "init"); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(repoDir, ".dev-mode.toml"), []byte("[project]\nname=\"demo\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte("[project]\nname=\"demo\"\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {
@@ -159,7 +159,7 @@ func TestResolveSlugDefaultsToMainForMainWorktree(t *testing.T) {
 	if err := runGitForTest(repoDir, "init"); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(repoDir, ".dev-mode.toml"), []byte("[project]\nname=\"demo\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte("[project]\nname=\"demo\"\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {
@@ -197,7 +197,7 @@ func TestResolveSlugUsesConfiguredMainSlugForMainWorktree(t *testing.T) {
 		t.Fatalf("git init: %v", err)
 	}
 	cfg := "[project]\nname=\"demo\"\nmain_slug=\"primary\"\n"
-	if err := os.WriteFile(filepath.Join(repoDir, ".dev-mode.toml"), []byte(cfg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {

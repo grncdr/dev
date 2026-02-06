@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const installHomeEnv = "DEV_MODE_INSTALL_HOME"
+const installHomeEnv = "DEV_INSTALL_HOME"
 
 func newInstallCmd() *cobra.Command {
 	var confirm bool
@@ -37,7 +37,7 @@ func runInstall(confirm bool) error {
 
 	if os.Geteuid() != 0 {
 		if !confirm {
-			fmt.Println("dev-mode install needs sudo to:")
+			fmt.Println("dev install needs sudo to:")
 			fmt.Println("- write DNS resolver config")
 			fmt.Println("- trust a local CA in the system store")
 			fmt.Println("- enable binding to ports 80/443")

@@ -12,7 +12,7 @@ import (
 	"github.com/mattn/go-shellwords"
 	"github.com/spf13/cobra"
 
-	docstore "dev-mode/docs"
+	docstore "dev/docs"
 )
 
 type pagerCommand struct {
@@ -62,7 +62,7 @@ func printAvailableDocs(out io.Writer) error {
 			return err
 		}
 	}
-	_, err := fmt.Fprintln(out, "\nUse: dev-mode docs <basename>")
+	_, err := fmt.Fprintln(out, "\nUse: dev docs <basename>")
 	return err
 }
 
@@ -98,7 +98,7 @@ func runDocs(basename string, out, errOut io.Writer, lookPath func(string) (stri
 }
 
 func resolvePagerCommand(lookPath func(string) (string, error)) (*pagerCommand, error) {
-	if cmd, err := parsePagerEnv("DEV_MODE_PAGER"); err != nil {
+	if cmd, err := parsePagerEnv("DEV_PAGER"); err != nil {
 		return nil, err
 	} else if cmd != nil {
 		return cmd, nil

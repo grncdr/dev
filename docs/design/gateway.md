@@ -19,7 +19,7 @@ This document specifies the first implementation of the public gateway and local
 ## Terminology
 
 - **Gateway**: public service that accepts client HTTP(S) and forwards to connected agents.
-- **Agent**: code running in `dev-mode daemon` that maintains outbound tunnel connections.
+- **Agent**: code running in `dev daemon` that maintains outbound tunnel connections.
 - **Label**: globally unique routing key (defaults to worktree slug).
 - **Public host**: `<subdomain>.<label>.<gateway_apex>`.
 
@@ -88,10 +88,10 @@ Goal: zero browser/OIDC setup for day-to-day team onboarding.
 ### Invite flow
 
 1. Admin creates invite:
-   - `dev-mode gateway invite create`
+   - `dev gateway invite create`
    - Defaults: single-use, TTL 5 minutes.
 2. Teammate logs in with invite code:
-   - `dev-mode gateway login <invite-code> [--name <name>] --gateway-url <url>`
+   - `dev gateway login <invite-code> [--name <name>] --gateway-url <url>`
    - If `--name` is omitted, default to `$USER`.
 3. CLI generates local keypair and CSR.
 4. CLI submits `{invite_code, name, csr}` to gateway.
@@ -146,8 +146,8 @@ Gateway stores local state files to restore tunnel leases across restarts.
 
 ### Storage location
 
-- Default: `~/.local/state/dev-mode/gateway/` (override via `DEV_MODE_STATE_DIR`)
-- For deployed gateway instances, set `DEV_MODE_STATE_DIR` and persist that directory.
+- Default: `~/.local/state/dev/gateway/` (override via `DEV_STATE_DIR`)
+- For deployed gateway instances, set `DEV_STATE_DIR` and persist that directory.
 - All gateway state/certs/logs/config snapshots live under `<state_dir>/gateway/`.
 
 ### Files
@@ -190,7 +190,7 @@ This gives "tunnels restored on startup" semantics while still requiring live ag
 
 - If no connected agent for label: return `502` with structured error code `gateway_label_unavailable`.
 - If stream to agent fails mid-request: return `502` with `gateway_upstream_error`.
-- If Basic Auth is enabled and credentials are missing/invalid: return `401` with `WWW-Authenticate: Basic realm="dev-mode gateway"`.
+- If Basic Auth is enabled and credentials are missing/invalid: return `401` with `WWW-Authenticate: Basic realm="dev gateway"`.
 - ACME provisioning applies backoff on failures and honors Let’s Encrypt `retry after` hints to avoid repeated failed authorizations.
 - Gateway logs include request id, host, label, selected agent id, and error code.
 
@@ -250,9 +250,9 @@ Notes:
 
 CLI behavior:
 
-- `dev-mode share [slug] [--label <label>]` starts/ensures agent registration.
-- `dev-mode unshare [slug] [--label <label>]` unregisters label.
-- `dev-mode status` shows sharing connection state in the Gateway section.
+- `dev share [slug] [--label <label>]` starts/ensures agent registration.
+- `dev unshare [slug] [--label <label>]` unregisters label.
+- `dev status` shows sharing connection state in the Gateway section.
 
 ## Observability
 

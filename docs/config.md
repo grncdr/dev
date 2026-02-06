@@ -1,12 +1,12 @@
-# dev-mode Config
+# dev Config
 
-This doc describes the config files and options used by dev-mode.
+This doc describes the config files and options used by dev.
 
 ## Project config (committed)
 
-Path: `.dev-mode.toml` in the repo root.
+Path: `.dev.toml` in the repo root.
 
-You can generate a starter config with `dev-mode init`, which creates `.dev-mode.toml` in the current directory and defaults `project.name` to `<owner>/<repo>` when the git `origin` remote matches that format, otherwise the directory basename.
+You can generate a starter config with `dev init`, which creates `.dev.toml` in the current directory and defaults `project.name` to `<owner>/<repo>` when the git `origin` remote matches that format, otherwise the directory basename.
 
 Required fields:
 
@@ -99,12 +99,12 @@ Notes:
 - Start/stop hooks are optional:
   - `pre_start` and `post_start`
   - `pre_stop` and `post_stop`
-- The `${MAIN_WORKTREE}` and `${WORKTREE_STATE}` variables are expanded by dev-mode at runtime.
+- The `${MAIN_WORKTREE}` and `${WORKTREE_STATE}` variables are expanded by dev at runtime.
 - `port` controls how the process is reached by the proxy:
   - `port = "unix"` uses a unix socket at `${WORKTREE_STATE}/<process>.sock`.
-  - `port = "random"` allocates a high localhost port and sets `PORT` / `DEV_MODE_PORT` env vars.
+  - `port = "random"` allocates a high localhost port and sets `PORT` / `DEV_PORT` env vars.
   - `port = 3000` uses that fixed localhost TCP port.
-- When `port = "unix"`, the daemon also injects `DEV_MODE_SOCKET` and `DEV_MODE_SOCKET_<PROCESS>` env vars (uppercase, non-alnum → `_`).
+- When `port = "unix"`, the daemon also injects `DEV_SOCKET` and `DEV_SOCKET_<PROCESS>` env vars (uppercase, non-alnum → `_`).
 - Health checks are optional via `process.<name>.health`:
   - `health = { type = "http", path = "/health" }` waits for HTTP 2xx/3xx before proxying traffic.
   - `health = { type = "tcp" }` waits for a successful TCP connect (you can also set `port = <int>` inside health to probe a specific port).
@@ -122,11 +122,11 @@ Notes:
 - `match = "prefix"` matches segment boundaries (e.g. `/blah` matches `/blah/..`). Use `/foo*` to match raw prefixes.
 - `commands.wrapper` wraps any command execution; use `$COMMAND` to inject the command tokens. Each process can override with `process.<name>.wrapper`.
 - Managed process runtime includes these core variables:
-  - `DEV_MODE_PROJECT`
-  - `DEV_MODE_WORKTREE_SLUG`
-  - `DEV_MODE_WORKTREE_DNS_NAME` (for example `feature.localhost`)
-  - `DEV_MODE_WORKTREE_PATH`
-  - `DEV_MODE_WORKTREE_BRANCH`
+  - `DEV_PROJECT`
+  - `DEV_WORKTREE_SLUG`
+  - `DEV_WORKTREE_DNS_NAME` (for example `feature.localhost`)
+  - `DEV_WORKTREE_PATH`
+  - `DEV_WORKTREE_BRANCH`
   - `PORT` (when a process has a resolved port)
 - See `docs/environment.md` for full execution-context details and hook/process env tables.
 - See `docs/logging.md` for log locations.
@@ -134,15 +134,15 @@ Notes:
 
 ## Project local override (not committed)
 
-Path: `.dev-mode.local.toml` in the repo root.
+Path: `.dev.local.toml` in the repo root.
 
-This file overrides `.dev-mode.toml` for your local machine.
+This file overrides `.dev.toml` for your local machine.
 
 ## Daemon config
 
-Path: `~/.config/dev-mode/daemon.toml`
+Path: `~/.config/dev/daemon.toml`
 
-Override via `DEV_MODE_DAEMON_CONFIG` environment variable or `--daemon-config` flag.
+Override via `DEV_DAEMON_CONFIG` environment variable or `--daemon-config` flag.
 
 ```toml
 [gateway]
@@ -166,7 +166,7 @@ enabled = false
 hosted_zone_id = ""
 ttl = 60
 
-worktree_dir = "~/.local/state/dev-mode/worktrees"
+worktree_dir = "~/.local/state/dev/worktrees"
 
 [local-proxy]
 enabled = true
@@ -198,7 +198,7 @@ Notes:
 
 ## CLI overrides
 
-- `--config <path>`: override project config path (default: `.dev-mode.toml`).
-- `--daemon-config <path>`: override daemon config path (default: `~/.config/dev-mode/daemon.toml`).
-- `dev-mode config show`: shows the effective project config (with local override applied) and daemon config.
-- `dev-mode config show --output json`: machine-readable output.
+- `--config <path>`: override project config path (default: `.dev.toml`).
+- `--daemon-config <path>`: override daemon config path (default: `~/.config/dev/daemon.toml`).
+- `dev config show`: shows the effective project config (with local override applied) and daemon config.
+- `dev config show --output json`: machine-readable output.

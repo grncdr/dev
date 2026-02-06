@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"dev-mode/internal/config"
+	"dev/internal/config"
 )
 
 type fakeDNSProvider struct {

@@ -8,7 +8,7 @@ import (
 
 func TestResolveGatewayURLForLogin_FromProjectConfig(t *testing.T) {
 	dir := t.TempDir()
-	projectPath := filepath.Join(dir, ".dev-mode.toml")
+	projectPath := filepath.Join(dir, ".dev.toml")
 	if err := os.WriteFile(projectPath, []byte(`
 [project]
 name = "Foo Corp"

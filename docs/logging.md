@@ -1,13 +1,13 @@
 # Logging
 
-This document describes where dev-mode writes logs.
+This document describes where dev writes logs.
 
 ## State directory
 
 All logs are stored under the state directory:
 
-- Default: `~/.local/state/dev-mode/logs/`
-- Override via `DEV_MODE_STATE_DIR` environment variable
+- Default: `~/.local/state/dev/logs/`
+- Override via `DEV_STATE_DIR` environment variable
 
 ## Daemon logs
 

@@ -9,7 +9,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 
-	"dev-mode/internal/config"
+	"dev/internal/config"
 )
 
 func newConfigCmd(opts *Options) *cobra.Command {

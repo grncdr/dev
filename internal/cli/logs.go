@@ -14,8 +14,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"dev-mode/internal/config"
-	"dev-mode/internal/worktree"
+	"dev/internal/config"
+	"dev/internal/worktree"
 )
 
 type logViewOptions struct {

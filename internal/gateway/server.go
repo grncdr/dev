@@ -18,8 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"dev-mode/internal/config"
-	"dev-mode/internal/tunnelmux"
+	"dev/internal/config"
+	"dev/internal/tunnelmux"
 )
 
 type Server struct {
@@ -175,7 +175,7 @@ func (s *Server) withBasicAuth(next http.Handler) http.Handler {
 		if !ok ||
 			subtle.ConstantTimeCompare([]byte(u), []byte(s.auth.Username)) != 1 ||
 			subtle.ConstantTimeCompare([]byte(p), []byte(s.auth.Password)) != 1 {
-			w.Header().Set("WWW-Authenticate", `Basic realm="dev-mode gateway"`)
+			w.Header().Set("WWW-Authenticate", `Basic realm="dev gateway"`)
 			writeJSON(w, http.StatusUnauthorized, map[string]string{
 				"code":  "gateway_auth_required",
 				"error": "invalid gateway credentials",
@@ -349,7 +349,7 @@ func (s *Server) handleAgentCertIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Name == "" {
-		req.Name = "dev-mode-user"
+		req.Name = "dev-user"
 	}
 	if err := s.invites.Consume(req.InviteCode); err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"code": "invite_invalid", "error": err.Error()})

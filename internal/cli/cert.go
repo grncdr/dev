@@ -19,7 +19,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"dev-mode/internal/config"
+	"dev/internal/config"
 )
 
 const (
@@ -102,14 +102,14 @@ func runCertExport(out io.Writer) error {
 	caCertPath := filepath.Join(dir, "ca.pem")
 	data, err := os.ReadFile(caCertPath)
 	if err != nil {
-		return fmt.Errorf("read local CA certificate %s (run dev-mode cert install): %w", caCertPath, err)
+		return fmt.Errorf("read local CA certificate %s (run dev cert install): %w", caCertPath, err)
 	}
 	_, err = out.Write(data)
 	return err
 }
 
 func certsDir() (string, error) {
-	path, err := config.ExpandUserPath("~/.config/dev-mode/certs")
+	path, err := config.ExpandUserPath("~/.config/dev/certs")
 	if err != nil {
 		return "", err
 	}
@@ -137,7 +137,7 @@ func ensureCA(keyPath, certPath string) (*ecdsa.PrivateKey, *x509.Certificate, e
 	cert := &x509.Certificate{
 		SerialNumber: serial,
 		Subject: pkix.Name{
-			CommonName: "dev-mode Local CA",
+			CommonName: "dev Local CA",
 		},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(certValidity),
@@ -175,7 +175,7 @@ func ensureLeaf(caKey *ecdsa.PrivateKey, caCert *x509.Certificate, keyPath, cert
 	cert := &x509.Certificate{
 		SerialNumber: serial,
 		Subject: pkix.Name{
-			CommonName: "dev-mode localhost",
+			CommonName: "dev localhost",
 		},
 		NotBefore:   time.Now().Add(-time.Hour),
 		NotAfter:    time.Now().Add(certValidity),
@@ -257,7 +257,7 @@ func trustCAOnLinux(certPath string) error {
 		return nil
 	}
 
-	target := filepath.Join("/usr/local/share/ca-certificates", "dev-mode-ca.crt")
+	target := filepath.Join("/usr/local/share/ca-certificates", "dev-ca.crt")
 	data, err := os.ReadFile(certPath)
 	if err != nil {
 		return err

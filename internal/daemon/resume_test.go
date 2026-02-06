@@ -21,7 +21,7 @@ func TestDaemonRestoresWorktreesAfterCleanShutdown(t *testing.T) {
 		t.Fatalf("git init: %v", err)
 	}
 
-	configPath := filepath.Join(repoDir, ".dev-mode.toml")
+	configPath := filepath.Join(repoDir, ".dev.toml")
 	configBody := `
 [project]
 name = "demo"
@@ -44,22 +44,22 @@ port = "random"
 	}
 
 	oldHome := os.Getenv("HOME")
-	oldHTTP := os.Getenv("DEV_MODE_PROXY_LISTEN_HTTP")
-	oldHTTPS := os.Getenv("DEV_MODE_PROXY_LISTEN_HTTPS")
+	oldHTTP := os.Getenv("DEV_PROXY_LISTEN_HTTP")
+	oldHTTPS := os.Getenv("DEV_PROXY_LISTEN_HTTPS")
 	oldCwd, _ := os.Getwd()
 	t.Cleanup(func() {
 		_ = os.Setenv("HOME", oldHome)
-		_ = os.Setenv("DEV_MODE_PROXY_LISTEN_HTTP", oldHTTP)
-		_ = os.Setenv("DEV_MODE_PROXY_LISTEN_HTTPS", oldHTTPS)
+		_ = os.Setenv("DEV_PROXY_LISTEN_HTTP", oldHTTP)
+		_ = os.Setenv("DEV_PROXY_LISTEN_HTTPS", oldHTTPS)
 		_ = os.Chdir(oldCwd)
 	})
 	if err := os.Setenv("HOME", baseDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Setenv("DEV_MODE_PROXY_LISTEN_HTTP", "off"); err != nil {
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTP", "off"); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Setenv("DEV_MODE_PROXY_LISTEN_HTTPS", "off"); err != nil {
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTPS", "off"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chdir(repoDir); err != nil {

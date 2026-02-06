@@ -31,7 +31,7 @@ func TestEnsureCA(t *testing.T) {
 func TestRunCertExport(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	certDir := filepath.Join(home, ".config", "dev-mode", "certs")
+	certDir := filepath.Join(home, ".config", "dev", "certs")
 	if err := os.MkdirAll(certDir, 0o755); err != nil {
 		t.Fatalf("mkdir cert dir: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestRunCertExportMissingCA(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error")
 	}
-	if !strings.Contains(err.Error(), "run dev-mode cert install") {
+	if !strings.Contains(err.Error(), "run dev cert install") {
 		t.Fatalf("expected install hint, got: %v", err)
 	}
 }

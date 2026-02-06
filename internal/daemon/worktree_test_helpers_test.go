@@ -3,8 +3,8 @@ package daemon
 import (
 	"testing"
 
-	"dev-mode/internal/config"
-	"dev-mode/internal/worktree"
+	"dev/internal/config"
+	"dev/internal/worktree"
 )
 
 func defaultSlugForRepo(t *testing.T, repoDir string) string {

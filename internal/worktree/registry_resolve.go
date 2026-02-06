@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"dev-mode/internal/config"
+	"dev/internal/config"
 )
 
 func ResolveDefaultSlug(cwd string, daemonCfg *config.DaemonConfig) (string, error) {
@@ -44,7 +44,7 @@ func ResolveDefaultSlug(cwd string, daemonCfg *config.DaemonConfig) (string, err
 	if ok {
 		return registered.Slug, nil
 	}
-	return "", errors.New("slug is required: current worktree is not registered (run `dev-mode worktree register` in this worktree or pass an explicit slug)")
+	return "", errors.New("slug is required: current worktree is not registered (run `dev worktree register` in this worktree or pass an explicit slug)")
 }
 
 func ResolvePathFromSlugWithRegistry(slug, cwd string, daemonCfg *config.DaemonConfig) (string, error) {
@@ -76,7 +76,7 @@ func ResolvePathFromSlugWithRegistry(slug, cwd string, daemonCfg *config.DaemonC
 	} else if ok {
 		return registered.Path, nil
 	}
-	return "", fmt.Errorf("worktree slug %q is not registered in dev-mode state", slug)
+	return "", fmt.Errorf("worktree slug %q is not registered in dev state", slug)
 }
 
 func resolveProjectIdentifierFromMainPath(mainPath string) (string, error) {

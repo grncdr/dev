@@ -6,7 +6,7 @@ This RFC describes an optional future safety model for executing command-bearing
 
 ## Problem
 
-`.dev-mode.toml` can execute arbitrary commands with the user's privileges (process commands, wrappers, hooks). A malicious repo can abuse that.
+`.dev.toml` can execute arbitrary commands with the user's privileges (process commands, wrappers, hooks). A malicious repo can abuse that.
 
 ## Goals
 
@@ -46,7 +46,7 @@ Trust is granted per resolved config path + command hash:
 
 ```json
 {
-  "config_path": "/abs/path/to/.dev-mode.toml",
+  "config_path": "/abs/path/to/.dev.toml",
   "commands_hash": "sha256:...",
   "approved_at": "2026-02-02T12:34:56Z",
   "approved_by": "local-user"
@@ -55,7 +55,7 @@ Trust is granted per resolved config path + command hash:
 
 Proposed store:
 
-- `~/.config/dev-mode/trust.json`
+- `~/.config/dev/trust.json`
 
 This is intentionally separate from normal user settings.
 
@@ -75,7 +75,7 @@ If trust gating is enabled later, the daemon should apply it to current endpoint
   "code": "trust_required",
   "error": "unapproved command-bearing config",
   "challenge": {
-    "config_path": "/abs/path/to/.dev-mode.toml",
+    "config_path": "/abs/path/to/.dev.toml",
     "commands_hash": "sha256:...",
     "entries": [
       {"scope":"process:web","field":"command","value":"npm run dev"},
@@ -95,7 +95,7 @@ Request:
 
 ```json
 {
-  "config_path": "/abs/path/to/.dev-mode.toml",
+  "config_path": "/abs/path/to/.dev.toml",
   "commands_hash": "sha256:..."
 }
 ```
@@ -138,4 +138,4 @@ This RFC is rejected for now due to implementation complexity and UX/API surface
 
 We may revisit this later with a simpler approach.
 
-For now, do not execute `dev-mode` in an untrusted repository without reviewing `.dev-mode.toml` (and any local overrides) first.
+For now, do not execute `dev` in an untrusted repository without reviewing `.dev.toml` (and any local overrides) first.

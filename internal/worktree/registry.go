@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"dev-mode/internal/config"
+	"dev/internal/config"
 )
 
 const worktreeRegistryFileName = "worktree-registry.json"

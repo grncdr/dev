@@ -10,12 +10,12 @@ import (
 	"strings"
 	"testing"
 
-	"dev-mode/internal/config"
+	"dev/internal/config"
 )
 
 func TestHandleProxyHTTPS_GatewayDebugLogWritesHTTPTranscript(t *testing.T) {
 	base := t.TempDir()
-	cfgPath := filepath.Join(base, ".dev-mode.toml")
+	cfgPath := filepath.Join(base, ".dev.toml")
 	cfgBody := `
 [project]
 name = "foocorp"
@@ -118,7 +118,7 @@ proxy = { path = "/" }
 
 func TestHandleProxyHTTPS_GatewayDebugLogBinaryBodyPlaceholder(t *testing.T) {
 	base := t.TempDir()
-	cfgPath := filepath.Join(base, ".dev-mode.toml")
+	cfgPath := filepath.Join(base, ".dev.toml")
 	cfgBody := `
 [project]
 name = "foocorp"

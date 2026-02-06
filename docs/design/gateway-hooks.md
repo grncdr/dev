@@ -44,16 +44,16 @@ If unavailable, fall back to the project main worktree path.
 
 Proposed minimum environment variables:
 
-- `DEV_MODE_EVENT` (`connect`, `disconnect`, `error`)
-- `DEV_MODE_PROJECT`
-- `DEV_MODE_WORKTREE_SLUG`
-- `DEV_MODE_WORKTREE_DNS_NAME`
-- `DEV_MODE_GATEWAY_URL`
-- `DEV_MODE_GATEWAY_LABEL`
-- `DEV_MODE_GATEWAY_PUBLIC_HOST`
-- `DEV_MODE_GATEWAY_STATUS`
-- `DEV_MODE_GATEWAY_ERROR` (set for `error` events)
-- `DEV_MODE_GATEWAY_TIMESTAMP` (RFC3339)
+- `DEV_EVENT` (`connect`, `disconnect`, `error`)
+- `DEV_PROJECT`
+- `DEV_WORKTREE_SLUG`
+- `DEV_WORKTREE_DNS_NAME`
+- `DEV_GATEWAY_URL`
+- `DEV_GATEWAY_LABEL`
+- `DEV_GATEWAY_PUBLIC_HOST`
+- `DEV_GATEWAY_STATUS`
+- `DEV_GATEWAY_ERROR` (set for `error` events)
+- `DEV_GATEWAY_TIMESTAMP` (RFC3339)
 
 ## Deduping / Flap Control
 
@@ -78,7 +78,7 @@ To avoid notification spam from reconnect loops:
 ## Observability
 
 - Log start/end, duration, exit status, and event key fields.
-- Consider adding `dev-mode daemon status` summary for recent gateway hook runs.
+- Consider adding `dev daemon status` summary for recent gateway hook runs.
 
 ## Open Questions
 

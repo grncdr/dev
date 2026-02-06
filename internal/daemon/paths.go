@@ -1,8 +1,8 @@
 package daemon
 
-import "dev-mode/internal/config"
+import "dev/internal/config"
 
-const SocketPath = "~/.config/dev-mode/devd.sock"
+const SocketPath = "~/.config/dev/devd.sock"
 
 func ResolveSocketPath() (string, error) {
 	return config.ExpandUserPath(SocketPath)

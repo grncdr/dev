@@ -9,7 +9,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
-	"dev-mode/internal/config"
+	"dev/internal/config"
 )
 
 func TestRunInit_WritesConfig(t *testing.T) {

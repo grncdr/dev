@@ -17,9 +17,9 @@ import (
 	"github.com/creack/pty"
 	"github.com/mattn/go-shellwords"
 
-	"dev-mode/internal/config"
-	"dev-mode/internal/procenv"
-	"dev-mode/internal/worktree"
+	"dev/internal/config"
+	"dev/internal/procenv"
+	"dev/internal/worktree"
 )
 
 type Manager struct {
@@ -215,14 +215,14 @@ func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string,
 		if port != "" {
 			cmd.Env = append(cmd.Env,
 				fmt.Sprintf("PORT=%s", port),
-				fmt.Sprintf("DEV_MODE_PORT=%s", port),
-				fmt.Sprintf("DEV_MODE_PORT_%s=%s", envKey(name), port),
+				fmt.Sprintf("DEV_PORT=%s", port),
+				fmt.Sprintf("DEV_PORT_%s=%s", envKey(name), port),
 			)
 		}
 		if network == "unix" && address != "" {
 			cmd.Env = append(cmd.Env,
-				fmt.Sprintf("DEV_MODE_SOCKET=%s", address),
-				fmt.Sprintf("DEV_MODE_SOCKET_%s=%s", envKey(name), address),
+				fmt.Sprintf("DEV_SOCKET=%s", address),
+				fmt.Sprintf("DEV_SOCKET_%s=%s", envKey(name), address),
 			)
 		}
 
@@ -576,11 +576,11 @@ func buildRuntimeVars(project, envSlug, worktreePath, branch, apexZone string) m
 		zone = "localhost"
 	}
 	return map[string]string{
-		"DEV_MODE_PROJECT":           project,
-		"DEV_MODE_WORKTREE_SLUG":     envSlug,
-		"DEV_MODE_WORKTREE_DNS_NAME": dnsLabel + "." + zone,
-		"DEV_MODE_WORKTREE_PATH":     worktreePath,
-		"DEV_MODE_WORKTREE_BRANCH":   branch,
+		"DEV_PROJECT":           project,
+		"DEV_WORKTREE_SLUG":     envSlug,
+		"DEV_WORKTREE_DNS_NAME": dnsLabel + "." + zone,
+		"DEV_WORKTREE_PATH":     worktreePath,
+		"DEV_WORKTREE_BRANCH":   branch,
 	}
 }
 
@@ -598,9 +598,9 @@ func buildTemplateVars(runtimeVars map[string]string, mainPath, worktreeState st
 	vars := procenv.CloneEnv(runtimeVars)
 	vars["MAIN_WORKTREE"] = mainPath
 	vars["WORKTREE_STATE"] = worktreeState
-	vars["WORKTREE_PATH"] = runtimeVars["DEV_MODE_WORKTREE_PATH"]
-	vars["WORKTREE_SLUG"] = runtimeVars["DEV_MODE_WORKTREE_SLUG"]
-	vars["PROJECT_NAME"] = runtimeVars["DEV_MODE_PROJECT"]
+	vars["WORKTREE_PATH"] = runtimeVars["DEV_WORKTREE_PATH"]
+	vars["WORKTREE_SLUG"] = runtimeVars["DEV_WORKTREE_SLUG"]
+	vars["PROJECT_NAME"] = runtimeVars["DEV_PROJECT"]
 	return vars
 }
 
@@ -772,7 +772,7 @@ func runHook(command, wrapper, hookName, dir string, vars map[string]string) err
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Dir = dir
 	hookVars := procenv.CloneEnv(vars)
-	hookVars["DEV_MODE_HOOK_NAME"] = hookName
+	hookVars["DEV_HOOK_NAME"] = hookName
 	cmd.Env = append(os.Environ(), procenv.FormatEnv(hookVars)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	DefaultProjectConfig = ".dev-mode.toml"
-	DefaultLocalOverride = ".dev-mode.local.toml"
-	DefaultDaemonConfig  = "~/.config/dev-mode/daemon.toml"
+	DefaultProjectConfig = ".dev.toml"
+	DefaultLocalOverride = ".dev.local.toml"
+	DefaultDaemonConfig  = "~/.config/dev/daemon.toml"
 )
 
 type ProjectConfig struct {
@@ -173,7 +173,7 @@ func ExpandUserPath(path string) (string, error) {
 	return filepath.Join(home, path[1:]), nil
 }
 
-const DefaultStateDir = "~/.local/state/dev-mode"
+const DefaultStateDir = "~/.local/state/dev"
 
 func ResolveStateDir(cfg *DaemonConfig) (string, error) {
 	if cfg != nil && cfg.StateDir != "" {
@@ -186,7 +186,7 @@ func ResolveStateDir(cfg *DaemonConfig) (string, error) {
 		}
 		return expanded, nil
 	}
-	if env := os.Getenv("DEV_MODE_STATE_DIR"); env != "" {
+	if env := os.Getenv("DEV_STATE_DIR"); env != "" {
 		return ExpandUserPath(env)
 	}
 	return ExpandUserPath(DefaultStateDir)
@@ -223,7 +223,7 @@ func ResolveWorktreeDir(cfg *DaemonConfig) (string, error) {
 }
 
 func ResolveDaemonConfigPath() string {
-	if env := os.Getenv("DEV_MODE_DAEMON_CONFIG"); env != "" {
+	if env := os.Getenv("DEV_DAEMON_CONFIG"); env != "" {
 		return env
 	}
 	return DefaultDaemonConfig

@@ -6,13 +6,13 @@ This document defines the lifecycle commands for managed worktrees.
 
 ```bash
 # add a new worktree
-dev-mode worktree add project/slug [branch]
+dev worktree add project/slug [branch]
 
 # remove an existing worktree
-dev-mode worktree cleanup [project/slug] [--delete-branch] [--dry-run] [--force]
+dev worktree cleanup [project/slug] [--delete-branch] [--dry-run] [--force]
 
 # list managed worktrees
-dev-mode worktree list
+dev worktree list
 ```
 
 ## Identifier Model (`project/slug`)
@@ -29,7 +29,7 @@ Note: this is currently a local policy for worktree lifecycle commands. We shoul
 
 - Worktrees are created under daemon-configured `worktree_dir`.
 - `worktree_dir` is read only from daemon config (projects cannot override it).
-- If unset, default is `<dev-mode state dir>/worktrees`.
+- If unset, default is `<dev state dir>/worktrees`.
 - Path handling:
   - Expand `~`.
   - Require absolute path.
@@ -37,13 +37,13 @@ Note: this is currently a local policy for worktree lifecycle commands. We shoul
   - Fail if configured path exists as a file.
 - Final worktree path is always `<worktree_dir>/<project>/<slug>`.
 
-Example: in project `foobar`, running `dev-mode worktree add foobar/xyz` creates:
+Example: in project `foobar`, running `dev worktree add foobar/xyz` creates:
 
-`~/.local/state/dev-mode/worktrees/foobar/xyz`
+`~/.local/state/dev/worktrees/foobar/xyz`
 
 ## `worktree add`
 
-`dev-mode worktree add project/slug [branch]`
+`dev worktree add project/slug [branch]`
 
 - Command is strict about target path existence:
   - if `<worktree_dir>/<project>/<slug>` already exists, fail.
@@ -57,7 +57,7 @@ Example: in project `foobar`, running `dev-mode worktree add foobar/xyz` creates
 
 ## `worktree cleanup`
 
-`dev-mode worktree cleanup [project/slug] [--delete-branch] [--dry-run] [--force]`
+`dev worktree cleanup [project/slug] [--delete-branch] [--dry-run] [--force]`
 
 - Target resolution:
   - If `project/slug` is provided, operate on that target.
@@ -80,7 +80,7 @@ Example: in project `foobar`, running `dev-mode worktree add foobar/xyz` creates
 
 ## `worktree list`
 
-`dev-mode worktree list` shows managed worktrees with key state, including:
+`dev worktree list` shows managed worktrees with key state, including:
 
 - `project/slug`
 - worktree path
@@ -105,14 +105,14 @@ Behavior:
 
 Suggested hook environment:
 
-- `DEV_MODE_PROJECT`
-- `DEV_MODE_WORKTREE_SLUG`
-- `DEV_MODE_WORKTREE_PATH`
-- `DEV_MODE_WORKTREE_BRANCH`
-- `DEV_MODE_WORKTREE_DNS_NAME`
-- `DEV_MODE_HOOK_NAME`
-- `DEV_MODE_OPERATION` (`add` or `cleanup`)
-- `DEV_MODE_IMPLICIT_TARGET` (`true`/`false`)
+- `DEV_PROJECT`
+- `DEV_WORKTREE_SLUG`
+- `DEV_WORKTREE_PATH`
+- `DEV_WORKTREE_BRANCH`
+- `DEV_WORKTREE_DNS_NAME`
+- `DEV_HOOK_NAME`
+- `DEV_OPERATION` (`add` or `cleanup`)
+- `DEV_IMPLICIT_TARGET` (`true`/`false`)
 
 ## Testing Expectations
 

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"dev-mode/internal/config"
+	"dev/internal/config"
 )
 
 const (

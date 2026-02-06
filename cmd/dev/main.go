@@ -1,6 +1,6 @@
 package main
 
-import "dev-mode/internal/cli"
+import "dev/internal/cli"
 
 func main() {
 	cli.ExitErr(cli.Execute())
