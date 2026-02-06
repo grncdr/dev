@@ -217,6 +217,7 @@ func (s *Server) handleWorktreeStatus(w http.ResponseWriter, r *http.Request) {
 		writeErrorWithCode(w, http.StatusBadRequest, "status_failed", err)
 		return
 	}
+	resp.Routing = s.routingStatusForWorktree(req.Slug, req.Path)
 	writeJSON(w, http.StatusOK, resp)
 }
 

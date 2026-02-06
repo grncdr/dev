@@ -145,20 +145,7 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 	if err != nil {
 		return err
 	}
-	tunnelBySlug := map[string]daemon.TunnelStatus{}
 	mainStatusByWorktree := map[string]*daemon.WorktreeStatus{}
-	if daemonUp {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		if tunnels, err := client.TunnelsStatus(ctx); err == nil {
-			for _, t := range tunnels.Tunnels {
-				existing, ok := tunnelBySlug[t.Slug]
-				if !ok || (existing.Status != "connected" && t.Status == "connected") {
-					tunnelBySlug[t.Slug] = t
-				}
-			}
-		}
-	}
 	cwd := workingDir(opts)
 
 	for i, slug := range sortedTargetSlugs(targets) {
@@ -198,7 +185,7 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 				mainStatusByWorktree[cacheKey] = mainStatus
 			}
 		}
-		printWorktreeDetailedStatus(slug, projectPath, cfg, daemonCfg, status, mainStatus, daemonUp, targets[slug], tunnelForSlug(tunnelBySlug, slug))
+		printWorktreeDetailedStatus(slug, projectPath, cfg, status, mainStatus, daemonUp, targets[slug])
 	}
 	return nil
 }
@@ -238,121 +225,13 @@ func filterWorktreeStatus(status *daemon.WorktreeStatus, target *processTarget) 
 			filtered = append(filtered, proc)
 		}
 	}
-	return &daemon.WorktreeStatus{Slug: status.Slug, Processes: filtered}
-}
-
-func processProxyURLsByProcess(slug, projectPath string, cfg *config.ProjectConfig, daemonCfg *config.DaemonConfig) map[string][]string {
-	result := map[string][]string{}
-	if cfg == nil {
-		return result
+	filteredRouting := daemon.WorktreeRouting{
+		Local:         filterRoutesByTarget(status.Routing.Local, target),
+		Gateway:       filterRoutesByTarget(status.Routing.Gateway, target),
+		GatewayURL:    status.Routing.GatewayURL,
+		GatewayStatus: status.Routing.GatewayStatus,
 	}
-	zone := strings.TrimPrefix(proxyApexZone(daemonCfg), ".")
-	if zone == "" {
-		zone = "localhost"
-	}
-	displaySlug := effectiveDisplaySlug(slug, projectPath, cfg)
-	for process, proc := range cfg.Processes {
-		rawProxy, ok := proc["proxy"]
-		if !ok || rawProxy == nil {
-			continue
-		}
-		for _, matcher := range flattenProxyMatchers(rawProxy) {
-			if tcpListen, ok := config.ParseInt(rawProxyValue(matcher, "tcp_listen")); ok && tcpListen > 0 {
-				result[process] = append(result[process], fmt.Sprintf("tcp://127.0.0.1:%d", tcpListen))
-				continue
-			}
-			path := "/"
-			if raw, ok := matcher["path"].(string); ok && raw != "" {
-				path = raw
-			}
-			for _, subdomain := range matcherSubdomains(matcher) {
-				host := fmt.Sprintf("%s.%s", displaySlug, zone)
-				if subdomain == "*" {
-					host = fmt.Sprintf("*.%s.%s", displaySlug, zone)
-				} else if subdomain != "" {
-					host = fmt.Sprintf("%s.%s.%s", subdomain, displaySlug, zone)
-				}
-				result[process] = append(result[process], fmt.Sprintf("https://%s%s", host, path))
-			}
-		}
-	}
-	for process, lines := range result {
-		sort.Strings(lines)
-		result[process] = dedupeStrings(lines)
-	}
-	return result
-}
-
-func matcherSubdomains(matcher map[string]any) []string {
-	if matcher == nil {
-		return []string{""}
-	}
-	if raw, ok := matcher["subdomains"]; ok {
-		if list, ok := raw.([]any); ok {
-			out := make([]string, 0, len(list))
-			for _, item := range list {
-				if item == nil {
-					out = append(out, "")
-					continue
-				}
-				if s, ok := item.(string); ok {
-					out = append(out, strings.TrimSpace(s))
-				}
-			}
-			if len(out) > 0 {
-				return out
-			}
-		}
-	}
-	if raw, ok := matcher["subdomain"]; ok {
-		if raw == nil {
-			return []string{""}
-		}
-		if s, ok := raw.(string); ok {
-			return []string{strings.TrimSpace(s)}
-		}
-	}
-	return []string{""}
-}
-
-func proxyApexZone(daemonCfg *config.DaemonConfig) string {
-	if daemonCfg != nil && strings.TrimSpace(daemonCfg.LocalProxy.ApexZone) != "" {
-		return daemonCfg.LocalProxy.ApexZone
-	}
-	return ".localhost"
-}
-
-func effectiveDisplaySlug(slug, projectPath string, cfg *config.ProjectConfig) string {
-	_ = projectPath
-	return worktree.ProxyDNSLabelForSlug(cfg, slug)
-}
-
-func flattenProxyMatchers(raw any) []map[string]any {
-	switch typed := raw.(type) {
-	case []any:
-		out := []map[string]any{}
-		for _, item := range typed {
-			out = append(out, flattenProxyMatchers(item)...)
-		}
-		return out
-	case []map[string]any:
-		out := make([]map[string]any, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, item)
-		}
-		return out
-	case map[string]any:
-		return []map[string]any{typed}
-	default:
-		return nil
-	}
-}
-
-func rawProxyValue(entry map[string]any, key string) any {
-	if entry == nil {
-		return nil
-	}
-	return entry[key]
+	return &daemon.WorktreeStatus{Slug: status.Slug, Processes: filtered, Routing: filteredRouting}
 }
 
 func samePath(a, b string) bool {
@@ -379,7 +258,7 @@ func canonicalPath(path string) (string, error) {
 	return resolved, nil
 }
 
-func printWorktreeDetailedStatus(slug, projectPath string, cfg *config.ProjectConfig, daemonCfg *config.DaemonConfig, status, mainStatus *daemon.WorktreeStatus, daemonUp bool, target *processTarget, tunnel *daemon.TunnelStatus) {
+func printWorktreeDetailedStatus(slug, projectPath string, cfg *config.ProjectConfig, status, mainStatus *daemon.WorktreeStatus, daemonUp bool, target *processTarget) {
 	projectName := "(unknown)"
 	if cfg != nil && strings.TrimSpace(cfg.Project.Name) != "" {
 		projectName = cfg.Project.Name
@@ -391,22 +270,30 @@ func printWorktreeDetailedStatus(slug, projectPath string, cfg *config.ProjectCo
 	}
 	fmt.Printf("Worktree: %s (%s)\n", slug, worktreePath)
 
-	proxyByProcess := processProxyURLsByProcess(slug, projectPath, cfg, daemonCfg)
+	proxyByProcess := map[string][]string{}
+	if status != nil {
+		proxyByProcess = status.Routing.Local
+	}
 	if target != nil && !target.all && len(target.processes) > 0 {
 		proxyByProcess = filterRoutesByTarget(proxyByProcess, target)
 	}
 	fmt.Println("Proxy:")
 	printRouteMappings(proxyByProcess)
 
-	gatewayURL := gatewayURLFromConfig(cfg)
+	gatewayURL := ""
+	connection := "disconnected"
+	gatewayByProcess := map[string][]string{}
+	if status != nil {
+		gatewayURL = strings.TrimSpace(status.Routing.GatewayURL)
+		if status.Routing.GatewayStatus != "" {
+			connection = status.Routing.GatewayStatus
+		}
+		gatewayByProcess = status.Routing.Gateway
+	}
 	if gatewayURL != "" {
 		fmt.Println()
-		connection := "disconnected"
-		if daemonUp && tunnel != nil && tunnel.Status == "connected" {
-			connection = "connected"
-		}
 		fmt.Printf("Gateway: %s [%s]\n", gatewayURL, connection)
-		printRouteMappings(gatewayProxyURLsByProcess(proxyByProcess, cfg, tunnel))
+		printRouteMappings(filterRoutesByTarget(gatewayByProcess, target))
 	}
 
 	fmt.Println()
@@ -501,14 +388,6 @@ func routeMappingLines(byProcess map[string][]string) []string {
 		}
 	}
 	return lines
-}
-
-func gatewayURLFromConfig(cfg *config.ProjectConfig) string {
-	if cfg == nil {
-		return ""
-	}
-	url, _ := cfg.Gateway["url"].(string)
-	return strings.TrimSpace(url)
 }
 
 func printProcesses(status, mainStatus *daemon.WorktreeStatus, cfg *config.ProjectConfig, projectPath string, daemonUp bool, target *processTarget) {
@@ -638,80 +517,6 @@ func shouldUseMainWorktreeStatus(cfg *config.ProjectConfig, projectPath string) 
 		}
 	}
 	return false
-}
-
-func tunnelForSlug(tunnels map[string]daemon.TunnelStatus, slug string) *daemon.TunnelStatus {
-	if len(tunnels) == 0 {
-		return nil
-	}
-	t, ok := tunnels[slug]
-	if !ok {
-		return nil
-	}
-	copy := t
-	return &copy
-}
-
-func gatewayProxyURLsByProcess(localByProcess map[string][]string, cfg *config.ProjectConfig, tunnel *daemon.TunnelStatus) map[string][]string {
-	out := map[string][]string{}
-	if tunnel == nil || tunnel.Status != "connected" || cfg == nil {
-		return out
-	}
-	exposed := config.GatewayExposeModes(cfg)
-	if len(exposed) == 0 {
-		return out
-	}
-	gatewayURL, _ := cfg.Gateway["url"].(string)
-	gatewayURL = strings.TrimSpace(gatewayURL)
-	if gatewayURL == "" {
-		return out
-	}
-	parsedGateway, err := url.Parse(gatewayURL)
-	if err != nil {
-		return out
-	}
-	gatewayScheme := parsedGateway.Scheme
-	if gatewayScheme == "" {
-		gatewayScheme = "https"
-	}
-	gatewayHost := strings.TrimSpace(tunnel.PublicHost)
-	if gatewayHost == "" {
-		return out
-	}
-	label := strings.TrimSpace(tunnel.Label)
-	if label == "" {
-		return out
-	}
-	for process, routes := range localByProcess {
-		if _, ok := exposed[process]; !ok {
-			continue
-		}
-		for _, route := range routes {
-			if !strings.HasPrefix(route, "https://") {
-				continue
-			}
-			u, err := url.Parse(route)
-			if err != nil || u.Host == "" {
-				continue
-			}
-			host := u.Hostname()
-			parts := strings.Split(host, ".")
-			switch {
-			case len(parts) == 2:
-				u.Host = label + "." + gatewayHost
-			case len(parts) >= 3:
-				sub := strings.Join(parts[:len(parts)-2], ".")
-				u.Host = sub + "." + label + "." + gatewayHost
-			default:
-				continue
-			}
-			u.Scheme = gatewayScheme
-			out[process] = append(out[process], u.String())
-		}
-		sort.Strings(out[process])
-		out[process] = dedupeStrings(out[process])
-	}
-	return out
 }
 
 func dedupeStrings(values []string) []string {

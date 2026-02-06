@@ -53,12 +53,20 @@ func (m *Manager) SetDaemonConfig(cfg *config.DaemonConfig) {
 type WorktreeStatus struct {
 	Slug      string          `json:"slug"`
 	Processes []ProcessStatus `json:"processes"`
+	Routing   WorktreeRouting `json:"routing,omitempty"`
 }
 
 type ProcessStatus struct {
 	Name   string `json:"name"`
 	PID    int    `json:"pid"`
 	Status string `json:"status"`
+}
+
+type WorktreeRouting struct {
+	Local         map[string][]string `json:"local,omitempty"`
+	Gateway       map[string][]string `json:"gateway,omitempty"`
+	GatewayURL    string              `json:"gateway_url,omitempty"`
+	GatewayStatus string              `json:"gateway_status,omitempty"`
 }
 
 type processInfo struct {
