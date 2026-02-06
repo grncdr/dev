@@ -16,14 +16,17 @@ This document is the source of truth for local proxy routing and gateway-to-agen
 - Request hosts are interpreted as:
   - `<slug>.<apex_zone>` (base worktree host)
   - `<subdomain>.<slug>.<apex_zone>` (subdomain-of-slug host)
-- `project.main_slug` applies only to main worktree host mapping.
+- `local-dns.overrides` remaps worktree slugs to host labels for proxy/status routing.
 
 ## Config Model
 
 ```toml
 [project]
 name = "Foo Corp"
-main_slug = "foocorp"
+main_slug = "primary"
+
+[local-dns]
+overrides = { main = "foocorp" }
 
 [process.rails]
 command = "puma"
@@ -87,7 +90,7 @@ tcp_listen = 15432                      # raw TCP forwarder on 127.0.0.1:15432
 Given request `(host, path)`:
 
 1. Parse `(slug, subdomain-of-slug)` from host.
-2. Resolve main-slug alias (`project.main_slug`) to real main worktree slug when applicable.
+2. Resolve host label remaps (`local-dns.overrides`) to worktree slug when applicable.
 3. Build candidate matchers for all processes.
 4. Filter candidates by subdomain + path match.
 5. Choose winner by:

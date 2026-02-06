@@ -13,7 +13,10 @@ Required fields:
 ```toml
 [project]
 name = "foocorp/monorepo" # required
-main_slug = "foocorp" # optional, applies only to main worktree host slug
+main_slug = "primary" # optional, logical main-worktree slug alias
+
+[local-dns]
+overrides = { main = "foocorp" } # optional, remap slug->host label for proxy/status URLs
 ```
 
 Optional sections:
@@ -91,7 +94,9 @@ post_stop = "bin/post-stop"
 Notes:
 - `project.name` is required.
 - `project.name` may include `/` (for example `org/repo`) to use nested project paths under `worktree_dir`.
-- `project.main_slug` is optional and only changes the main worktree host slug.
+- `project.main_slug` is optional and sets the logical slug alias for the main worktree.
+- `local-dns.overrides` is optional and remaps worktree slugs to proxy DNS labels for host routing/status output.
+  - Example: `main = "foocorp"` maps `foocorp.localhost` to the main worktree.
 - All runnable units live under `process.*`; use `singleton = true` for project-wide services.
 - Worktree lifecycle hooks are optional:
   - `pre_worktree_add` and `post_worktree_add`

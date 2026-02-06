@@ -21,6 +21,7 @@ type ProjectConfig struct {
 	Gateway   map[string]any            `toml:"gateway" json:"gateway,omitempty"`
 	Processes map[string]map[string]any `toml:"process" json:"processes,omitempty"`
 	Proxy     ProjectProxyBlock         `toml:"proxy" json:"proxy,omitempty"`
+	LocalDNS  ProjectLocalDNSBlock      `toml:"local-dns" json:"local_dns,omitempty"`
 	Hooks     HooksBlock                `toml:"hooks" json:"hooks,omitempty"`
 	Commands  CommandsBlock             `toml:"commands" json:"commands,omitempty"`
 }
@@ -80,6 +81,10 @@ type CommandsBlock struct {
 
 type ProjectProxyBlock struct {
 	// Reserved for future project-level proxy options.
+}
+
+type ProjectLocalDNSBlock struct {
+	Overrides map[string]string `toml:"overrides" json:"overrides,omitempty"`
 }
 
 type DaemonLocalProxyBlock struct {

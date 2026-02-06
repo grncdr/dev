@@ -19,7 +19,6 @@ When you run `dev start` / `dev worktree start`, each managed process receives:
   - `DEV_WORKTREE_DNS_NAME`
   - `DEV_WORKTREE_PATH`
   - `DEV_WORKTREE_BRANCH`
-  - For the main worktree, `DEV_WORKTREE_SLUG` and `DEV_WORKTREE_DNS_NAME` use `project.main_slug` when configured.
 - Port/socket variables when applicable:
   - `PORT` (kept for common server conventions)
   - `DEV_PORT`

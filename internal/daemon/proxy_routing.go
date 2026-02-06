@@ -116,18 +116,11 @@ func (s *Server) tunnelRouteSlugForLabel(label string) (string, bool) {
 	if slug == "" {
 		return "", false
 	}
-	cfg, repoPath, err := s.projectConfigForSlug(slug)
-	if err != nil || cfg == nil || strings.TrimSpace(cfg.Project.MainSlug) == "" {
+	cfg, _, err := s.projectConfigForSlug(slug)
+	if err != nil || cfg == nil {
 		return slug, true
 	}
-	mainPath, err := worktree.ResolveMainPathInDir(repoPath)
-	if err != nil {
-		return slug, true
-	}
-	if sameResolvedPath(mainPath, repoPath) {
-		return strings.TrimSpace(cfg.Project.MainSlug), true
-	}
-	return slug, true
+	return worktree.ProxyDNSLabelForSlug(cfg, slug), true
 }
 
 func sameResolvedPath(a, b string) bool {
@@ -205,7 +198,9 @@ func (s *Server) resolveRequestedSlug(requestedSlug string) (string, error) {
 	if err != nil {
 		return requestedSlug, nil
 	}
-	override := strings.TrimSpace(strings.ToLower(cfg.Project.MainSlug))
+	if mappedSlug, ok := worktree.ProxySlugForDNSLabel(cfg, requestedSlug); ok {
+		return mappedSlug, nil
+	}
 	mainSlug, err := resolveMainWorktreeSlug(mainPath)
 	if err != nil {
 		return requestedSlug, nil
@@ -213,7 +208,7 @@ func (s *Server) resolveRequestedSlug(requestedSlug string) (string, error) {
 	if strings.EqualFold(requestedSlug, "main") {
 		return mainSlug, nil
 	}
-	if override != "" && strings.EqualFold(requestedSlug, override) {
+	if strings.EqualFold(requestedSlug, mainSlug) {
 		return mainSlug, nil
 	}
 	return requestedSlug, nil

@@ -1,10 +1,6 @@
 package daemon
 
-import (
-	"testing"
-
-	"dev/internal/config"
-)
+import "testing"
 
 func TestBuildRuntimeVarsCoreNames(t *testing.T) {
 	vars := buildRuntimeVars("myproj", "feature/branch", "/repo/feature/branch", "feature/branch", ".localhost")
@@ -44,16 +40,5 @@ func TestBuildRuntimeVarsDNSName(t *testing.T) {
 			t.Errorf("slug=%q apexZone=%q: expected DEV_WORKTREE_DNS_NAME=%q, got %q",
 				tc.slug, tc.apexZone, tc.expected, vars["DEV_WORKTREE_DNS_NAME"])
 		}
-	}
-}
-
-func TestEffectiveWorktreeEnvSlug_MainSlugOverride(t *testing.T) {
-	cfg := &config.ProjectConfig{}
-	cfg.Project.MainSlug = "foocorp"
-	if got := effectiveWorktreeEnvSlug(cfg, "repo", "/tmp/repo", "/tmp/repo"); got != "foocorp" {
-		t.Fatalf("expected foocorp, got %q", got)
-	}
-	if got := effectiveWorktreeEnvSlug(cfg, "feature/x", "/tmp/repo-feature", "/tmp/repo"); got != "feature/x" {
-		t.Fatalf("expected feature/x, got %q", got)
 	}
 }

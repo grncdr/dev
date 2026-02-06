@@ -133,8 +133,7 @@ func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string,
 	m.mu.Lock()
 	apexZone := m.apexZone
 	m.mu.Unlock()
-	envSlug := effectiveWorktreeEnvSlug(cfg, slug, path, mainPath)
-	runtimeVars := buildRuntimeVars(projectID, envSlug, path, branch, apexZone)
+	runtimeVars := buildRuntimeVars(projectID, slug, path, branch, apexZone)
 	templateVars := buildTemplateVars(runtimeVars, mainPath, worktreeState)
 	if err := runHook(cfg.Hooks.PreStart, cfg.Commands.Wrapper, "pre_start", path, runtimeVars); err != nil {
 		return nil, err
@@ -357,10 +356,6 @@ func (m *Manager) stopWorktreeFromDir(slug, dirHint string, processes []string, 
 		return nil, err
 	}
 
-	mainPath, err := worktree.ResolveMainPathInDir(path)
-	if err != nil {
-		return nil, err
-	}
 	projectID, err := resolveProjectIdentifier(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("resolve project identifier: %w", err)
@@ -373,8 +368,7 @@ func (m *Manager) stopWorktreeFromDir(slug, dirHint string, processes []string, 
 	m.mu.Lock()
 	apexZone := m.apexZone
 	m.mu.Unlock()
-	envSlug := effectiveWorktreeEnvSlug(cfg, slug, path, mainPath)
-	runtimeVars := buildRuntimeVars(projectID, envSlug, path, branch, apexZone)
+	runtimeVars := buildRuntimeVars(projectID, slug, path, branch, apexZone)
 
 	if err := runHook(cfg.Hooks.PreStop, cfg.Commands.Wrapper, "pre_stop", path, runtimeVars); err != nil {
 		return nil, err
@@ -582,16 +576,6 @@ func buildRuntimeVars(project, envSlug, worktreePath, branch, apexZone string) m
 		"DEV_WORKTREE_PATH":     worktreePath,
 		"DEV_WORKTREE_BRANCH":   branch,
 	}
-}
-
-func effectiveWorktreeEnvSlug(cfg *config.ProjectConfig, slug, path, mainPath string) string {
-	if cfg == nil || strings.TrimSpace(cfg.Project.MainSlug) == "" {
-		return slug
-	}
-	if sameResolvedPath(path, mainPath) {
-		return strings.ToLower(strings.TrimSpace(cfg.Project.MainSlug))
-	}
-	return slug
 }
 
 func buildTemplateVars(runtimeVars map[string]string, mainPath, worktreeState string) map[string]string {

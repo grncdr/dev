@@ -323,14 +323,8 @@ func proxyApexZone(daemonCfg *config.DaemonConfig) string {
 }
 
 func effectiveDisplaySlug(slug, projectPath string, cfg *config.ProjectConfig) string {
-	displaySlug := worktree.SlugDNSLabel(slug)
-	if cfg == nil || cfg.Project.MainSlug == "" || projectPath == "" {
-		return displaySlug
-	}
-	if mainPath, err := worktree.ResolveMainPathInDir(projectPath); err == nil && samePath(projectPath, mainPath) {
-		displaySlug = cfg.Project.MainSlug
-	}
-	return displaySlug
+	_ = projectPath
+	return worktree.ProxyDNSLabelForSlug(cfg, slug)
 }
 
 func flattenProxyMatchers(raw any) []map[string]any {

@@ -79,7 +79,7 @@ func TestLocalProxyHostForTunnelRequest(t *testing.T) {
 	}
 }
 
-func TestLocalProxyHostForTunnelRequest_UsesMainSlugOverride(t *testing.T) {
+func TestLocalProxyHostForTunnelRequest_UsesDNSRemap(t *testing.T) {
 	base := t.TempDir()
 	repo := filepath.Join(base, "monorepo")
 	if err := os.MkdirAll(repo, 0o755); err != nil {
@@ -91,7 +91,9 @@ func TestLocalProxyHostForTunnelRequest_UsesMainSlugOverride(t *testing.T) {
 	cfgBody := `
 [project]
 name = "foocorp"
-main_slug = "foocorp"
+
+[local-dns]
+overrides = { main = "foocorp" }
 `
 	cfgPath := filepath.Join(repo, ".dev.toml")
 	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o600); err != nil {
@@ -118,7 +120,7 @@ main_slug = "foocorp"
 		tunnels: map[string]*managedTunnel{
 			"foocorp": {
 				req: TunnelRequest{
-					Slug:  "monorepo",
+					Slug:  "main",
 					Label: "foocorp",
 				},
 				status: "connected",
@@ -127,7 +129,7 @@ main_slug = "foocorp"
 	}
 	got, ok := s.localProxyHostForTunnelRequest("app.foocorp.foocorp.dev")
 	if !ok || got != "app.foocorp.localhost" {
-		t.Fatalf("expected main_slug host rewrite, got %q ok=%v", got, ok)
+		t.Fatalf("expected remapped host rewrite, got %q ok=%v", got, ok)
 	}
 }
 
@@ -350,7 +352,7 @@ func TestSelectProxyMatcher_SubdomainPriority(t *testing.T) {
 	}
 }
 
-func TestResolveRequestedSlug_MapsMainSlugOverride(t *testing.T) {
+func TestResolveRequestedSlug_MapsDNSRemap(t *testing.T) {
 	base := t.TempDir()
 	repo := filepath.Join(base, "monorepo")
 	if err := os.MkdirAll(repo, 0o755); err != nil {
@@ -362,7 +364,10 @@ func TestResolveRequestedSlug_MapsMainSlugOverride(t *testing.T) {
 	cfg := `
 [project]
 name = "foocorp"
-main_slug = "foocorp"
+main_slug = "primary"
+
+[local-dns]
+overrides = { main = "foocorp" }
 `
 	if err := os.WriteFile(filepath.Join(repo, ".dev.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
@@ -382,8 +387,8 @@ main_slug = "foocorp"
 	if err != nil {
 		t.Fatalf("resolveRequestedSlug: %v", err)
 	}
-	if got != "foocorp" {
-		t.Fatalf("expected foocorp, got %s", got)
+	if got != "primary" {
+		t.Fatalf("expected primary, got %s", got)
 	}
 }
 
