@@ -16,15 +16,6 @@ import (
 	"dev/internal/worktree"
 )
 
-const (
-	ansiBold  = "\x1b[1m"
-	ansiReset = "\x1b[0m"
-)
-
-func bold(text string) string {
-	return ansiBold + text + ansiReset
-}
-
 func newWorktreeStartCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start [process_identifier...]",
@@ -181,30 +172,16 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 		if i > 0 {
 			fmt.Println()
 		}
-		printProjectSection(slug, projectPath, cfg)
-		fmt.Println()
-
-		if !daemonUp {
-			printProcessesSection(nil, cfg, daemonCfg, slug, projectPath, false, targets[slug], nil)
-			fmt.Println()
-			printGatewaySection(cfg, nil, false)
-			continue
+		var status *daemon.WorktreeStatus
+		if daemonUp {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			resp, err := client.WorktreeStatus(ctx, slug)
+			cancel()
+			if err == nil {
+				status = filterWorktreeStatus(resp, targets[slug])
+			}
 		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		resp, err := client.WorktreeStatus(ctx, slug)
-		cancel()
-		if err != nil {
-			printProcessesSection(nil, cfg, daemonCfg, slug, projectPath, false, targets[slug], tunnelForSlug(tunnelBySlug, slug))
-			fmt.Println()
-			printGatewaySection(cfg, tunnelForSlug(tunnelBySlug, slug), true)
-			continue
-		}
-
-		filtered := filterWorktreeStatus(resp, targets[slug])
-		printProcessesSection(filtered, cfg, daemonCfg, slug, projectPath, true, targets[slug], tunnelForSlug(tunnelBySlug, slug))
-		fmt.Println()
-		printGatewaySection(cfg, tunnelForSlug(tunnelBySlug, slug), true)
+		printWorktreeDetailedStatus(slug, projectPath, cfg, daemonCfg, status, daemonUp, targets[slug], tunnelForSlug(tunnelBySlug, slug))
 	}
 	return nil
 }
@@ -230,71 +207,6 @@ func printWorktreeStatus(status *daemon.WorktreeStatus) {
 			fmt.Printf("  %s: %s (pid %d)\n", proc.Name, proc.Status, proc.PID)
 		} else {
 			fmt.Printf("  %s: %s\n", proc.Name, proc.Status)
-		}
-	}
-}
-
-func printProjectSection(slug, path string, cfg *config.ProjectConfig) {
-	fmt.Println(bold("Project"))
-	if cfg != nil && cfg.Project.Name != "" {
-		fmt.Printf("  name: %s\n", cfg.Project.Name)
-	} else {
-		fmt.Println("  name: (unknown)")
-	}
-	if path == "" {
-		fmt.Println("  main worktree: (unknown)")
-		return
-	}
-	mainPath, err := worktree.ResolveMainPathInDir(path)
-	if err != nil {
-		fmt.Println("  main worktree: (unknown)")
-		return
-	}
-	if samePath(path, mainPath) {
-		fmt.Println("  main worktree: this worktree")
-		return
-	}
-	fmt.Printf("  main worktree: %s\n", mainPath)
-}
-
-func printProcessesSection(status *daemon.WorktreeStatus, cfg *config.ProjectConfig, daemonCfg *config.DaemonConfig, slug, projectPath string, daemonUp bool, target *processTarget, tunnel *daemon.TunnelStatus) {
-	fmt.Println(bold("Processes"))
-	if !daemonUp {
-		fmt.Println("  daemon not running")
-		return
-	}
-	if status == nil || len(status.Processes) == 0 {
-		fmt.Println("  (no processes)")
-		return
-	}
-	proxyByProcess := processProxyURLsByProcess(slug, projectPath, cfg, daemonCfg)
-	gatewayByProcess := gatewayProxyURLsByProcess(proxyByProcess, cfg, tunnel)
-	processes := append([]daemon.ProcessStatus(nil), status.Processes...)
-	sort.Slice(processes, func(i, j int) bool { return processes[i].Name < processes[j].Name })
-	if target != nil && !target.all && len(target.processes) > 0 {
-		filtered := make([]daemon.ProcessStatus, 0, len(processes))
-		for _, proc := range processes {
-			if target.processes[proc.Name] {
-				filtered = append(filtered, proc)
-			}
-		}
-		processes = filtered
-	}
-	if len(processes) == 0 {
-		fmt.Println("  (no processes)")
-		return
-	}
-	for _, proc := range processes {
-		if proc.PID > 0 {
-			fmt.Printf("  %s: %s (pid %d)\n", proc.Name, proc.Status, proc.PID)
-		} else {
-			fmt.Printf("  %s: %s\n", proc.Name, proc.Status)
-		}
-		for _, route := range proxyByProcess[proc.Name] {
-			fmt.Printf("    proxy %s\n", route)
-		}
-		for _, route := range gatewayByProcess[proc.Name] {
-			fmt.Printf("    gateway %s\n", route)
 		}
 	}
 }
@@ -456,34 +368,221 @@ func canonicalPath(path string) (string, error) {
 	return resolved, nil
 }
 
-func printGatewaySection(cfg *config.ProjectConfig, tunnel *daemon.TunnelStatus, daemonUp bool) {
-	if cfg == nil {
-		return
+func printWorktreeDetailedStatus(slug, projectPath string, cfg *config.ProjectConfig, daemonCfg *config.DaemonConfig, status *daemon.WorktreeStatus, daemonUp bool, target *processTarget, tunnel *daemon.TunnelStatus) {
+	projectName := "(unknown)"
+	if cfg != nil && strings.TrimSpace(cfg.Project.Name) != "" {
+		projectName = cfg.Project.Name
 	}
-	url, _ := cfg.Gateway["url"].(string)
-	if strings.TrimSpace(url) == "" {
-		return
+	fmt.Printf("Project: %s\n", projectName)
+	worktreePath := projectPath
+	if strings.TrimSpace(worktreePath) == "" {
+		worktreePath = "(unknown)"
 	}
-	fmt.Println(bold("Gateway"))
-	fmt.Printf("  url: %s\n", url)
-	if !daemonUp {
-		fmt.Printf("  status: daemon not running\n")
-		return
+	fmt.Printf("Worktree: %s (%s)\n", slug, worktreePath)
+
+	proxyByProcess := processProxyURLsByProcess(slug, projectPath, cfg, daemonCfg)
+	if target != nil && !target.all && len(target.processes) > 0 {
+		proxyByProcess = filterRoutesByTarget(proxyByProcess, target)
 	}
-	if tunnel == nil {
-		fmt.Printf("  status: not connected\n")
-		return
+	fmt.Println("Proxy:")
+	printRouteMappings(proxyByProcess)
+
+	gatewayURL := gatewayURLFromConfig(cfg)
+	if gatewayURL != "" {
+		fmt.Println()
+		connection := "disconnected"
+		if daemonUp && tunnel != nil && tunnel.Status == "connected" {
+			connection = "connected"
+		}
+		fmt.Printf("Gateway: %s [%s]\n", gatewayURL, connection)
+		printRouteMappings(gatewayProxyURLsByProcess(proxyByProcess, cfg, tunnel))
 	}
-	fmt.Printf("  status: %s\n", tunnel.Status)
-	if tunnel.Label != "" {
-		fmt.Printf("  label: %s\n", tunnel.Label)
-		if public := gatewayPublicURL(url, tunnel.PublicHost, tunnel.Label); public != "" {
-			fmt.Printf("  public: %s\n", public)
+
+	fmt.Println()
+	fmt.Println("Processes:")
+	printProcesses(status, cfg, projectPath, daemonUp, target)
+}
+
+func filterRoutesByTarget(routes map[string][]string, target *processTarget) map[string][]string {
+	if target == nil || target.all || len(target.processes) == 0 {
+		return routes
+	}
+	filtered := map[string][]string{}
+	for process, mappings := range routes {
+		if targetIncludesProcess(target, process) {
+			filtered[process] = mappings
 		}
 	}
-	if tunnel.LastError != "" {
-		fmt.Printf("  error: %s\n", tunnel.LastError)
+	return filtered
+}
+
+func targetIncludesProcess(target *processTarget, process string) bool {
+	if target == nil || target.all || len(target.processes) == 0 {
+		return true
 	}
+	return target.processes[process]
+}
+
+func printRouteMappings(byProcess map[string][]string) {
+	lines := routeMappingLines(byProcess)
+	if len(lines) == 0 {
+		fmt.Println("  (none)")
+		return
+	}
+	for _, line := range lines {
+		fmt.Printf("  %s\n", line)
+	}
+}
+
+func routeMappingLines(byProcess map[string][]string) []string {
+	type pathMapping struct {
+		path    string
+		process string
+	}
+	grouped := map[string][]pathMapping{}
+	ungrouped := []string{}
+	for process, routes := range byProcess {
+		for _, route := range routes {
+			parsed, err := url.Parse(route)
+			if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+				ungrouped = append(ungrouped, fmt.Sprintf("%s -> %s", route, process))
+				continue
+			}
+			switch parsed.Scheme {
+			case "http", "https":
+				hostKey := fmt.Sprintf("%s://%s", parsed.Scheme, parsed.Host)
+				path := parsed.EscapedPath()
+				if path == "" {
+					path = "/"
+				}
+				grouped[hostKey] = append(grouped[hostKey], pathMapping{
+					path:    path,
+					process: process,
+				})
+			default:
+				ungrouped = append(ungrouped, fmt.Sprintf("%s -> %s", route, process))
+			}
+		}
+	}
+	sort.Strings(ungrouped)
+	hosts := make([]string, 0, len(grouped))
+	for host := range grouped {
+		hosts = append(hosts, host)
+	}
+	sort.Strings(hosts)
+	lines := make([]string, 0, len(ungrouped)+len(hosts)*2)
+	lines = append(lines, ungrouped...)
+	for _, host := range hosts {
+		mappings := grouped[host]
+		sort.Slice(mappings, func(i, j int) bool {
+			if mappings[i].path == mappings[j].path {
+				return mappings[i].process < mappings[j].process
+			}
+			return mappings[i].path < mappings[j].path
+		})
+		if len(mappings) == 1 && mappings[0].path == "/" {
+			lines = append(lines, fmt.Sprintf("%s -> %s", host, mappings[0].process))
+			continue
+		}
+		lines = append(lines, host)
+		for _, mapping := range mappings {
+			lines = append(lines, fmt.Sprintf("  %s -> %s", mapping.path, mapping.process))
+		}
+	}
+	return lines
+}
+
+func gatewayURLFromConfig(cfg *config.ProjectConfig) string {
+	if cfg == nil {
+		return ""
+	}
+	url, _ := cfg.Gateway["url"].(string)
+	return strings.TrimSpace(url)
+}
+
+func printProcesses(status *daemon.WorktreeStatus, cfg *config.ProjectConfig, projectPath string, daemonUp bool, target *processTarget) {
+	if !daemonUp {
+		fmt.Println("  daemon not running")
+		return
+	}
+	statusByName := map[string]daemon.ProcessStatus{}
+	if status != nil {
+		for _, proc := range status.Processes {
+			statusByName[proc.Name] = proc
+		}
+	}
+	names := map[string]bool{}
+	if cfg != nil {
+		for name := range cfg.Processes {
+			names[name] = true
+		}
+	}
+	for name := range statusByName {
+		names[name] = true
+	}
+	if target != nil && !target.all && len(target.processes) > 0 {
+		for name := range names {
+			if !targetIncludesProcess(target, name) {
+				delete(names, name)
+			}
+		}
+	}
+	if len(names) == 0 {
+		fmt.Println("  (none)")
+		return
+	}
+	isMainWorktree := false
+	if projectPath != "" {
+		if mainPath, err := worktree.ResolveMainPathInDir(projectPath); err == nil && samePath(projectPath, mainPath) {
+			isMainWorktree = true
+		}
+	}
+	ordered := make([]string, 0, len(names))
+	for name := range names {
+		ordered = append(ordered, name)
+	}
+	sort.Strings(ordered)
+	for _, name := range ordered {
+		proc, ok := statusByName[name]
+		if !ok {
+			proc = daemon.ProcessStatus{Name: name, Status: "stopped"}
+		}
+		fromWorktree := ""
+		if cfg != nil && !isMainWorktree {
+			if processCfg, ok := cfg.Processes[name]; ok {
+				if singleton, ok := processCfg["singleton"].(bool); ok && singleton {
+					fromWorktree = mainWorktreeSlug(cfg)
+				}
+			}
+		}
+		fmt.Printf("  %s\n", formatProcessLine(proc, fromWorktree))
+	}
+}
+
+func formatProcessLine(proc daemon.ProcessStatus, fromWorktree string) string {
+	base := ""
+	if proc.Status == "running" && proc.PID > 0 {
+		base = fmt.Sprintf("%s (running: PID %d)", proc.Name, proc.PID)
+	} else if proc.PID > 0 {
+		base = fmt.Sprintf("%s (%s: PID %d)", proc.Name, proc.Status, proc.PID)
+	} else {
+		base = fmt.Sprintf("%s (%s)", proc.Name, proc.Status)
+	}
+	fromWorktree = strings.TrimSpace(fromWorktree)
+	if fromWorktree != "" {
+		base += fmt.Sprintf(" (from worktree: %s)", fromWorktree)
+	}
+	return base
+}
+
+func mainWorktreeSlug(cfg *config.ProjectConfig) string {
+	if cfg == nil {
+		return "main"
+	}
+	if slug := strings.TrimSpace(cfg.Project.MainSlug); slug != "" {
+		return slug
+	}
+	return "main"
 }
 
 func tunnelForSlug(tunnels map[string]daemon.TunnelStatus, slug string) *daemon.TunnelStatus {
