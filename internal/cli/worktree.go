@@ -383,8 +383,14 @@ func routeMappingLines(byProcess map[string][]string) []string {
 			continue
 		}
 		lines = append(lines, host)
+		maxPathLen := 0
 		for _, mapping := range mappings {
-			lines = append(lines, fmt.Sprintf("  %s -> %s", mapping.path, mapping.process))
+			if l := len(mapping.path); l > maxPathLen {
+				maxPathLen = l
+			}
+		}
+		for _, mapping := range mappings {
+			lines = append(lines, fmt.Sprintf("  %-*s -> %s", maxPathLen, mapping.path, mapping.process))
 		}
 	}
 	return lines

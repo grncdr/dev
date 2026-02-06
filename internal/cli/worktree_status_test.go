@@ -31,6 +31,22 @@ func TestRouteMappingLinesSorted(t *testing.T) {
 	}
 }
 
+func TestRouteMappingLinesAlignsProcessesByPathWidth(t *testing.T) {
+	byProcess := map[string][]string{
+		"server":       {"https://myserver.localhost/"},
+		"other-server": {"https://myserver.localhost/path"},
+	}
+	got := routeMappingLines(byProcess)
+	want := []string{
+		"https://myserver.localhost",
+		"  /     -> server",
+		"  /path -> other-server",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("routeMappingLines mismatch:\nwant: %#v\ngot:  %#v", want, got)
+	}
+}
+
 func TestRouteMappingLinesIncludesUngroupedRoutes(t *testing.T) {
 	byProcess := map[string][]string{
 		"db": {"tcp://127.0.0.1:15432"},
