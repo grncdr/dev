@@ -2,6 +2,8 @@
 
 This document defines the lifecycle commands for managed worktrees.
 
+Note: `worktree add` and `worktree cleanup` currently execute in the CLI process. We may want to move execution into the daemon so lifecycle operations run in a cleaner, more controlled environment.
+
 ## Commands
 
 ```bash
