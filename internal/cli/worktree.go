@@ -146,6 +146,7 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 		return err
 	}
 	tunnelBySlug := map[string]daemon.TunnelStatus{}
+	mainStatusByWorktree := map[string]*daemon.WorktreeStatus{}
 	if daemonUp {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -181,7 +182,23 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 				status = filterWorktreeStatus(resp, targets[slug])
 			}
 		}
-		printWorktreeDetailedStatus(slug, projectPath, cfg, daemonCfg, status, daemonUp, targets[slug], tunnelForSlug(tunnelBySlug, slug))
+		mainStatus := status
+		mainSlug := mainWorktreeSlug(cfg)
+		if daemonUp && shouldUseMainWorktreeStatus(cfg, projectPath) {
+			cacheKey := projectPath + "\x00" + mainSlug
+			if cached, ok := mainStatusByWorktree[cacheKey]; ok {
+				mainStatus = cached
+			} else {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				resp, err := client.WorktreeStatus(ctx, mainSlug)
+				cancel()
+				if err == nil {
+					mainStatus = resp
+				}
+				mainStatusByWorktree[cacheKey] = mainStatus
+			}
+		}
+		printWorktreeDetailedStatus(slug, projectPath, cfg, daemonCfg, status, mainStatus, daemonUp, targets[slug], tunnelForSlug(tunnelBySlug, slug))
 	}
 	return nil
 }
@@ -368,7 +385,7 @@ func canonicalPath(path string) (string, error) {
 	return resolved, nil
 }
 
-func printWorktreeDetailedStatus(slug, projectPath string, cfg *config.ProjectConfig, daemonCfg *config.DaemonConfig, status *daemon.WorktreeStatus, daemonUp bool, target *processTarget, tunnel *daemon.TunnelStatus) {
+func printWorktreeDetailedStatus(slug, projectPath string, cfg *config.ProjectConfig, daemonCfg *config.DaemonConfig, status, mainStatus *daemon.WorktreeStatus, daemonUp bool, target *processTarget, tunnel *daemon.TunnelStatus) {
 	projectName := "(unknown)"
 	if cfg != nil && strings.TrimSpace(cfg.Project.Name) != "" {
 		projectName = cfg.Project.Name
@@ -400,7 +417,7 @@ func printWorktreeDetailedStatus(slug, projectPath string, cfg *config.ProjectCo
 
 	fmt.Println()
 	fmt.Println("Processes:")
-	printProcesses(status, cfg, projectPath, daemonUp, target)
+	printProcesses(status, mainStatus, cfg, projectPath, daemonUp, target)
 }
 
 func filterRoutesByTarget(routes map[string][]string, target *processTarget) map[string][]string {
@@ -500,7 +517,7 @@ func gatewayURLFromConfig(cfg *config.ProjectConfig) string {
 	return strings.TrimSpace(url)
 }
 
-func printProcesses(status *daemon.WorktreeStatus, cfg *config.ProjectConfig, projectPath string, daemonUp bool, target *processTarget) {
+func printProcesses(status, mainStatus *daemon.WorktreeStatus, cfg *config.ProjectConfig, projectPath string, daemonUp bool, target *processTarget) {
 	if !daemonUp {
 		fmt.Println("  daemon not running")
 		return
@@ -509,6 +526,12 @@ func printProcesses(status *daemon.WorktreeStatus, cfg *config.ProjectConfig, pr
 	if status != nil {
 		for _, proc := range status.Processes {
 			statusByName[proc.Name] = proc
+		}
+	}
+	mainStatusByName := map[string]daemon.ProcessStatus{}
+	if mainStatus != nil {
+		for _, proc := range mainStatus.Processes {
+			mainStatusByName[proc.Name] = proc
 		}
 	}
 	names := map[string]bool{}
@@ -531,32 +554,44 @@ func printProcesses(status *daemon.WorktreeStatus, cfg *config.ProjectConfig, pr
 		fmt.Println("  (none)")
 		return
 	}
-	isMainWorktree := false
-	if projectPath != "" {
-		if mainPath, err := worktree.ResolveMainPathInDir(projectPath); err == nil && samePath(projectPath, mainPath) {
-			isMainWorktree = true
-		}
-	}
+	isMainWorktree := isMainWorktreePath(projectPath)
+	mainSlug := mainWorktreeSlug(cfg)
 	ordered := make([]string, 0, len(names))
 	for name := range names {
 		ordered = append(ordered, name)
 	}
 	sort.Strings(ordered)
 	for _, name := range ordered {
-		proc, ok := statusByName[name]
-		if !ok {
-			proc = daemon.ProcessStatus{Name: name, Status: "stopped"}
-		}
-		fromWorktree := ""
-		if cfg != nil && !isMainWorktree {
-			if processCfg, ok := cfg.Processes[name]; ok {
-				if singleton, ok := processCfg["singleton"].(bool); ok && singleton {
-					fromWorktree = mainWorktreeSlug(cfg)
-				}
-			}
-		}
+		proc, fromWorktree := resolveProcessStatus(name, statusByName, mainStatusByName, cfg, isMainWorktree, mainSlug)
 		fmt.Printf("  %s\n", formatProcessLine(proc, fromWorktree))
 	}
+}
+
+func resolveProcessStatus(name string, statusByName, mainStatusByName map[string]daemon.ProcessStatus, cfg *config.ProjectConfig, isMainWorktree bool, mainSlug string) (daemon.ProcessStatus, string) {
+	proc, ok := statusByName[name]
+	fromWorktree := ""
+	if isSingletonProcess(cfg, name) && !isMainWorktree {
+		fromWorktree = mainSlug
+		if mainProc, ok := mainStatusByName[name]; ok {
+			return mainProc, fromWorktree
+		}
+	}
+	if !ok {
+		proc = daemon.ProcessStatus{Name: name, Status: "stopped"}
+	}
+	return proc, fromWorktree
+}
+
+func isSingletonProcess(cfg *config.ProjectConfig, name string) bool {
+	if cfg == nil {
+		return false
+	}
+	processCfg, ok := cfg.Processes[name]
+	if !ok {
+		return false
+	}
+	singleton, ok := processCfg["singleton"].(bool)
+	return ok && singleton
 }
 
 func formatProcessLine(proc daemon.ProcessStatus, fromWorktree string) string {
@@ -583,6 +618,32 @@ func mainWorktreeSlug(cfg *config.ProjectConfig) string {
 		return slug
 	}
 	return "main"
+}
+
+func isMainWorktreePath(projectPath string) bool {
+	if projectPath == "" {
+		return false
+	}
+	mainPath, err := worktree.ResolveMainPathInDir(projectPath)
+	if err != nil {
+		return false
+	}
+	return samePath(projectPath, mainPath)
+}
+
+func shouldUseMainWorktreeStatus(cfg *config.ProjectConfig, projectPath string) bool {
+	if cfg == nil || len(cfg.Processes) == 0 {
+		return false
+	}
+	if isMainWorktreePath(projectPath) {
+		return false
+	}
+	for name := range cfg.Processes {
+		if isSingletonProcess(cfg, name) {
+			return true
+		}
+	}
+	return false
 }
 
 func tunnelForSlug(tunnels map[string]daemon.TunnelStatus, slug string) *daemon.TunnelStatus {

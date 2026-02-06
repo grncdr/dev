@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"dev/internal/config"
 	"dev/internal/daemon"
 )
 
@@ -80,5 +81,45 @@ func TestFormatProcessLine(t *testing.T) {
 				t.Fatalf("formatProcessLine mismatch:\nwant: %q\ngot:  %q", tc.want, got)
 			}
 		})
+	}
+}
+
+func TestResolveProcessStatusSingletonUsesMainWorktreeStatus(t *testing.T) {
+	cfg := &config.ProjectConfig{
+		Processes: map[string]map[string]any{
+			"db": {"singleton": true},
+		},
+	}
+	current := map[string]daemon.ProcessStatus{}
+	main := map[string]daemon.ProcessStatus{
+		"db": {Name: "db", Status: "running", PID: 3456},
+	}
+	got, from := resolveProcessStatus("db", current, main, cfg, false, "primary")
+	if got.Status != "running" || got.PID != 3456 {
+		t.Fatalf("expected running singleton from main, got %+v", got)
+	}
+	if from != "primary" {
+		t.Fatalf("expected from worktree primary, got %q", from)
+	}
+}
+
+func TestResolveProcessStatusNonSingletonUsesLocalStatus(t *testing.T) {
+	cfg := &config.ProjectConfig{
+		Processes: map[string]map[string]any{
+			"web": {"singleton": false},
+		},
+	}
+	current := map[string]daemon.ProcessStatus{
+		"web": {Name: "web", Status: "running", PID: 7890},
+	}
+	main := map[string]daemon.ProcessStatus{
+		"web": {Name: "web", Status: "stopped"},
+	}
+	got, from := resolveProcessStatus("web", current, main, cfg, false, "main")
+	if got.Status != "running" || got.PID != 7890 {
+		t.Fatalf("expected local running status, got %+v", got)
+	}
+	if from != "" {
+		t.Fatalf("expected no from-worktree marker, got %q", from)
 	}
 }
