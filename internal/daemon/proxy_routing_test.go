@@ -145,7 +145,7 @@ func TestParseProxyMatchers(t *testing.T) {
 			"priority":  int64(5),
 		},
 	}
-	matchers := parseProxyMatchers("rails", raw, true, config.GatewayModeReverseProxy)
+	matchers := parseProxyMatchers("rails", raw, true, config.GatewayModeReverseProxy, "")
 	if len(matchers) != 2 {
 		t.Fatalf("expected 2 matchers, got %d", len(matchers))
 	}
@@ -164,6 +164,9 @@ func TestParseProxyMatchers(t *testing.T) {
 	if matchers[1].GatewayMode != config.GatewayModeReverseProxy {
 		t.Fatalf("expected default gateway mode reverse_proxy, got %q", matchers[1].GatewayMode)
 	}
+	if matchers[0].GatewayDebugLog != "" || matchers[1].GatewayDebugLog != "" {
+		t.Fatalf("expected gateway debug log disabled by default")
+	}
 	if !matchers[0].Singleton || !matchers[1].Singleton {
 		t.Fatalf("expected singleton to propagate to matchers")
 	}
@@ -174,7 +177,7 @@ func TestParseProxyMatchers_SubdomainsList(t *testing.T) {
 		"subdomains": []any{"app", "api", "*"},
 		"path":       "/",
 	}
-	matchers := parseProxyMatchers("web", raw, false, config.GatewayModeReverseProxy)
+	matchers := parseProxyMatchers("web", raw, false, config.GatewayModeReverseProxy, "")
 	if len(matchers) != 3 {
 		t.Fatalf("expected 3 matchers, got %d", len(matchers))
 	}
@@ -191,7 +194,7 @@ func TestParseProxyMatchers_InlineStringMap(t *testing.T) {
 	raw := map[string]string{
 		"subdomain": "mailpit",
 	}
-	matchers := parseProxyMatchers("mailpit", raw, true, config.GatewayModeRewrite)
+	matchers := parseProxyMatchers("mailpit", raw, true, config.GatewayModeRewrite, "")
 	if len(matchers) != 1 {
 		t.Fatalf("expected 1 matcher, got %d", len(matchers))
 	}
@@ -207,7 +210,7 @@ func TestParseProxyMatchers_TCPListen(t *testing.T) {
 	raw := map[string]any{
 		"tcp_listen": int64(15432),
 	}
-	matchers := parseProxyMatchers("postgres", raw, true, config.GatewayModeReverseProxy)
+	matchers := parseProxyMatchers("postgres", raw, true, config.GatewayModeReverseProxy, "")
 	if len(matchers) != 1 {
 		t.Fatalf("expected 1 matcher, got %d", len(matchers))
 	}
@@ -224,7 +227,7 @@ func TestProcessProxyMatchers_FromLoadedInlineProxyConfig(t *testing.T) {
 name = "foocorp"
 
 [gateway]
-expose = { mailpit = { mode = "rewrite" } }
+expose = { mailpit = { mode = "rewrite", debug_log = "tmp/gateway-http.log" } }
 
 [process.mailpit]
 singleton = true
@@ -247,6 +250,9 @@ proxy = { subdomain = "mailpit" }
 	}
 	if matchers[0].GatewayMode != config.GatewayModeRewrite {
 		t.Fatalf("expected rewrite gateway_mode, got %q", matchers[0].GatewayMode)
+	}
+	if matchers[0].GatewayDebugLog != "tmp/gateway-http.log" {
+		t.Fatalf("expected gateway debug_log path, got %q", matchers[0].GatewayDebugLog)
 	}
 }
 
@@ -293,7 +299,7 @@ proxy = { path = "/" }
 	mgr := NewManager()
 	mgr.paths["main"] = dir
 	s := &Server{manager: mgr}
-	_, _, _, err := s.resolveProxyTargetForRequest("main.localhost", "/", true)
+	_, _, _, _, _, _, err := s.resolveProxyTargetForRequest("main.localhost", "/", true)
 	if !errors.Is(err, errGatewayProcessNotExposed) {
 		t.Fatalf("expected gateway-not-exposed error, got %v", err)
 	}

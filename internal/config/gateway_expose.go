@@ -12,10 +12,26 @@ const (
 	GatewayModeRewrite      = "rewrite"
 )
 
+type GatewayExposeRule struct {
+	Mode     string
+	DebugLog string
+}
+
 // GatewayExposeModes returns gateway-exposed process modes keyed by process name.
 // Only processes listed in gateway.expose are returned.
 func GatewayExposeModes(cfg *ProjectConfig) map[string]string {
+	rules := GatewayExposeRules(cfg)
 	out := map[string]string{}
+	for name, rule := range rules {
+		out[name] = rule.Mode
+	}
+	return out
+}
+
+// GatewayExposeRules returns parsed gateway.expose entries keyed by process name.
+// Only processes listed in gateway.expose are returned.
+func GatewayExposeRules(cfg *ProjectConfig) map[string]GatewayExposeRule {
+	out := map[string]GatewayExposeRule{}
 	if cfg == nil || cfg.Gateway == nil {
 		return out
 	}
@@ -32,35 +48,45 @@ func GatewayExposeModes(cfg *ProjectConfig) map[string]string {
 		if name == "" {
 			continue
 		}
-		mode := parseGatewayExposeMode(rawRule)
-		if mode == GatewayModeDisable {
+		rule := parseGatewayExposeRule(rawRule)
+		if rule.Mode == GatewayModeDisable {
 			continue
 		}
-		out[name] = mode
+		out[name] = rule
 	}
 	return out
 }
 
-func parseGatewayExposeMode(raw any) string {
+func parseGatewayExposeRule(raw any) GatewayExposeRule {
 	if raw == nil {
-		return GatewayModeReverseProxy
+		return GatewayExposeRule{Mode: GatewayModeReverseProxy}
 	}
 	if mode, ok := normalizeGatewayModeValue(raw); ok {
-		return mode
+		return GatewayExposeRule{Mode: mode}
 	}
 	m, ok := normalizeStringMap(raw)
 	if !ok {
-		return GatewayModeDisable
+		return GatewayExposeRule{Mode: GatewayModeDisable}
+	}
+	debugLog := ""
+	if val, ok := m["debug_log"].(string); ok {
+		debugLog = strings.TrimSpace(val)
 	}
 	modeRaw, ok := m["mode"]
 	if !ok || modeRaw == nil {
-		return GatewayModeReverseProxy
+		return GatewayExposeRule{
+			Mode:     GatewayModeReverseProxy,
+			DebugLog: debugLog,
+		}
 	}
 	mode, ok := normalizeGatewayModeValue(modeRaw)
 	if !ok {
-		return GatewayModeDisable
+		return GatewayExposeRule{Mode: GatewayModeDisable}
 	}
-	return mode
+	return GatewayExposeRule{
+		Mode:     mode,
+		DebugLog: debugLog,
+	}
 }
 
 func normalizeGatewayModeValue(raw any) (string, bool) {

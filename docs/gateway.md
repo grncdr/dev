@@ -39,6 +39,7 @@ When traffic is tunneled through the gateway, exposed processes are controlled b
 - only listed processes accept gateway-tunneled traffic
 - `mode = "reverse_proxy"`: standard reverse proxy headers, no host/cookie/body rewrites. Local processes receive the usual `X-Forwarded-*` headers (`X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Forwarded-For`) so they can detect the public hostname and scheme.
 - `mode = "rewrite"`: rewrites local apex hosts/cookies to the gateway public apex for browser-facing compatibility. Use this when your app cannot easily support both local `.localhost` hostnames and your public gateway DNS zone at the same time.
+- `debug_log = "<path>"`: appends full tunneled HTTP request/response transcripts to a file for that process.
 
 To start the gateway:
 

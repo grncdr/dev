@@ -24,9 +24,11 @@ url = "https://gateway.foocorp.dev"
 
 [gateway.expose.rails]
 mode = "reverse_proxy"
+debug_log = ""
 
 [gateway.expose.webpack]
 mode = "rewrite"
+debug_log = "tmp/gateway-http.log"
 
 [process.postgres]
 singleton = true
@@ -112,6 +114,7 @@ Notes:
   - Only processes listed in `gateway.expose` are reachable from the gateway.
   - `mode = "reverse_proxy"`: sends `X-Forwarded-*` headers and does not rewrite response headers/body.
   - `mode = "rewrite"`: sends `X-Forwarded-Proto`, omits `X-Forwarded-Host`/`X-Forwarded-For`, rewrites `Location`, rewrites `Set-Cookie Domain`, rewrites RFC cookie `$Domain` on incoming requests, and rewrites text response bodies for local/public host mapping.
+  - `debug_log = "<path>"`: appends full gateway HTTP request/response transcripts to a log file. Relative paths are resolved from the matched process worktree directory. Response bodies are logged after rewrite handling.
 - `subdomain = null` matches `<slug>.<apex_zone>`. `subdomain = "app"` matches `app.<slug>.<apex_zone>`. `subdomain = "*"` matches any subdomain under `<slug>.<apex_zone>`.
 - `subdomains = [...]` is also supported in a matcher to map multiple subdomains in one block.
 - `path` defaults to `/`, `match` defaults to `prefix`, and `priority` defaults to `0`.

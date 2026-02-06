@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -231,7 +232,7 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 		isGatewayTunnel = true
 	}
 
-	network, address, gatewayMode, err := s.resolveProxyTargetForRequest(routeHost, r.URL.Path, isGatewayTunnel)
+	network, address, process, gatewayMode, gatewayDebugLog, targetSlug, err := s.resolveProxyTargetForRequest(routeHost, r.URL.Path, isGatewayTunnel)
 	if err != nil {
 		if errors.Is(err, errGatewayProcessNotExposed) {
 			writeErrorWithCode(w, http.StatusForbidden, "proxy_gateway_not_exposed", err)
@@ -241,6 +242,27 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rewriteMode := isGatewayTunnel && gatewayMode == config.GatewayModeRewrite
+	transcriptRelPath := ""
+	if isGatewayTunnel {
+		transcriptRelPath = strings.TrimSpace(gatewayDebugLog)
+	}
+	debugGatewayTranscript := transcriptRelPath != ""
+	transcriptWorktreePath := ""
+	if debugGatewayTranscript {
+		if path, ok := s.manager.WorktreePath(targetSlug); ok {
+			transcriptWorktreePath = path
+		}
+	}
+	var requestForTranscript *http.Request
+	var requestBodyForTranscript []byte
+	if debugGatewayTranscript {
+		body, err := snapshotRequestBody(r)
+		if err == nil {
+			requestForTranscript = r.Clone(r.Context())
+			requestForTranscript.Header = r.Header.Clone()
+			requestBodyForTranscript = body
+		}
+	}
 
 	target, _ := url.Parse("http://unix")
 	reverseProxy := httputil.NewSingleHostReverseProxy(target)
@@ -265,8 +287,8 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 	if !rewroteDomain || rewriteDomain == "" {
 		rewriteDomain = host
 	}
-	if rewriteMode {
-		reverseProxy.ModifyResponse = func(resp *http.Response) error {
+	reverseProxy.ModifyResponse = func(resp *http.Response) error {
+		if rewriteMode {
 			if loc := resp.Header.Get("Location"); loc != "" {
 				if rewritten, ok := rewriteLocation(loc, localApex, publicApex); ok {
 					resp.Header.Set("Location", rewritten)
@@ -278,13 +300,60 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 			if err := rewriteResponseBody(resp, routeHost, rewriteDomain); err != nil {
 				return err
 			}
-			return nil
 		}
+		if debugGatewayTranscript {
+			respBody, err := snapshotResponseBody(resp)
+			if err != nil {
+				return nil
+			}
+			if requestForTranscript != nil && transcriptWorktreePath != "" {
+				if err := writeGatewayHTTPTranscript(transcriptWorktreePath, transcriptRelPath, requestForTranscript, requestBodyForTranscript, resp, respBody); err != nil {
+					writeDaemonLogLine(fmt.Sprintf("gateway transcript write failed process=%s host=%s path=%s err=%q", process, host, transcriptRelPath, err.Error()))
+				}
+			}
+		}
+		return nil
 	}
 	reverseProxy.ErrorHandler = func(rw http.ResponseWriter, _ *http.Request, err error) {
 		writeErrorWithCode(rw, http.StatusBadGateway, "proxy_upstream_error", err)
 	}
 	reverseProxy.ServeHTTP(w, r)
+}
+
+func snapshotRequestBody(req *http.Request) ([]byte, error) {
+	if req == nil || req.Body == nil {
+		return nil, nil
+	}
+	body, err := io.ReadAll(req.Body)
+	if closeErr := req.Body.Close(); err == nil && closeErr != nil {
+		err = closeErr
+	}
+	if err != nil {
+		return nil, err
+	}
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	req.ContentLength = int64(len(body))
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(body)), nil
+	}
+	return body, nil
+}
+
+func snapshotResponseBody(resp *http.Response) ([]byte, error) {
+	if resp == nil || resp.Body == nil {
+		return nil, nil
+	}
+	body, err := io.ReadAll(resp.Body)
+	if closeErr := resp.Body.Close(); err == nil && closeErr != nil {
+		err = closeErr
+	}
+	if err != nil {
+		return nil, err
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	resp.ContentLength = int64(len(body))
+	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
+	return body, nil
 }
 
 func applyForwardedHeaders(req *http.Request, rewriteMode bool) {

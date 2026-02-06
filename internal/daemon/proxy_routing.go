@@ -21,15 +21,16 @@ const (
 )
 
 type proxyMatcher struct {
-	Process     string
-	Subdomain   string
-	Kind        subdomainMatchKind
-	Path        string
-	Match       string
-	GatewayMode string
-	Priority    int
-	TCPListen   int
-	Singleton   bool
+	Process         string
+	Subdomain       string
+	Kind            subdomainMatchKind
+	Path            string
+	Match           string
+	GatewayMode     string
+	GatewayDebugLog string
+	Priority        int
+	TCPListen       int
+	Singleton       bool
 }
 
 var errGatewayProcessNotExposed = errors.New("gateway traffic not exposed for matched process")
@@ -146,49 +147,49 @@ func sameResolvedPath(a, b string) bool {
 	return filepath.Clean(resolvedA) == filepath.Clean(resolvedB)
 }
 
-func (s *Server) resolveProxyTarget(host, path string) (network string, address string, gatewayMode string, err error) {
+func (s *Server) resolveProxyTarget(host, path string) (network string, address string, process string, gatewayMode string, gatewayDebugLog string, targetSlug string, err error) {
 	return s.resolveProxyTargetForRequest(host, path, false)
 }
 
-func (s *Server) resolveProxyTargetForRequest(host, path string, fromGateway bool) (network string, address string, gatewayMode string, err error) {
+func (s *Server) resolveProxyTargetForRequest(host, path string, fromGateway bool) (network string, address string, process string, gatewayMode string, gatewayDebugLog string, targetSlug string, err error) {
 	requestedSlug, subdomain, err := s.parseProxyHost(host)
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", "", "", err
 	}
 
 	slug, err := s.resolveRequestedSlug(requestedSlug)
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", "", "", err
 	}
 
 	cfg, repoPath, err := s.projectConfigForSlug(slug)
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", "", "", err
 	}
 
 	matchers := processProxyMatchers(cfg)
 	best, ok := selectProxyMatcher(matchers, subdomain, path)
 	if !ok {
-		return "", "", "", errors.New("no proxy matcher matched")
+		return "", "", "", "", "", "", errors.New("no proxy matcher matched")
 	}
 	if fromGateway && best.GatewayMode == config.GatewayModeDisable {
-		return "", "", "", errGatewayProcessNotExposed
+		return "", "", "", "", "", "", errGatewayProcessNotExposed
 	}
 
-	targetSlug := slug
+	targetSlug = slug
 	if best.Singleton {
 		mainSlug, err := resolveMainWorktreeSlug(repoPath)
 		if err != nil {
-			return "", "", "", err
+			return "", "", "", "", "", "", err
 		}
 		targetSlug = mainSlug
 	}
 
 	network, address, err = s.manager.EnsureProcessForTarget(targetSlug, best.Process)
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", "", "", err
 	}
-	return network, address, best.GatewayMode, nil
+	return network, address, best.Process, best.GatewayMode, best.GatewayDebugLog, targetSlug, nil
 }
 
 func (s *Server) resolveRequestedSlug(requestedSlug string) (string, error) {
@@ -249,7 +250,7 @@ func processProxyMatchers(cfg *config.ProjectConfig) []proxyMatcher {
 		return nil
 	}
 	matchers := []proxyMatcher{}
-	gatewayModes := config.GatewayExposeModes(cfg)
+	gatewayRules := config.GatewayExposeRules(cfg)
 	for name, proc := range cfg.Processes {
 		rawProxy, ok := proc["proxy"]
 		if !ok || rawProxy == nil {
@@ -260,10 +261,12 @@ func processProxyMatchers(cfg *config.ProjectConfig) []proxyMatcher {
 			singleton = rawSingleton
 		}
 		gatewayMode := config.GatewayModeDisable
-		if exposedMode, ok := gatewayModes[name]; ok {
-			gatewayMode = exposedMode
+		gatewayDebugLog := ""
+		if exposedRule, ok := gatewayRules[name]; ok {
+			gatewayMode = exposedRule.Mode
+			gatewayDebugLog = exposedRule.DebugLog
 		}
-		matchers = append(matchers, parseProxyMatchers(name, rawProxy, singleton, gatewayMode)...)
+		matchers = append(matchers, parseProxyMatchers(name, rawProxy, singleton, gatewayMode, gatewayDebugLog)...)
 	}
 	return matchers
 }
@@ -292,17 +295,17 @@ func (s *Server) projectConfigForSlug(slug string) (*config.ProjectConfig, strin
 	return cfg, repoPath, nil
 }
 
-func parseProxyMatchers(process string, raw any, singleton bool, gatewayMode string) []proxyMatcher {
+func parseProxyMatchers(process string, raw any, singleton bool, gatewayMode string, gatewayDebugLog string) []proxyMatcher {
 	raw = normalizeProxyConfigValue(raw)
 	switch typed := raw.(type) {
 	case []any:
 		out := []proxyMatcher{}
 		for _, item := range typed {
-			out = append(out, parseProxyMatchers(process, item, singleton, gatewayMode)...)
+			out = append(out, parseProxyMatchers(process, item, singleton, gatewayMode, gatewayDebugLog)...)
 		}
 		return out
 	case map[string]any:
-		return parseProxyMatchersFromMap(process, typed, singleton, gatewayMode)
+		return parseProxyMatchersFromMap(process, typed, singleton, gatewayMode, gatewayDebugLog)
 	default:
 		return nil
 	}
@@ -334,7 +337,7 @@ func normalizeProxyConfigValue(raw any) any {
 	}
 }
 
-func parseProxyMatchersFromMap(process string, raw map[string]any, singleton bool, gatewayMode string) []proxyMatcher {
+func parseProxyMatchersFromMap(process string, raw map[string]any, singleton bool, gatewayMode string, gatewayDebugLog string) []proxyMatcher {
 	subdomains := parseSubdomainValues(raw["subdomain"], raw["subdomains"])
 	if len(subdomains) == 0 {
 		return nil
@@ -355,15 +358,16 @@ func parseProxyMatchersFromMap(process string, raw map[string]any, singleton boo
 	out := make([]proxyMatcher, 0, len(subdomains))
 	for _, sd := range subdomains {
 		out = append(out, proxyMatcher{
-			Process:     process,
-			Subdomain:   sd.subdomain,
-			Kind:        sd.kind,
-			Path:        path,
-			Match:       match,
-			GatewayMode: gatewayMode,
-			Priority:    priority,
-			TCPListen:   tcpListen,
-			Singleton:   singleton,
+			Process:         process,
+			Subdomain:       sd.subdomain,
+			Kind:            sd.kind,
+			Path:            path,
+			Match:           match,
+			GatewayMode:     gatewayMode,
+			GatewayDebugLog: gatewayDebugLog,
+			Priority:        priority,
+			TCPListen:       tcpListen,
+			Singleton:       singleton,
 		})
 	}
 	return out

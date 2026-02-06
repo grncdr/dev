@@ -141,6 +141,9 @@ If matcher sets `tcp_listen`, daemon opens `127.0.0.1:<tcp_listen>` and forwards
   - rewrites `Set-Cookie` `Domain` values by replacing local apex with gateway public apex
   - rewrites incoming RFC cookie `$Domain` values from public apex back to local apex
   - rewrites text response bodies for local/public host mapping
+- `gateway.expose.<process>.debug_log = "<path>"`:
+  - appends full tunneled HTTP request/response transcripts to a file (response logging happens after rewrite handling)
+  - relative paths resolve from the matched process worktree directory
 - Processes not listed in `gateway.expose` reject gateway-tunneled requests.
 
 ## Gateway → Agent Flow
