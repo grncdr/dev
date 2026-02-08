@@ -52,7 +52,9 @@ func (m *Manager) SetDaemonConfig(cfg *config.DaemonConfig) {
 }
 
 type WorktreeStatus struct {
+	Project   string          `json:"project,omitempty"`
 	Slug      string          `json:"slug"`
+	Path      string          `json:"path,omitempty"`
 	Processes []ProcessStatus `json:"processes"`
 	Routing   WorktreeRouting `json:"routing,omitempty"`
 }
@@ -90,24 +92,35 @@ type processInfo struct {
 }
 
 func (m *Manager) StartWorktree(slug string) (*WorktreeStatus, error) {
-	return m.startWorktreeFromDir(slug, "", nil, true)
+	return m.startWorktreeFromRef(slug, "", "", nil, true)
 }
 
 func (m *Manager) StartWorktreeFromDir(slug, dirHint string) (*WorktreeStatus, error) {
-	return m.startWorktreeFromDir(slug, dirHint, nil, true)
+	return m.startWorktreeFromRef(slug, "", dirHint, nil, true)
+}
+
+func (m *Manager) StartWorktreeFromRef(slug, project, dirHint string) (*WorktreeStatus, error) {
+	return m.startWorktreeFromRef(slug, project, dirHint, nil, true)
 }
 
 func (m *Manager) StartProcessesFromDir(slug, dirHint string, processes []string, all bool) (*WorktreeStatus, error) {
-	return m.startWorktreeFromDir(slug, dirHint, processes, all)
+	return m.startWorktreeFromRef(slug, "", dirHint, processes, all)
 }
 
-func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string, all bool) (*WorktreeStatus, error) {
+func (m *Manager) StartProcessesFromRef(slug, project, dirHint string, processes []string, all bool) (*WorktreeStatus, error) {
+	return m.startWorktreeFromRef(slug, project, dirHint, processes, all)
+}
+
+func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes []string, all bool) (*WorktreeStatus, error) {
 	if slug == "" {
 		return nil, errors.New("slug is required")
 	}
 
-	path, err := m.resolveWorktreePath(slug, dirHint)
+	path, err := m.resolveWorktreePath(slug, project, dirHint)
 	if err != nil {
+		return nil, err
+	}
+	if err := m.ensureSlugPathCompatible(slug, path); err != nil {
 		return nil, err
 	}
 
@@ -328,21 +341,23 @@ func (m *Manager) startWorktreeFromDir(slug, dirHint string, processes []string,
 		return nil, err
 	}
 
-	return &WorktreeStatus{Slug: slug, Processes: statuses}, nil
+	return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses}, nil
 }
 
-func (m *Manager) resolveWorktreePath(slug, dirHint string) (string, error) {
+func (m *Manager) resolveWorktreePath(slug, project, dirHint string) (string, error) {
 	m.mu.Lock()
 	daemonCfg := m.daemonCfg
 	m.mu.Unlock()
-	if dirHint != "" {
-		return worktree.ResolvePathFromSlugWithRegistry(slug, dirHint, daemonCfg)
+	return worktree.ResolvePathWithProjectHint(slug, project, dirHint, daemonCfg)
+}
+
+func (m *Manager) ensureSlugPathCompatible(slug, path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing, ok := m.paths[slug]; ok && existing != "" && !sameResolvedPath(existing, path) {
+		return fmt.Errorf("worktree slug %q is already associated with %s", slug, existing)
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	return worktree.ResolvePathFromSlugWithRegistry(slug, cwd, daemonCfg)
+	return nil
 }
 
 func resolveProjectIdentifier(cfg *config.ProjectConfig) (string, error) {
@@ -505,24 +520,35 @@ func topoSortProcesses(startSet map[string]bool, needs map[string][]string) ([]s
 }
 
 func (m *Manager) StopWorktree(slug string) (*WorktreeStatus, error) {
-	return m.stopWorktreeFromDir(slug, "", nil, true)
+	return m.stopWorktreeFromRef(slug, "", "", nil, true)
 }
 
 func (m *Manager) StopWorktreeFromDir(slug, dirHint string) (*WorktreeStatus, error) {
-	return m.stopWorktreeFromDir(slug, dirHint, nil, true)
+	return m.stopWorktreeFromRef(slug, "", dirHint, nil, true)
+}
+
+func (m *Manager) StopWorktreeFromRef(slug, project, dirHint string) (*WorktreeStatus, error) {
+	return m.stopWorktreeFromRef(slug, project, dirHint, nil, true)
 }
 
 func (m *Manager) StopProcessesFromDir(slug, dirHint string, processes []string, all bool) (*WorktreeStatus, error) {
-	return m.stopWorktreeFromDir(slug, dirHint, processes, all)
+	return m.stopWorktreeFromRef(slug, "", dirHint, processes, all)
 }
 
-func (m *Manager) stopWorktreeFromDir(slug, dirHint string, processes []string, all bool) (*WorktreeStatus, error) {
+func (m *Manager) StopProcessesFromRef(slug, project, dirHint string, processes []string, all bool) (*WorktreeStatus, error) {
+	return m.stopWorktreeFromRef(slug, project, dirHint, processes, all)
+}
+
+func (m *Manager) stopWorktreeFromRef(slug, project, dirHint string, processes []string, all bool) (*WorktreeStatus, error) {
 	if slug == "" {
 		return nil, errors.New("slug is required")
 	}
 
-	path, err := m.resolveWorktreePath(slug, dirHint)
+	path, err := m.resolveWorktreePath(slug, project, dirHint)
 	if err != nil {
+		return nil, err
+	}
+	if err := m.ensureSlugPathCompatible(slug, path); err != nil {
 		return nil, err
 	}
 
@@ -556,7 +582,7 @@ func (m *Manager) stopWorktreeFromDir(slug, dirHint string, processes []string, 
 
 	statuses := []ProcessStatus{}
 	if !ok {
-		return &WorktreeStatus{Slug: slug, Processes: statuses}, nil
+		return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses}, nil
 	}
 
 	selected := selectProcesses(cfg.Processes, processes, all)
@@ -596,22 +622,43 @@ func (m *Manager) stopWorktreeFromDir(slug, dirHint string, processes []string, 
 		return nil, err
 	}
 
-	return &WorktreeStatus{Slug: slug, Processes: statuses}, nil
+	return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses}, nil
 }
 
 func (m *Manager) StatusWorktree(slug string) (*WorktreeStatus, error) {
-	return m.StatusWorktreeFromDir(slug, "")
+	return m.StatusWorktreeFromRef(slug, "", "")
 }
 
 func (m *Manager) StatusWorktreeFromDir(slug, dirHint string) (*WorktreeStatus, error) {
+	return m.StatusWorktreeFromRef(slug, "", dirHint)
+}
+
+func (m *Manager) StatusWorktreeFromRef(slug, project, dirHint string) (*WorktreeStatus, error) {
 	if slug == "" {
 		return nil, errors.New("slug is required")
 	}
 
+	path, err := m.resolveWorktreePath(slug, project, dirHint)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.ensureSlugPathCompatible(slug, path); err != nil {
+		return nil, err
+	}
+	cfgPath := filepath.Join(path, config.DefaultProjectConfig)
+	cfg, _, err := config.LoadProjectConfig(cfgPath)
+	if err != nil {
+		return nil, err
+	}
+	projectID, err := resolveProjectIdentifier(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("resolve project identifier: %w", err)
+	}
+
 	if _, ok := m.WorktreePath(slug); !ok {
-		if _, err := m.resolveWorktreePath(slug, dirHint); err != nil {
-			return nil, err
-		}
+		m.mu.Lock()
+		m.paths[slug] = path
+		m.mu.Unlock()
 	}
 
 	m.mu.Lock()
@@ -620,7 +667,7 @@ func (m *Manager) StatusWorktreeFromDir(slug, dirHint string) (*WorktreeStatus, 
 
 	statuses := []ProcessStatus{}
 	if !ok {
-		return &WorktreeStatus{Slug: slug, Processes: statuses}, nil
+		return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses}, nil
 	}
 
 	for name, info := range procs {
@@ -637,7 +684,7 @@ func (m *Manager) StatusWorktreeFromDir(slug, dirHint string) (*WorktreeStatus, 
 		statuses = append(statuses, ProcessStatus{Name: name, PID: pid, Status: status})
 	}
 
-	return &WorktreeStatus{Slug: slug, Processes: statuses}, nil
+	return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses}, nil
 }
 
 func resolveWorktreeState(project, slug string) (string, error) {

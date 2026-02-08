@@ -140,7 +140,7 @@ func (s *Server) handleWorktreeStart(w http.ResponseWriter, r *http.Request) {
 		writeErrorWithCode(w, http.StatusBadRequest, "missing_slug", errors.New("slug is required"))
 		return
 	}
-	resp, err := s.manager.StartWorktreeFromDir(req.Slug, req.Path)
+	resp, err := s.manager.StartWorktreeFromRef(req.Slug, req.Project, req.Path)
 	if err != nil {
 		writeErrorWithCode(w, http.StatusBadRequest, "start_failed", err)
 		return
@@ -158,7 +158,7 @@ func (s *Server) handleProcessStart(w http.ResponseWriter, r *http.Request) {
 		writeErrorWithCode(w, http.StatusBadRequest, "missing_slug", errors.New("slug is required"))
 		return
 	}
-	resp, err := s.manager.StartProcessesFromDir(req.Slug, req.Path, req.Processes, req.All)
+	resp, err := s.manager.StartProcessesFromRef(req.Slug, req.Project, req.Path, req.Processes, req.All)
 	if err != nil {
 		writeErrorWithCode(w, http.StatusBadRequest, "start_failed", err)
 		return
@@ -176,7 +176,7 @@ func (s *Server) handleWorktreeStop(w http.ResponseWriter, r *http.Request) {
 		writeErrorWithCode(w, http.StatusBadRequest, "missing_slug", errors.New("slug is required"))
 		return
 	}
-	resp, err := s.manager.StopWorktreeFromDir(req.Slug, req.Path)
+	resp, err := s.manager.StopWorktreeFromRef(req.Slug, req.Project, req.Path)
 	if err != nil {
 		writeErrorWithCode(w, http.StatusBadRequest, "stop_failed", err)
 		return
@@ -194,7 +194,7 @@ func (s *Server) handleProcessStop(w http.ResponseWriter, r *http.Request) {
 		writeErrorWithCode(w, http.StatusBadRequest, "missing_slug", errors.New("slug is required"))
 		return
 	}
-	resp, err := s.manager.StopProcessesFromDir(req.Slug, req.Path, req.Processes, req.All)
+	resp, err := s.manager.StopProcessesFromRef(req.Slug, req.Project, req.Path, req.Processes, req.All)
 	if err != nil {
 		writeErrorWithCode(w, http.StatusBadRequest, "stop_failed", err)
 		return
@@ -212,12 +212,12 @@ func (s *Server) handleWorktreeStatus(w http.ResponseWriter, r *http.Request) {
 		writeErrorWithCode(w, http.StatusBadRequest, "missing_slug", errors.New("slug is required"))
 		return
 	}
-	resp, err := s.manager.StatusWorktreeFromDir(req.Slug, req.Path)
+	resp, err := s.manager.StatusWorktreeFromRef(req.Slug, req.Project, req.Path)
 	if err != nil {
 		writeErrorWithCode(w, http.StatusBadRequest, "status_failed", err)
 		return
 	}
-	resp.Routing = s.routingStatusForWorktree(req.Slug, req.Path)
+	resp.Routing = s.routingStatusForWorktree(req.Slug, req.Project, req.Path)
 	writeJSON(w, http.StatusOK, resp)
 }
 

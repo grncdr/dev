@@ -7,6 +7,7 @@ type HealthResponse struct {
 
 type WorktreeRequest struct {
 	Slug      string   `json:"slug"`
+	Project   string   `json:"project,omitempty"`
 	Path      string   `json:"path,omitempty"`
 	Processes []string `json:"processes,omitempty"`
 	All       bool     `json:"all,omitempty"`

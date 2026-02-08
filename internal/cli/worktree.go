@@ -74,6 +74,7 @@ func runWorktreeStart(targetArgs []string, opts *Options) error {
 	client := daemon.NewClient(socketPath)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+	cwd := workingDir(opts)
 
 	targets, err := resolveProcessTargets(targetArgs, opts)
 	if err != nil {
@@ -81,7 +82,7 @@ func runWorktreeStart(targetArgs []string, opts *Options) error {
 	}
 	for i, slug := range sortedTargetSlugs(targets) {
 		target := targets[slug]
-		resp, err := client.ProcessStart(ctx, slug, target.processList(), target.all)
+		resp, err := client.ProcessStartForTarget(ctx, slug, target.project, cwd, target.processList(), target.all)
 		if err != nil {
 			return err
 		}
@@ -106,6 +107,7 @@ func runWorktreeStop(targetArgs []string, opts *Options) error {
 	client := daemon.NewClient(socketPath)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+	cwd := workingDir(opts)
 
 	targets, err := resolveProcessTargets(targetArgs, opts)
 	if err != nil {
@@ -113,7 +115,7 @@ func runWorktreeStop(targetArgs []string, opts *Options) error {
 	}
 	for i, slug := range sortedTargetSlugs(targets) {
 		target := targets[slug]
-		resp, err := client.ProcessStop(ctx, slug, target.processList(), target.all)
+		resp, err := client.ProcessStopForTarget(ctx, slug, target.project, cwd, target.processList(), target.all)
 		if err != nil {
 			return err
 		}
@@ -141,15 +143,30 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 	if err != nil {
 		return err
 	}
-	daemonCfg, err := loadDaemonConfig(opts)
-	if err != nil {
-		return err
-	}
+	daemonCfg, _ := loadDaemonConfig(opts)
 	mainStatusByWorktree := map[string]*daemon.WorktreeStatus{}
 	cwd := workingDir(opts)
 
 	for i, slug := range sortedTargetSlugs(targets) {
-		projectPath, _ := worktree.ResolvePathFromSlugWithRegistry(slug, cwd, daemonCfg)
+		target := targets[slug]
+		projectPath := ""
+		projectName := target.project
+		var status *daemon.WorktreeStatus
+		if daemonUp {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			resp, err := client.WorktreeStatusForTarget(ctx, slug, target.project, cwd)
+			cancel()
+			if err == nil {
+				status = filterWorktreeStatus(resp, target)
+				projectPath = strings.TrimSpace(resp.Path)
+				if strings.TrimSpace(resp.Project) != "" {
+					projectName = strings.TrimSpace(resp.Project)
+				}
+			}
+		}
+		if projectPath == "" {
+			projectPath, _ = worktree.ResolvePathWithProjectHint(slug, target.project, cwd, daemonCfg)
+		}
 		var cfg *config.ProjectConfig
 		if projectPath != "" {
 			cfgPath := filepath.Join(projectPath, config.DefaultProjectConfig)
@@ -157,27 +174,25 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 				cfg = loaded
 			}
 		}
+		if projectName == "" && cfg != nil {
+			projectName = strings.TrimSpace(cfg.Project.Name)
+		}
 		if i > 0 {
 			fmt.Println()
-		}
-		var status *daemon.WorktreeStatus
-		if daemonUp {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			resp, err := client.WorktreeStatus(ctx, slug)
-			cancel()
-			if err == nil {
-				status = filterWorktreeStatus(resp, targets[slug])
-			}
 		}
 		mainStatus := status
 		mainSlug := mainWorktreeSlug(cfg)
 		if daemonUp && shouldUseMainWorktreeStatus(cfg, projectPath) {
-			cacheKey := projectPath + "\x00" + mainSlug
+			cacheKey := projectName + "\x00" + projectPath + "\x00" + mainSlug
 			if cached, ok := mainStatusByWorktree[cacheKey]; ok {
 				mainStatus = cached
 			} else {
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				resp, err := client.WorktreeStatus(ctx, mainSlug)
+				hintPath := cwd
+				if projectPath != "" {
+					hintPath = projectPath
+				}
+				resp, err := client.WorktreeStatusForTarget(ctx, mainSlug, projectName, hintPath)
 				cancel()
 				if err == nil {
 					mainStatus = resp
@@ -185,7 +200,7 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 				mainStatusByWorktree[cacheKey] = mainStatus
 			}
 		}
-		printWorktreeDetailedStatus(slug, projectPath, cfg, status, mainStatus, daemonUp, targets[slug])
+		printWorktreeDetailedStatus(slug, projectPath, projectName, cfg, status, mainStatus, daemonUp, target)
 	}
 	return nil
 }
@@ -231,7 +246,13 @@ func filterWorktreeStatus(status *daemon.WorktreeStatus, target *processTarget) 
 		GatewayURL:    status.Routing.GatewayURL,
 		GatewayStatus: status.Routing.GatewayStatus,
 	}
-	return &daemon.WorktreeStatus{Slug: status.Slug, Processes: filtered, Routing: filteredRouting}
+	return &daemon.WorktreeStatus{
+		Project:   status.Project,
+		Slug:      status.Slug,
+		Path:      status.Path,
+		Processes: filtered,
+		Routing:   filteredRouting,
+	}
 }
 
 func samePath(a, b string) bool {
@@ -258,10 +279,12 @@ func canonicalPath(path string) (string, error) {
 	return resolved, nil
 }
 
-func printWorktreeDetailedStatus(slug, projectPath string, cfg *config.ProjectConfig, status, mainStatus *daemon.WorktreeStatus, daemonUp bool, target *processTarget) {
+func printWorktreeDetailedStatus(slug, projectPath, projectNameHint string, cfg *config.ProjectConfig, status, mainStatus *daemon.WorktreeStatus, daemonUp bool, target *processTarget) {
 	projectName := "(unknown)"
 	if cfg != nil && strings.TrimSpace(cfg.Project.Name) != "" {
 		projectName = cfg.Project.Name
+	} else if strings.TrimSpace(projectNameHint) != "" {
+		projectName = strings.TrimSpace(projectNameHint)
 	}
 	fmt.Printf("Project: %s\n", projectName)
 	worktreePath := projectPath
@@ -568,6 +591,7 @@ func resolveSlug(opts *Options, arg string) (string, error) {
 }
 
 type processTarget struct {
+	project   string
 	all       bool
 	processes map[string]bool
 }
@@ -619,8 +643,10 @@ func resolveProcessTargets(args []string, opts *Options) (map[string]*processTar
 		}
 		target, ok := targets[slug]
 		if !ok {
-			target = &processTarget{processes: map[string]bool{}}
+			target = &processTarget{project: id.Project, processes: map[string]bool{}}
 			targets[slug] = target
+		} else if target.project != id.Project {
+			return nil, fmt.Errorf("conflicting project qualifiers for worktree %q", slug)
 		}
 		if id.Process == "*" {
 			target.all = true

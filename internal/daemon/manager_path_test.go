@@ -38,7 +38,7 @@ func TestResolveWorktreePathPrefersDirHint(t *testing.T) {
 	}
 	slug := "main"
 	m := NewManager()
-	path, err := m.resolveWorktreePath(slug, hint)
+	path, err := m.resolveWorktreePath(slug, "", hint)
 	if err != nil {
 		t.Fatalf("resolveWorktreePath: %v", err)
 	}
@@ -115,7 +115,7 @@ main_slug = "primary"
 	}
 
 	m := NewManager()
-	gotMain, err := m.resolveWorktreePath("main", repo)
+	gotMain, err := m.resolveWorktreePath("main", "", repo)
 	if err != nil {
 		t.Fatalf("resolve main alias: %v", err)
 	}
@@ -125,7 +125,7 @@ main_slug = "primary"
 		t.Fatalf("main alias resolved %s, want %s", gotMainResolved, want)
 	}
 
-	gotConfigured, err := m.resolveWorktreePath("primary", repo)
+	gotConfigured, err := m.resolveWorktreePath("primary", "", repo)
 	if err != nil {
 		t.Fatalf("resolve configured main alias: %v", err)
 	}

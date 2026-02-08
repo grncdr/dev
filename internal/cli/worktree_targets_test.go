@@ -25,6 +25,9 @@ func TestResolveProcessTargetsExplicit(t *testing.T) {
 	if feature == nil || feature.all {
 		t.Fatalf("expected specific processes for feature")
 	}
+	if feature.project != "proj" {
+		t.Fatalf("expected project proj, got %q", feature.project)
+	}
 	list := feature.processList()
 	if len(list) != 2 || list[0] != "rails" || list[1] != "webpack" {
 		t.Fatalf("unexpected process list: %+v", list)
@@ -32,6 +35,16 @@ func TestResolveProcessTargetsExplicit(t *testing.T) {
 	other := targets["other"]
 	if other == nil || !other.all {
 		t.Fatalf("expected wildcard target for other")
+	}
+}
+
+func TestResolveProcessTargetsConflictingProjectQualifiers(t *testing.T) {
+	_, err := resolveProcessTargets([]string{
+		"proj-a:feature:rails",
+		"proj-b:feature:worker",
+	}, nil)
+	if err == nil {
+		t.Fatalf("expected conflict error")
 	}
 }
 

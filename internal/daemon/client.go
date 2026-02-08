@@ -41,23 +41,43 @@ func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
 }
 
 func (c *Client) WorktreeStart(ctx context.Context, slug string) (*WorktreeStatus, error) {
-	return c.worktreeAction(ctx, "/worktrees/start", slug)
+	return c.worktreeAction(ctx, "/worktrees/start", slug, "", "")
+}
+
+func (c *Client) WorktreeStartForTarget(ctx context.Context, slug, project, path string) (*WorktreeStatus, error) {
+	return c.worktreeAction(ctx, "/worktrees/start", slug, project, path)
 }
 
 func (c *Client) WorktreeStop(ctx context.Context, slug string) (*WorktreeStatus, error) {
-	return c.worktreeAction(ctx, "/worktrees/stop", slug)
+	return c.worktreeAction(ctx, "/worktrees/stop", slug, "", "")
+}
+
+func (c *Client) WorktreeStopForTarget(ctx context.Context, slug, project, path string) (*WorktreeStatus, error) {
+	return c.worktreeAction(ctx, "/worktrees/stop", slug, project, path)
 }
 
 func (c *Client) WorktreeStatus(ctx context.Context, slug string) (*WorktreeStatus, error) {
-	return c.worktreeAction(ctx, "/worktrees/status", slug)
+	return c.worktreeAction(ctx, "/worktrees/status", slug, "", "")
+}
+
+func (c *Client) WorktreeStatusForTarget(ctx context.Context, slug, project, path string) (*WorktreeStatus, error) {
+	return c.worktreeAction(ctx, "/worktrees/status", slug, project, path)
 }
 
 func (c *Client) ProcessStart(ctx context.Context, slug string, processes []string, all bool) (*WorktreeStatus, error) {
-	return c.processAction(ctx, "/processes/start", slug, processes, all)
+	return c.processAction(ctx, "/processes/start", slug, "", "", processes, all)
+}
+
+func (c *Client) ProcessStartForTarget(ctx context.Context, slug, project, path string, processes []string, all bool) (*WorktreeStatus, error) {
+	return c.processAction(ctx, "/processes/start", slug, project, path, processes, all)
 }
 
 func (c *Client) ProcessStop(ctx context.Context, slug string, processes []string, all bool) (*WorktreeStatus, error) {
-	return c.processAction(ctx, "/processes/stop", slug, processes, all)
+	return c.processAction(ctx, "/processes/stop", slug, "", "", processes, all)
+}
+
+func (c *Client) ProcessStopForTarget(ctx context.Context, slug, project, path string, processes []string, all bool) (*WorktreeStatus, error) {
+	return c.processAction(ctx, "/processes/stop", slug, project, path, processes, all)
 }
 
 func (c *Client) Shutdown(ctx context.Context) error {
@@ -88,10 +108,12 @@ func (c *Client) TunnelsStatus(ctx context.Context) (*TunnelsResponse, error) {
 	return &resp, nil
 }
 
-func (c *Client) worktreeAction(ctx context.Context, path, slug string) (*WorktreeStatus, error) {
+func (c *Client) worktreeAction(ctx context.Context, path, slug, project, dirHint string) (*WorktreeStatus, error) {
 	var resp WorktreeStatus
-	req := WorktreeRequest{Slug: slug}
-	if cwd, err := os.Getwd(); err == nil {
+	req := WorktreeRequest{Slug: slug, Project: project}
+	if dirHint != "" {
+		req.Path = dirHint
+	} else if cwd, err := os.Getwd(); err == nil {
 		req.Path = cwd
 	}
 	if err := c.doJSON(ctx, http.MethodPost, path, req, &resp); err != nil {
@@ -100,10 +122,12 @@ func (c *Client) worktreeAction(ctx context.Context, path, slug string) (*Worktr
 	return &resp, nil
 }
 
-func (c *Client) processAction(ctx context.Context, path, slug string, processes []string, all bool) (*WorktreeStatus, error) {
+func (c *Client) processAction(ctx context.Context, path, slug, project, dirHint string, processes []string, all bool) (*WorktreeStatus, error) {
 	var resp WorktreeStatus
-	req := WorktreeRequest{Slug: slug, Processes: processes, All: all}
-	if cwd, err := os.Getwd(); err == nil {
+	req := WorktreeRequest{Slug: slug, Project: project, Processes: processes, All: all}
+	if dirHint != "" {
+		req.Path = dirHint
+	} else if cwd, err := os.Getwd(); err == nil {
 		req.Path = cwd
 	}
 	if err := c.doJSON(ctx, http.MethodPost, path, req, &resp); err != nil {

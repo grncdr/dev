@@ -10,8 +10,8 @@ import (
 	"dev/internal/worktree"
 )
 
-func (s *Server) routingStatusForWorktree(slug, dirHint string) WorktreeRouting {
-	cfg, _, err := s.projectConfigForWorktreeStatus(slug, dirHint)
+func (s *Server) routingStatusForWorktree(slug, project, dirHint string) WorktreeRouting {
+	cfg, _, err := s.projectConfigForWorktreeStatus(slug, project, dirHint)
 	if err != nil || cfg == nil {
 		return WorktreeRouting{}
 	}
@@ -36,8 +36,8 @@ func (s *Server) routingStatusForWorktree(slug, dirHint string) WorktreeRouting 
 	return routing
 }
 
-func (s *Server) projectConfigForWorktreeStatus(slug, dirHint string) (*config.ProjectConfig, string, error) {
-	path, err := s.manager.resolveWorktreePath(slug, dirHint)
+func (s *Server) projectConfigForWorktreeStatus(slug, project, dirHint string) (*config.ProjectConfig, string, error) {
+	path, err := s.manager.resolveWorktreePath(slug, project, dirHint)
 	if err != nil {
 		return nil, "", err
 	}
