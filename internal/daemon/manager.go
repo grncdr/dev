@@ -258,6 +258,7 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Dir = path
 		cmd.Env = append(os.Environ(), procenv.FormatEnv(runtimeVars)...)
+		configureManagedProcess(cmd)
 
 		if envVars, ok := proc["env"].(map[string]any); ok {
 			for key, raw := range envVars {
@@ -1102,11 +1103,11 @@ func stopManagedProcess(info *processInfo) {
 		info.idleTimer = nil
 	}
 	info.mu.Unlock()
-	_ = info.cmd.Process.Signal(os.Interrupt)
+	_ = interruptManagedProcess(info.cmd)
 
 	select {
 	case <-time.After(2 * time.Second):
-		_ = info.cmd.Process.Kill()
+		_ = killManagedProcess(info.cmd)
 		<-info.exited
 	case <-info.exited:
 	}
