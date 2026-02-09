@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/creack/pty"
 )
 
 func TestStopManagedProcessSignalsProcessGroup(t *testing.T) {
@@ -20,9 +22,13 @@ func TestStopManagedProcessSignalsProcessGroup(t *testing.T) {
 	cmd := exec.Command("sh", "-c", script)
 	cmd.Env = append(os.Environ(), "CHILD_PID_FILE="+pidFile)
 	configureManagedProcess(cmd)
-	if err := cmd.Start(); err != nil {
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
 		t.Fatalf("start process: %v", err)
 	}
+	t.Cleanup(func() {
+		_ = ptmx.Close()
+	})
 
 	info := &processInfo{
 		cmd:    cmd,
