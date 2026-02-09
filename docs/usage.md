@@ -133,8 +133,12 @@ Installs DNS, certs, and proxy privileges (requires sudo).
 ### `dev gateway run`
 Runs the gateway in the foreground.
 
-### `dev gateway invite create [--ttl 5m] [--uses 1]`
-Creates an invite code for onboarding a new agent identity.
+### `dev gateway init [--ttl 5m] [--uses 1]`
+Initializes gateway state and prints a bootstrap invite code.
 
 ### `dev gateway login <invite-code> [--name <name>] [--gateway-url <url>]`
 Exchanges an invite code for client certificate credentials and stores them locally.
+
+### `dev gateway invite [--ttl 5m] [--uses 1] [--gateway-url <url>]`
+Creates an invite code through an established gateway connection.
+Defaults to project `gateway.url`; fails if no gateway URL is configured.

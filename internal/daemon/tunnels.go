@@ -3,19 +3,15 @@ package daemon
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	"dev/internal/config"
 	"dev/internal/gateway"
 )
 
@@ -74,7 +70,7 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 	}
 	s.tunnels[req.Label] = mt
 
-	gatewayClient, gatewayTLS, err := gatewayMTLSClient(req.GatewayURL, s.daemonConfig)
+	gatewayClient, gatewayTLS, err := gateway.MTLSClientForGatewayURL(req.GatewayURL, s.daemonConfig)
 	if err != nil {
 		delete(s.tunnels, req.Label)
 		return nil, err
@@ -142,67 +138,6 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 		Project:    req.Project,
 		Status:     mt.status,
 	}, nil
-}
-
-func gatewayMTLSClient(gatewayURL string, daemonCfg *config.DaemonConfig) (*http.Client, *tls.Config, error) {
-	parsed, err := url.Parse(strings.TrimSpace(gatewayURL))
-	if err != nil {
-		return nil, nil, err
-	}
-	if parsed.Scheme != "https" {
-		return nil, nil, nil
-	}
-	host := parsed.Hostname()
-	if host == "" {
-		return nil, nil, errors.New("gateway URL host is required")
-	}
-	credDir, err := gatewayCredentialDir(host)
-	if err != nil {
-		return nil, nil, err
-	}
-	keyPath := filepath.Join(credDir, "client-key.pem")
-	certPath := filepath.Join(credDir, "client.pem")
-	caPath := filepath.Join(credDir, "ca.pem")
-	if _, err := os.Stat(keyPath); err != nil {
-		return nil, nil, fmt.Errorf("missing gateway credentials for %s (run dev gateway login --gateway-url %s)", host, gatewayURL)
-	}
-	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("load gateway client certificate: %w", err)
-	}
-	caPEM, err := os.ReadFile(caPath)
-	if err != nil {
-		return nil, nil, fmt.Errorf("read gateway CA certificate: %w", err)
-	}
-	// Start from system roots so public CA-signed gateway certs continue to verify.
-	rootCAs, err := x509.SystemCertPool()
-	if err != nil || rootCAs == nil {
-		rootCAs = x509.NewCertPool()
-	}
-	if ok := rootCAs.AppendCertsFromPEM(caPEM); !ok {
-		return nil, nil, errors.New("invalid gateway CA certificate")
-	}
-	tlsCfg := &tls.Config{
-		MinVersion:   tls.VersionTLS12,
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      rootCAs,
-		ServerName:   host,
-	}
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: tlsCfg,
-		},
-	}
-	return client, tlsCfg, nil
-}
-
-func gatewayCredentialDir(host string) (string, error) {
-	stateDir, err := config.ResolveStateDir(nil)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(stateDir, "gateway", "agent-credentials", host), nil
 }
 
 func tunnelHTTPClient(upstream string) *http.Client {

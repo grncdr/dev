@@ -127,6 +127,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	mux.HandleFunc("/_agent/register", s.handleAgentRegister)
 	mux.HandleFunc("/_agent/heartbeat", s.handleAgentHeartbeat)
 	mux.HandleFunc("/_agent/unregister", s.handleAgentUnregister)
+	mux.HandleFunc("/_agent/invites/create", s.handleAgentInviteCreate)
 	mux.HandleFunc("/_agent/cert/issue", s.handleAgentCertIssue)
 	mux.HandleFunc("/_agent/tunnel/", s.handleAgentTunnel)
 	mux.HandleFunc("/_admin/invites/create", s.handleAdminInviteCreate)
@@ -302,6 +303,17 @@ func (s *Server) handleAgentUnregister(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminInviteCreate(w http.ResponseWriter, r *http.Request) {
+	s.handleInviteCreate(w, r)
+}
+
+func (s *Server) handleAgentInviteCreate(w http.ResponseWriter, r *http.Request) {
+	if !s.ensureAgentAuth(w, r) {
+		return
+	}
+	s.handleInviteCreate(w, r)
+}
+
+func (s *Server) handleInviteCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeMethodNotAllowed(w)
 		return

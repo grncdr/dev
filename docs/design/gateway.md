@@ -88,7 +88,8 @@ Goal: zero browser/OIDC setup for day-to-day team onboarding.
 ### Invite flow
 
 1. Admin creates invite:
-   - `dev gateway invite create`
+   - Bootstrap: `dev gateway init` (on gateway host)
+   - Ongoing: `dev gateway invite` (from any connected agent)
    - Defaults: single-use, TTL 5 minutes.
 2. Teammate logs in with invite code:
    - `dev gateway login <invite-code> [--name <name>] --gateway-url <url>`
@@ -135,6 +136,7 @@ Proposed endpoints:
 - `POST /_agent/unregister`
 - `CONNECT /_agent/tunnel/{label}` or bidirectional stream endpoint
 - `GET /_registry/labels` (already planned; global label registry)
+- `POST /_agent/invites/create` (agent-authenticated invite creation)
 - `POST /_agent/cert/issue` (invite + CSR -> cert chain)
 - `POST /_agent/cert/renew` (renew short-lived cert)
 

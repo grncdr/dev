@@ -709,7 +709,7 @@ func TestServer_IssuesCertFromInvite(t *testing.T) {
 	client := &http.Client{Timeout: 2 * time.Second}
 
 	inviteReq := bytes.NewBufferString(`{"ttl_seconds":300,"uses":1}`)
-	resp, err := client.Post("http://"+srv.Addr()+"/_admin/invites/create", "application/json", inviteReq)
+	resp, err := client.Post("http://"+srv.Addr()+"/_agent/invites/create", "application/json", inviteReq)
 	if err != nil {
 		t.Fatalf("create invite: %v", err)
 	}

@@ -15,7 +15,9 @@ The gateway is a public-facing server that allows you to share your local develo
 3. Requests to `<label>.example.com` are forwarded through the tunnel to the local daemon
 4. The local daemon routes the request using the same proxy rules as local development
 
-## Configuring the gateway
+## Setting up the gateway
+
+This is generally done once per organization.
 
 The gateway requires configuration in `daemon.toml` (see `docs/config.md`):
 
@@ -35,13 +37,41 @@ The above config configures the gateway to be reachable at `tunnels.example.com`
 
 The gateway terminates TLS itself using certificates from Let's Encrypt. It should **not** be run behind a reverse proxy like nginx or Caddy—run it directly on a server with ports 80 and 443 available.
 
-To start the gateway:
+Initialize gateway state and print a bootstrap invite code:
+
+```bash
+dev gateway init
+```
+
+Start the gateway:
 
 ```bash
 dev gateway run
 ```
 
-## Configuring your project
+## Setting up each agent
+
+This is done once per team member.
+
+Generate an invite code:
+
+```bash
+dev gateway invite
+```
+
+Use the bootstrap invite from `dev gateway init` for the first agent login; after that, any connected agent can run `dev gateway invite` to issue more invites.
+
+Redeem the invite to get credentials:
+
+```bash
+dev gateway login <invite-code>
+```
+
+This generates a client certificate stored locally, enabling secure tunnel connections.
+
+## Setting up each project
+
+This is done for each project that should be shared through the gateway.
 
 Configure the gateway server in the project `.dev.toml`:
 
@@ -78,22 +108,6 @@ dev share --label 'cool-feature'
 ```
 
 The label is prepended to the gateway servers configured `dns_zone` ("wip.example.com" above) to make your service available at https://cool-feature.wip.example.com
-
-## Onboarding team members
-
-Create an invite code on the gateway server:
-
-```bash
-dev gateway invite create
-```
-
-Team members redeem the invite to get credentials:
-
-```bash
-dev gateway login <invite-code>
-```
-
-This generates a client certificate stored locally, enabling secure tunnel connections.
 
 ## Server state
 

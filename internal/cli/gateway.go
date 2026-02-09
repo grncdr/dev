@@ -40,28 +40,24 @@ func newGatewayCmd(opts *Options) *cobra.Command {
 			return runGateway(opts)
 		},
 	})
+	cmd.AddCommand(newGatewayInitCmd(opts))
 	cmd.AddCommand(newGatewayInviteCmd(opts))
 	cmd.AddCommand(newGatewayLoginCmd(opts))
 	return cmd
 }
 
-func newGatewayInviteCmd(opts *Options) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "invite",
-		Short: "manage gateway invites",
-	}
+func newGatewayInitCmd(opts *Options) *cobra.Command {
 	var ttl time.Duration
 	var uses int
-	create := &cobra.Command{
-		Use:   "create",
-		Short: "create an invite code",
+	cmd := &cobra.Command{
+		Use:   "init",
+		Short: "initialize gateway state and print a bootstrap invite code",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runGatewayInviteCreate(opts, ttl, uses)
+			return runGatewayInit(opts, ttl, uses)
 		},
 	}
-	create.Flags().DurationVar(&ttl, "ttl", 5*time.Minute, "invite TTL")
-	create.Flags().IntVar(&uses, "uses", 1, "number of uses")
-	cmd.AddCommand(create)
+	cmd.Flags().DurationVar(&ttl, "ttl", 5*time.Minute, "invite TTL")
+	cmd.Flags().IntVar(&uses, "uses", 1, "number of uses")
 	return cmd
 }
 
@@ -229,8 +225,8 @@ func buildGatewayACME(ctx context.Context, daemonCfg *config.DaemonConfig, dataD
 	return manager, tlsConfig, nil
 }
 
-func runGatewayInviteCreate(opts *Options, ttl time.Duration, uses int) error {
-	daemonCfg, _, err := config.LoadDaemonConfig(opts.ResolvedPaths.DaemonConfig)
+func runGatewayInit(opts *Options, ttl time.Duration, uses int) error {
+	daemonCfg, err := loadDaemonConfig(opts)
 	if err != nil {
 		return err
 	}
@@ -246,7 +242,8 @@ func runGatewayInviteCreate(opts *Options, ttl time.Duration, uses int) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("invite code: %s\n", invite.Code)
+	fmt.Printf("gateway state initialized at %s\n", dataDir)
+	fmt.Printf("bootstrap invite code: %s\n", invite.Code)
 	fmt.Printf("expires at: %s\n", invite.ExpiresAt.Format(time.RFC3339))
 	fmt.Printf("uses: %d\n", invite.UsesLeft)
 	return nil
@@ -302,7 +299,7 @@ func runGatewayLogin(opts *Options, inviteCode, name, gatewayURL string) error {
 	if out.CertPEM == "" || out.CAPEM == "" {
 		return errors.New("gateway returned empty certificate material")
 	}
-	credDir, err := gatewayCredentialDir(gatewayURL)
+	credDir, err := config.ResolveGatewayCredentialDirForURL(nil, gatewayURL)
 	if err != nil {
 		return err
 	}
@@ -343,8 +340,7 @@ func resolveGatewayURLForLogin(opts *Options, explicit string) string {
 	if err != nil || projectCfg == nil {
 		return ""
 	}
-	raw, _ := projectCfg.Gateway["url"].(string)
-	return strings.TrimSpace(raw)
+	return config.ProjectGatewayURL(projectCfg)
 }
 
 func generateGatewayCSR(name string) (*ecdsa.PrivateKey, []byte, error) {
@@ -360,22 +356,6 @@ func generateGatewayCSR(name string) (*ecdsa.PrivateKey, []byte, error) {
 	}
 	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
 	return key, csrPEM, nil
-}
-
-func gatewayCredentialDir(gatewayURL string) (string, error) {
-	stateDir, err := config.ResolveStateDir(nil)
-	if err != nil {
-		return "", err
-	}
-	u, err := url.Parse(gatewayURL)
-	if err != nil {
-		return "", err
-	}
-	host := u.Hostname()
-	if host == "" {
-		host = "gateway"
-	}
-	return filepath.Join(stateDir, "gateway", "agent-credentials", host), nil
 }
 
 func listenLooksTLS(listen string) bool {

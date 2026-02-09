@@ -51,7 +51,8 @@ When omitted, `start|stop|restart|status` operate on all processes in the curren
 - `dev share [slug] [--label <label>]`
 - `dev unshare [slug]`
 - `dev gateway run`
-- `dev gateway invite create`
+- `dev gateway init`
+- `dev gateway invite`
 - `dev gateway login <invite-code> [--name <name>] [--gateway-url <url>]`
 
 ### Local Machine Setup

@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -203,6 +204,38 @@ func ResolveGatewayDataDir(cfg *DaemonConfig) (string, error) {
 		return "", err
 	}
 	return filepath.Join(stateDir, "gateway"), nil
+}
+
+func ProjectGatewayURL(cfg *ProjectConfig) string {
+	if cfg == nil || cfg.Gateway == nil {
+		return ""
+	}
+	raw, _ := cfg.Gateway["url"].(string)
+	return strings.TrimSpace(raw)
+}
+
+func ResolveGatewayCredentialDir(cfg *DaemonConfig, host string) (string, error) {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return "", errors.New("gateway host is required")
+	}
+	stateDir, err := ResolveStateDir(cfg)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(stateDir, "gateway", "agent-credentials", host), nil
+}
+
+func ResolveGatewayCredentialDirForURL(cfg *DaemonConfig, gatewayURL string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(gatewayURL))
+	if err != nil {
+		return "", err
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return "", errors.New("gateway URL host is required")
+	}
+	return ResolveGatewayCredentialDir(cfg, host)
 }
 
 func ResolveWorktreeDir(cfg *DaemonConfig) (string, error) {

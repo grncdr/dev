@@ -142,6 +142,39 @@ func TestResolveGatewayDataDir(t *testing.T) {
 	}
 }
 
+func TestProjectGatewayURL(t *testing.T) {
+	cfg := &ProjectConfig{Gateway: map[string]any{"url": " https://gw.example.test "}}
+	if got := ProjectGatewayURL(cfg); got != "https://gw.example.test" {
+		t.Fatalf("expected gateway url, got %q", got)
+	}
+}
+
+func TestResolveGatewayCredentialDir(t *testing.T) {
+	base := t.TempDir()
+	cfg := &DaemonConfig{StateDir: base}
+	got, err := ResolveGatewayCredentialDir(cfg, "gw.example.test")
+	if err != nil {
+		t.Fatalf("ResolveGatewayCredentialDir: %v", err)
+	}
+	want := filepath.Join(base, "gateway", "agent-credentials", "gw.example.test")
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestResolveGatewayCredentialDirForURL(t *testing.T) {
+	base := t.TempDir()
+	cfg := &DaemonConfig{StateDir: base}
+	got, err := ResolveGatewayCredentialDirForURL(cfg, "https://gw.example.test:8443/path")
+	if err != nil {
+		t.Fatalf("ResolveGatewayCredentialDirForURL: %v", err)
+	}
+	want := filepath.Join(base, "gateway", "agent-credentials", "gw.example.test")
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
 func TestResolveWorktreeDir_Default(t *testing.T) {
 	base := t.TempDir()
 	old := os.Getenv("DEV_STATE_DIR")
