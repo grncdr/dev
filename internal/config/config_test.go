@@ -149,6 +149,41 @@ func TestProjectGatewayURL(t *testing.T) {
 	}
 }
 
+func TestProjectGatewayAuthCredentials(t *testing.T) {
+	cfg := &ProjectConfig{
+		Gateway: map[string]any{
+			"auth": map[string]any{
+				"username": "alice",
+				"password": "secret",
+			},
+		},
+	}
+	creds, enabled, err := ProjectGatewayAuthCredentials(cfg)
+	if err != nil {
+		t.Fatalf("ProjectGatewayAuthCredentials: %v", err)
+	}
+	if !enabled {
+		t.Fatalf("expected auth defaults to be enabled")
+	}
+	if creds.Username != "alice" || creds.Password != "secret" {
+		t.Fatalf("unexpected credentials: %+v", creds)
+	}
+}
+
+func TestProjectGatewayAuthCredentials_RequiresBothFields(t *testing.T) {
+	cfg := &ProjectConfig{
+		Gateway: map[string]any{
+			"auth": map[string]any{
+				"username": "alice",
+			},
+		},
+	}
+	_, _, err := ProjectGatewayAuthCredentials(cfg)
+	if err == nil {
+		t.Fatalf("expected incomplete auth config error")
+	}
+}
+
 func TestResolveGatewayCredentialDir(t *testing.T) {
 	base := t.TempDir()
 	cfg := &DaemonConfig{StateDir: base}

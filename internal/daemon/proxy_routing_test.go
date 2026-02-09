@@ -79,6 +79,34 @@ func TestLocalProxyHostForTunnelRequest(t *testing.T) {
 	}
 }
 
+func TestLocalProxyRouteForTunnelRequest_IncludesAuthCredentials(t *testing.T) {
+	s := &Server{
+		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
+		tunnels: map[string]*managedTunnel{
+			"xyzz": {
+				req: TunnelRequest{
+					Slug:         "feature-branch",
+					Label:        "xyzz",
+					AuthUsername: "alice",
+					AuthPassword: "secret",
+				},
+				status: "connected",
+			},
+		},
+	}
+
+	route, ok := s.localProxyRouteForTunnelRequest("xyzz.foocorp.dev")
+	if !ok {
+		t.Fatalf("expected route")
+	}
+	if route.LocalHost != "feature-branch.localhost" {
+		t.Fatalf("expected rewritten host, got %q", route.LocalHost)
+	}
+	if route.AuthUsername != "alice" || route.AuthPassword != "secret" {
+		t.Fatalf("expected auth credentials from tunnel request, got %+v", route)
+	}
+}
+
 func TestLocalProxyHostForTunnelRequest_UsesDNSRemap(t *testing.T) {
 	base := t.TempDir()
 	repo := filepath.Join(base, "monorepo")

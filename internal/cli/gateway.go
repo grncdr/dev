@@ -110,7 +110,6 @@ func runGateway(opts *Options) error {
 		ListenAddr: listen,
 		DataDir:    dataDir,
 		DNSZone:    dnsZone,
-		Auth:       daemonCfg.Gateway.Auth,
 		DNS:        dnsProvider,
 		Certs:      certProvisioner,
 		TLSConfig:  tlsConfig,
@@ -125,9 +124,6 @@ func runGateway(opts *Options) error {
 	}()
 
 	fmt.Printf("gateway listening on %s (data dir: %s)\n", srv.Addr(), dataDir)
-	if daemonCfg.Gateway.Auth.Enabled {
-		fmt.Println("gateway basic auth enabled")
-	}
 	if dnsProvider != nil {
 		fmt.Println("gateway Route53 DNS sync enabled")
 	}

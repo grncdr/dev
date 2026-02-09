@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -229,9 +230,18 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 	}
 	routeHost := host
 	isGatewayTunnel := false
-	if mappedHost, ok := s.localProxyHostForTunnelRequest(host); ok {
-		routeHost = mappedHost
+	gatewayAuthUsername := ""
+	gatewayAuthPassword := ""
+	if route, ok := s.localProxyRouteForTunnelRequest(host); ok {
+		routeHost = route.LocalHost
 		isGatewayTunnel = true
+		gatewayAuthUsername = route.AuthUsername
+		gatewayAuthPassword = route.AuthPassword
+	}
+	if isGatewayTunnel {
+		if !authenticateGatewayTunnelRequest(w, r, gatewayAuthUsername, gatewayAuthPassword) {
+			return
+		}
 	}
 
 	network, address, process, gatewayMode, gatewayDebugLog, targetSlug, err := s.resolveProxyTargetForRequest(routeHost, r.URL.Path, isGatewayTunnel)
@@ -321,6 +331,22 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 		writeErrorWithCode(rw, http.StatusBadGateway, "proxy_upstream_error", err)
 	}
 	reverseProxy.ServeHTTP(w, r)
+}
+
+func authenticateGatewayTunnelRequest(w http.ResponseWriter, r *http.Request, username, password string) bool {
+	username = strings.TrimSpace(username)
+	if username == "" && password == "" {
+		return true
+	}
+	u, p, ok := r.BasicAuth()
+	if !ok ||
+		subtle.ConstantTimeCompare([]byte(u), []byte(username)) != 1 ||
+		subtle.ConstantTimeCompare([]byte(p), []byte(password)) != 1 {
+		w.Header().Set("WWW-Authenticate", `Basic realm="dev share"`)
+		writeErrorWithCode(w, http.StatusUnauthorized, "proxy_gateway_auth_required", errors.New("invalid share credentials"))
+		return false
+	}
+	return true
 }
 
 func snapshotRequestBody(req *http.Request) ([]byte, error) {

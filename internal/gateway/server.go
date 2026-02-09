@@ -3,7 +3,6 @@ package gateway
 import (
 	"bufio"
 	"context"
-	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -18,7 +17,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"dev/internal/config"
 	"dev/internal/tunnelmux"
 )
 
@@ -30,7 +28,6 @@ type Server struct {
 	issuer           *CertIssuer
 	dnsZone          string
 	enforceAgentMTLS bool
-	auth             config.DaemonGatewayAuth
 	dns              DNSProvider
 	certs            CertProvisioner
 	tunnels          *tunnelPool
@@ -50,7 +47,6 @@ type ServerOptions struct {
 	ListenAddr string
 	DataDir    string
 	DNSZone    string
-	Auth       config.DaemonGatewayAuth
 	DNS        DNSProvider
 	Certs      CertProvisioner
 	TLSConfig  *tls.Config
@@ -121,7 +117,6 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		issuer:           issuer,
 		dnsZone:          dnsZone,
 		enforceAgentMTLS: opts.TLSConfig != nil,
-		auth:             opts.Auth,
 		dns:              opts.DNS,
 		certs:            opts.Certs,
 		tunnels:          newTunnelPool(),
@@ -142,7 +137,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	mux.HandleFunc("/", s.handlePublic)
 
 	s.httpServer = &http.Server{
-		Handler:           s.withBasicAuth(mux),
+		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return s, nil
@@ -170,41 +165,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	return s.httpServer.Shutdown(ctx)
-}
-
-func (s *Server) withBasicAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.requiresBasicAuth(r.URL.Path) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if !s.auth.Enabled {
-			next.ServeHTTP(w, r)
-			return
-		}
-		u, p, ok := r.BasicAuth()
-		if !ok ||
-			subtle.ConstantTimeCompare([]byte(u), []byte(s.auth.Username)) != 1 ||
-			subtle.ConstantTimeCompare([]byte(p), []byte(s.auth.Password)) != 1 {
-			w.Header().Set("WWW-Authenticate", `Basic realm="dev gateway"`)
-			writeJSON(w, http.StatusUnauthorized, map[string]string{
-				"code":  "gateway_auth_required",
-				"error": "invalid gateway credentials",
-			})
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (s *Server) requiresBasicAuth(path string) bool {
-	if strings.HasPrefix(path, "/_agent/") {
-		return false
-	}
-	if path == "/_registry/labels" {
-		return false
-	}
-	return true
 }
 
 func (s *Server) handleAgentRegister(w http.ResponseWriter, r *http.Request) {

@@ -99,9 +99,12 @@ Attaches your terminal to a process PTY. Uses the current worktree when only `pr
 
 ## Tunnels
 
-### `dev share [slug] [--label <label>] [--gateway-url <url>]`
+### `dev share [slug] [--label <label>] [--gateway-url <url>] [--auth <username:password>] [--no-auth]`
 Shares a worktree through the gateway. Slug defaults to the current worktree when omitted; label defaults to slug.
 Gateway URL comes from project `gateway.url` unless overridden with `--gateway-url`.
+`--auth` sets Basic Auth credentials enforced by your local daemon for this shared tunnel.
+When `--auth` is omitted, defaults come from project `gateway.auth` if set.
+`--no-auth` disables project `gateway.auth` defaults for this command.
 
 ### `dev unshare [slug] [--label <label>] [--gateway-url <url>]`
 Stops sharing the worktree.

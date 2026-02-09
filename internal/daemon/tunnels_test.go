@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,7 +72,6 @@ url = "http://unused.local"
 		ListenAddr: "127.0.0.1:0",
 		DataDir:    gwDir,
 		DNSZone:    "public.example.dev",
-		Auth:       config.DaemonGatewayAuth{},
 	})
 	if err != nil {
 		t.Fatalf("new gateway: %v", err)
@@ -157,5 +157,21 @@ url = "http://unused.local"
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatalf("daemon did not stop")
+	}
+}
+
+func TestOpenTunnel_RejectsIncompleteAuth(t *testing.T) {
+	s := &Server{
+		daemonConfig: &config.DaemonConfig{},
+	}
+	_, err := s.openTunnel(TunnelRequest{
+		Slug:         "main",
+		Label:        "alpha",
+		GatewayURL:   "https://gw.example.test",
+		Upstream:     "http://127.0.0.1:9999",
+		AuthUsername: "alice",
+	})
+	if err == nil || !strings.Contains(err.Error(), "auth_username and auth_password") {
+		t.Fatalf("expected auth validation error, got %v", err)
 	}
 }

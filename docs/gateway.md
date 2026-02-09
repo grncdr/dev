@@ -105,9 +105,17 @@ To share your locally running server via the gateway:
 
 ```
 dev share --label 'cool-feature'
+# or override share-level auth
+dev share --label 'cool-feature' --auth 'alice:secret'
 ```
 
 The label is prepended to the gateway servers configured `dns_zone` ("wip.example.com" above) to make your service available at https://cool-feature.wip.example.com
+
+Share authentication is enforced by the local daemon, not by the gateway server:
+
+- `dev share --auth <username:password>` sets credentials for this shared tunnel.
+- `dev share --no-auth` disables default credentials for this command.
+- Project config `[gateway.auth]` (`username` + `password`) provides defaults when `--auth` is omitted.
 
 ## Server state
 

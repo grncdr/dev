@@ -20,6 +20,8 @@ import (
 func newShareCmd(opts *Options) *cobra.Command {
 	var label string
 	var gatewayURL string
+	var auth string
+	var noAuth bool
 	cmd := &cobra.Command{
 		Use:   "share [slug]",
 		Short: "share a worktree through the gateway",
@@ -29,11 +31,13 @@ func newShareCmd(opts *Options) *cobra.Command {
 			if len(args) > 0 {
 				slugArg = args[0]
 			}
-			return runTunnelOpen(opts, slugArg, label, gatewayURL)
+			return runTunnelOpen(opts, slugArg, label, gatewayURL, auth, noAuth)
 		},
 	}
 	cmd.Flags().StringVar(&label, "label", "", "override tunnel label (defaults to slug)")
 	cmd.Flags().StringVar(&gatewayURL, "gateway-url", "", "gateway URL override")
+	cmd.Flags().StringVar(&auth, "auth", "", "basic auth credentials for shared gateway access in username:password format")
+	cmd.Flags().BoolVar(&noAuth, "no-auth", false, "disable project gateway.auth defaults for this share")
 	return cmd
 }
 
@@ -57,7 +61,7 @@ func newUnshareCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func runTunnelOpen(opts *Options, slugArg, labelArg, gatewayURLArg string) error {
+func runTunnelOpen(opts *Options, slugArg, labelArg, gatewayURLArg, authArg string, noAuth bool) error {
 	socketPath, err := daemon.ResolveSocketPath()
 	if err != nil {
 		return err
@@ -72,8 +76,7 @@ func runTunnelOpen(opts *Options, slugArg, labelArg, gatewayURLArg string) error
 	}
 	gatewayURL := strings.TrimSpace(gatewayURLArg)
 	if gatewayURL == "" {
-		configURL, _ := cfg.Gateway["url"].(string)
-		gatewayURL = strings.TrimSpace(configURL)
+		gatewayURL = config.ProjectGatewayURL(cfg)
 	}
 	if gatewayURL == "" {
 		return errors.New("gateway.url is required in project config or pass --gateway-url")
@@ -82,13 +85,19 @@ func runTunnelOpen(opts *Options, slugArg, labelArg, gatewayURLArg string) error
 	if label == "" {
 		label = effectiveDisplaySlug(slug, path, cfg)
 	}
+	authUsername, authPassword, err := resolveShareAuth(cfg, authArg, noAuth)
+	if err != nil {
+		return err
+	}
 
 	req := daemon.TunnelRequest{
-		Slug:       slug,
-		Label:      label,
-		GatewayURL: gatewayURL,
-		Project:    cfg.Project.Name,
-		Name:       os.Getenv("USER"),
+		Slug:         slug,
+		Label:        label,
+		GatewayURL:   gatewayURL,
+		Project:      cfg.Project.Name,
+		Name:         os.Getenv("USER"),
+		AuthUsername: authUsername,
+		AuthPassword: authPassword,
 	}
 
 	client := daemon.NewClient(socketPath)
@@ -140,6 +149,39 @@ func runTunnelOpen(opts *Options, slugArg, labelArg, gatewayURLArg string) error
 	}
 }
 
+func resolveShareAuth(cfg *config.ProjectConfig, authArg string, noAuth bool) (username string, password string, err error) {
+	if noAuth && strings.TrimSpace(authArg) != "" {
+		return "", "", errors.New("--auth and --no-auth cannot be used together")
+	}
+	if strings.TrimSpace(authArg) != "" {
+		return parseShareAuthArg(authArg)
+	}
+	if noAuth {
+		return "", "", nil
+	}
+	creds, enabled, err := config.ProjectGatewayAuthCredentials(cfg)
+	if err != nil {
+		return "", "", err
+	}
+	if !enabled {
+		return "", "", nil
+	}
+	return creds.Username, creds.Password, nil
+}
+
+func parseShareAuthArg(raw string) (username string, password string, err error) {
+	raw = strings.TrimSpace(raw)
+	user, pass, ok := strings.Cut(raw, ":")
+	if !ok {
+		return "", "", errors.New("--auth must be in username:password format")
+	}
+	user = strings.TrimSpace(user)
+	if user == "" || pass == "" {
+		return "", "", errors.New("--auth requires both username and password")
+	}
+	return user, pass, nil
+}
+
 func runTunnelClose(opts *Options, slugArg, labelArg, gatewayURLArg string) error {
 	socketPath, err := daemon.ResolveSocketPath()
 	if err != nil {
@@ -161,8 +203,7 @@ func runTunnelClose(opts *Options, slugArg, labelArg, gatewayURLArg string) erro
 		if err != nil {
 			return err
 		}
-		configURL, _ := cfg.Gateway["url"].(string)
-		if strings.TrimSpace(configURL) == "" {
+		if config.ProjectGatewayURL(cfg) == "" {
 			return errors.New("gateway.url is required in project config or pass --gateway-url")
 		}
 	}

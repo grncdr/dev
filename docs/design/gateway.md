@@ -8,13 +8,13 @@ This document specifies the first implementation of the public gateway and local
 - Support stable public HTTPS URLs for a connected worktree.
 - Preserve local proxy behavior and config as the single source of routing truth.
 - Keep transport secure with mTLS between gateway and local agent.
-- Support optional HTTP Basic Auth at the gateway edge for public tunnel access.
+- Support optional HTTP Basic Auth enforced by each local daemon for public tunnel access.
 
 ## Non-Goals (v1)
 
 - No host/path routing decisions in gateway.
 - No per-request dynamic policy engine in gateway.
-- No per-label auth policies in v1 (auth is gateway-global).
+- No centralized auth policy engine in gateway.
 
 ## Terminology
 
@@ -192,7 +192,7 @@ This gives "tunnels restored on startup" semantics while still requiring live ag
 
 - If no connected agent for label: return `502` with structured error code `gateway_label_unavailable`.
 - If stream to agent fails mid-request: return `502` with `gateway_upstream_error`.
-- If Basic Auth is enabled and credentials are missing/invalid: return `401` with `WWW-Authenticate: Basic realm="dev gateway"`.
+- If share auth is enabled and credentials are missing/invalid: daemon returns `401` with `WWW-Authenticate: Basic realm="dev share"`.
 - ACME provisioning applies backoff on failures and honors Let’s Encrypt `retry after` hints to avoid repeated failed authorizations.
 - Gateway logs include request id, host, label, selected agent id, and error code.
 
@@ -201,8 +201,8 @@ This gives "tunnels restored on startup" semantics while still requiring live ag
 - mTLS required for agent connectivity.
 - Registration auth bound to cert identity (plus optional token).
 - Optional Basic Auth for public ingress requests:
-  - Applied before label lookup/forwarding.
-  - Enabled/disabled via user config.
+  - Configured per shared label by `dev share --auth` (or project `gateway.auth` defaults).
+  - Enforced by the local daemon before forwarding to exposed processes.
   - Uses constant-time credential comparison.
 - Gateway strips/sets forwarding headers to prevent spoofing:
   - Preserve canonical `X-Forwarded-For`
@@ -219,6 +219,10 @@ Project config:
 ```toml
 [gateway]
 url = "https://tunnels.foocorp.dev"
+
+[gateway.auth]
+username = "alice"
+password = "secret"
 ```
 
 Daemon config (future expansion):
@@ -230,11 +234,6 @@ dns_zone = "tunnels.foocorp.dev"
 hostname = "gw.foocorp.dev"
 acme_resolvers = ["1.1.1.1"]
 
-[gateway.auth]
-enabled = false
-username = ""
-password = ""
-
 [gateway.route53]
 enabled = true
 hosted_zone_id = "Z1234567890"
@@ -242,9 +241,9 @@ ttl = 60
 ```
 
 Notes:
-- `gateway.auth` is global for this gateway instance.
-- When enabled, every public request must pass Basic Auth before forwarding.
-- Credentials live in daemon config so they are not committed to project config.
+- `gateway.auth` in project config provides default credentials for `dev share`.
+- `dev share --auth` overrides project defaults.
+- `dev share --no-auth` disables project defaults for the command.
 - `gateway.dns_zone` is required; the gateway refuses to start without it.
 - `gateway.hostname` is the DNS CNAME target used for Route53 label records.
 - `gateway.acme_resolvers` sets recursive resolvers for DNS-01 propagation checks (default `1.1.1.1`).
@@ -252,7 +251,7 @@ Notes:
 
 CLI behavior:
 
-- `dev share [slug] [--label <label>]` starts/ensures agent registration.
+- `dev share [slug] [--label <label>] [--auth <username:password>] [--no-auth]` starts/ensures agent registration.
 - `dev unshare [slug] [--label <label>]` unregisters label.
 - `dev status` shows sharing connection state in the Gateway section.
 

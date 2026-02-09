@@ -14,12 +14,14 @@ type WorktreeRequest struct {
 }
 
 type TunnelRequest struct {
-	Slug       string `json:"slug,omitempty"`
-	Label      string `json:"label,omitempty"`
-	GatewayURL string `json:"gateway_url,omitempty"`
-	Project    string `json:"project,omitempty"`
-	Name       string `json:"name,omitempty"`
-	Upstream   string `json:"upstream,omitempty"`
+	Slug         string `json:"slug,omitempty"`
+	Label        string `json:"label,omitempty"`
+	GatewayURL   string `json:"gateway_url,omitempty"`
+	Project      string `json:"project,omitempty"`
+	Name         string `json:"name,omitempty"`
+	Upstream     string `json:"upstream,omitempty"`
+	AuthUsername string `json:"auth_username,omitempty"`
+	AuthPassword string `json:"auth_password,omitempty"`
 }
 
 type TunnelStatus struct {

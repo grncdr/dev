@@ -201,3 +201,74 @@ proxy = { path = "/" }
 		t.Fatalf("expected exchange delimiter prefix in transcript, got:\n%s", transcript)
 	}
 }
+
+func TestHandleProxyHTTPS_GatewayAuthRejectsUnauthorizedRequest(t *testing.T) {
+	base := t.TempDir()
+	cfgPath := filepath.Join(base, ".dev.toml")
+	cfgBody := `
+[project]
+name = "foocorp"
+
+[gateway]
+expose = { web = { mode = "reverse_proxy" } }
+
+[process.web]
+proxy = { path = "/" }
+`
+	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+
+	upstreamAddr := strings.TrimPrefix(upstream.URL, "http://")
+	mgr := NewManager()
+	mgr.paths["main"] = base
+	mgr.processes["main"] = map[string]*processInfo{
+		"web": {
+			network: "tcp",
+			address: upstreamAddr,
+			cmd:     &exec.Cmd{Process: &os.Process{Pid: 1}},
+			ready:   true,
+			exited:  make(chan struct{}),
+		},
+	}
+
+	s := &Server{
+		manager: mgr,
+		daemonConfig: &config.DaemonConfig{
+			LocalProxy: config.DaemonLocalProxyBlock{
+				ApexZone: ".localhost",
+				Allow:    "all",
+			},
+		},
+		tunnels: map[string]*managedTunnel{
+			"xyzz": {
+				req: TunnelRequest{
+					Slug:         "main",
+					Label:        "xyzz",
+					AuthUsername: "alice",
+					AuthPassword: "secret",
+				},
+				status: "connected",
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "https://xyzz.public.example.com/ping", nil)
+	req.Host = "xyzz.public.example.com"
+	rec := httptest.NewRecorder()
+	s.handleProxyHTTPS(rec, req)
+	resp := rec.Result()
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("WWW-Authenticate"); got == "" {
+		t.Fatalf("expected WWW-Authenticate header")
+	}
+}

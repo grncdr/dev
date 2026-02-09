@@ -21,8 +21,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"dev/internal/config"
 )
 
 type fakeDNSProvider struct {
@@ -84,7 +82,7 @@ func (f *fakeDNSProvider) RemoveLabel(_ context.Context, label string) error {
 
 func TestServer_RegisterPersistsAcrossRestart(t *testing.T) {
 	dir := t.TempDir()
-	srv, client := startGatewayServer(t, dir, config.DaemonGatewayAuth{})
+	srv, client := startGatewayServer(t, dir)
 
 	body := bytes.NewBufferString(`{"project":"Foo Corp","slug":"main","label":"alpha","agent_id":"a1"}`)
 	resp, err := client.Post("http://"+srv.Addr()+"/_agent/register", "application/json", body)
@@ -102,7 +100,7 @@ func TestServer_RegisterPersistsAcrossRestart(t *testing.T) {
 		t.Fatalf("shutdown: %v", err)
 	}
 
-	srv2, client2 := startGatewayServer(t, dir, config.DaemonGatewayAuth{})
+	srv2, client2 := startGatewayServer(t, dir)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -138,7 +136,6 @@ func TestServer_RecoversPendingProvisioningOnRestart(t *testing.T) {
 		ListenAddr: "127.0.0.1:0",
 		DataDir:    dir,
 		DNSZone:    "tunnels.example.test",
-		Auth:       config.DaemonGatewayAuth{},
 		Certs:      firstCert,
 	})
 	if err != nil {
@@ -177,7 +174,6 @@ func TestServer_RecoversPendingProvisioningOnRestart(t *testing.T) {
 		ListenAddr: "127.0.0.1:0",
 		DataDir:    dir,
 		DNSZone:    "tunnels.example.test",
-		Auth:       config.DaemonGatewayAuth{},
 		Certs:      recoveryCert,
 	})
 	if err != nil {
@@ -214,10 +210,9 @@ func TestServer_RecoversPendingProvisioningOnRestart(t *testing.T) {
 	}
 }
 
-func TestServer_BasicAuthAppliesOnlyToPublicRequests(t *testing.T) {
+func TestServer_PublicRequestsDoNotUseGatewayBasicAuth(t *testing.T) {
 	dir := t.TempDir()
-	auth := config.DaemonGatewayAuth{Enabled: true, Username: "u", Password: "p"}
-	srv, client := startGatewayServer(t, dir, auth)
+	srv, client := startGatewayServer(t, dir)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -229,8 +224,8 @@ func TestServer_BasicAuthAppliesOnlyToPublicRequests(t *testing.T) {
 		t.Fatalf("public request: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("expected 502 without any labels, got %d", resp.StatusCode)
 	}
 
 	req, err := http.NewRequest(http.MethodGet, "http://"+srv.Addr()+"/_registry/labels", nil)
@@ -257,7 +252,7 @@ func TestServer_ForwardsThroughAgentTunnel(t *testing.T) {
 	defer upstream.Close()
 
 	dir := t.TempDir()
-	srv, client := startGatewayServer(t, dir, config.DaemonGatewayAuth{})
+	srv, client := startGatewayServer(t, dir)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -320,7 +315,7 @@ func TestServer_ForwardsRedirectAndCookieHeadersWithoutFollowing(t *testing.T) {
 	defer upstream.Close()
 
 	dir := t.TempDir()
-	srv, client := startGatewayServer(t, dir, config.DaemonGatewayAuth{})
+	srv, client := startGatewayServer(t, dir)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -399,7 +394,7 @@ func TestServer_ForwardsConcurrentRequestsOverSingleTunnel(t *testing.T) {
 	defer upstream.Close()
 
 	dir := t.TempDir()
-	srv, client := startGatewayServer(t, dir, config.DaemonGatewayAuth{})
+	srv, client := startGatewayServer(t, dir)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -521,7 +516,7 @@ func TestServer_ForwardsWebsocketUpgradeOverTunnel(t *testing.T) {
 	defer upstream.Close()
 
 	dir := t.TempDir()
-	srv, client := startGatewayServer(t, dir, config.DaemonGatewayAuth{})
+	srv, client := startGatewayServer(t, dir)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -621,7 +616,6 @@ func TestServer_LogsPublicRequestMetadata(t *testing.T) {
 		ListenAddr: "127.0.0.1:0",
 		DataDir:    dir,
 		DNSZone:    "tunnels.example.test",
-		Auth:       config.DaemonGatewayAuth{},
 		LogWriter:  &logBuf,
 	})
 	if err != nil {
@@ -719,7 +713,7 @@ func TestServer_LogsPublicRequestMetadata(t *testing.T) {
 
 func TestServer_PublicErrorsIncludeRequestID(t *testing.T) {
 	dir := t.TempDir()
-	srv, client := startGatewayServer(t, dir, config.DaemonGatewayAuth{})
+	srv, client := startGatewayServer(t, dir)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -759,7 +753,6 @@ func TestServer_SyncsDNSOnRegisterAndUnregister(t *testing.T) {
 		ListenAddr: "127.0.0.1:0",
 		DataDir:    dir,
 		DNSZone:    "tunnels.example.test",
-		Auth:       config.DaemonGatewayAuth{},
 		DNS:        fakeDNS,
 	})
 	if err != nil {
@@ -816,7 +809,6 @@ func TestServer_RegisterProvisionContinuesAfterClientCancel(t *testing.T) {
 		ListenAddr: "127.0.0.1:0",
 		DataDir:    dir,
 		DNSZone:    "tunnels.example.test",
-		Auth:       config.DaemonGatewayAuth{},
 		Certs:      fakeCert,
 	})
 	if err != nil {
@@ -866,7 +858,6 @@ func TestServer_RegisterStreamIncludesProvisionProgress(t *testing.T) {
 		ListenAddr: "127.0.0.1:0",
 		DataDir:    dir,
 		DNSZone:    "tunnels.example.test",
-		Auth:       config.DaemonGatewayAuth{},
 		DNS:        fakeDNS,
 		Certs:      fakeCert,
 	})
@@ -925,7 +916,6 @@ func TestServer_IssuesCertFromInvite(t *testing.T) {
 		ListenAddr: "127.0.0.1:0",
 		DataDir:    dir,
 		DNSZone:    "tunnels.example.test",
-		Auth:       config.DaemonGatewayAuth{},
 	})
 	if err != nil {
 		t.Fatalf("new server: %v", err)
@@ -1001,20 +991,18 @@ func TestNewServer_RequiresDNSZone(t *testing.T) {
 	_, err := NewServer(ServerOptions{
 		ListenAddr: "127.0.0.1:0",
 		DataDir:    t.TempDir(),
-		Auth:       config.DaemonGatewayAuth{},
 	})
 	if err == nil {
 		t.Fatalf("expected error when dns zone is empty")
 	}
 }
 
-func startGatewayServer(t *testing.T, dataDir string, auth config.DaemonGatewayAuth) (*Server, *http.Client) {
+func startGatewayServer(t *testing.T, dataDir string) (*Server, *http.Client) {
 	t.Helper()
 	srv, err := NewServer(ServerOptions{
 		ListenAddr: "127.0.0.1:0",
 		DataDir:    dataDir,
 		DNSZone:    "tunnels.example.test",
-		Auth:       auth,
 	})
 	if err != nil {
 		t.Fatalf("new server: %v", err)

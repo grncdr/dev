@@ -35,6 +35,10 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 	if strings.TrimSpace(req.GatewayURL) == "" {
 		return nil, errors.New("gateway_url is required")
 	}
+	req.AuthUsername = strings.TrimSpace(req.AuthUsername)
+	if (req.AuthUsername == "") != (req.AuthPassword == "") {
+		return nil, errors.New("auth_username and auth_password must both be set")
+	}
 	if strings.TrimSpace(req.Upstream) == "" {
 		req.Upstream = s.localProxyUpstreamURL()
 	}

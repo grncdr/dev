@@ -33,6 +33,12 @@ type proxyMatcher struct {
 	Singleton       bool
 }
 
+type tunnelProxyRoute struct {
+	LocalHost    string
+	AuthUsername string
+	AuthPassword string
+}
+
 var errGatewayProcessNotExposed = errors.New("gateway traffic not exposed for matched process")
 
 func (s *Server) parseProxyHost(host string) (slug, subdomain string, err error) {
@@ -76,9 +82,17 @@ func normalizeProxyHost(host string) string {
 }
 
 func (s *Server) localProxyHostForTunnelRequest(host string) (string, bool) {
+	route, ok := s.localProxyRouteForTunnelRequest(host)
+	if !ok {
+		return "", false
+	}
+	return route.LocalHost, true
+}
+
+func (s *Server) localProxyRouteForTunnelRequest(host string) (tunnelProxyRoute, bool) {
 	labels := strings.Split(normalizeProxyHost(host), ".")
 	if len(labels) == 0 {
-		return "", false
+		return tunnelProxyRoute{}, false
 	}
 
 	// Prefer "<subdomain>.<label>.<zone>" over "<label>.<zone>" when both labels happen to be active.
@@ -86,7 +100,11 @@ func (s *Server) localProxyHostForTunnelRequest(host string) (string, bool) {
 		if idx >= len(labels) {
 			continue
 		}
-		routeSlug, ok := s.tunnelRouteSlugForLabel(labels[idx])
+		mt, ok := s.activeTunnelForLabel(labels[idx])
+		if !ok {
+			continue
+		}
+		routeSlug, ok := s.tunnelRouteSlug(mt)
 		if !ok {
 			continue
 		}
@@ -94,22 +112,36 @@ func (s *Server) localProxyHostForTunnelRequest(host string) (string, bool) {
 		if apex == "" {
 			apex = "localhost"
 		}
-		if idx == 0 {
-			return routeSlug + "." + apex, true
+		route := tunnelProxyRoute{
+			AuthUsername: mt.req.AuthUsername,
+			AuthPassword: mt.req.AuthPassword,
 		}
-		return labels[0] + "." + routeSlug + "." + apex, true
+		if idx == 0 {
+			route.LocalHost = routeSlug + "." + apex
+			return route, true
+		}
+		route.LocalHost = labels[0] + "." + routeSlug + "." + apex
+		return route, true
 	}
-	return "", false
+	return tunnelProxyRoute{}, false
 }
 
-func (s *Server) tunnelRouteSlugForLabel(label string) (string, bool) {
+func (s *Server) activeTunnelForLabel(label string) (*managedTunnel, bool) {
 	s.tunnelMu.Lock()
 	defer s.tunnelMu.Unlock()
 	if s.tunnels == nil {
-		return "", false
+		return nil, false
 	}
 	mt, ok := s.tunnels[label]
 	if !ok || mt == nil {
+		return nil, false
+	}
+	copied := *mt
+	return &copied, true
+}
+
+func (s *Server) tunnelRouteSlug(mt *managedTunnel) (string, bool) {
+	if mt == nil {
 		return "", false
 	}
 	slug := strings.TrimSpace(mt.req.Slug)

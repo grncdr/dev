@@ -25,6 +25,10 @@ Optional sections:
 [gateway]
 url = "https://gateway.foocorp.dev"
 
+[gateway.auth]
+username = "alice"
+password = "secret"
+
 [gateway.expose.rails]
 mode = "reverse_proxy"
 debug_log = ""
@@ -165,11 +169,6 @@ acme_email = "tech@foocorp.dev"
 acme_directory = "https://acme-v02.api.letsencrypt.org/directory"
 acme_resolvers = ["1.1.1.1"]
 
-[gateway.auth]
-enabled = false
-username = ""
-password = ""
-
 [gateway.route53]
 enabled = false
 hosted_zone_id = ""
@@ -189,9 +188,9 @@ Notes:
 - `local-proxy.enabled` defaults to `true`; set to `false` to disable the local proxy.
 - `local-proxy.apex_zone` is daemon-level and defaults to `.localhost`.
 - `worktree_dir` is daemon-level and controls where managed worktrees are created.
-- `gateway.auth` configures optional HTTP Basic Auth for public gateway requests.
-- `gateway.auth` is global (not per project/label).
-- Keep `gateway.auth.password` in daemon config only.
+- `gateway.auth` in project config provides default `dev share` Basic Auth credentials.
+  - `dev share --auth <username:password>` overrides project defaults.
+  - `dev share --no-auth` disables project defaults for that share invocation.
 - `gateway.dns_zone` is the public DNS suffix served by the gateway (for example `tunnels.foocorp.dev`).
 - `gateway.hostname` is the gateway hostname used as the Route53 CNAME target (for example `gw.foocorp.dev`).
 - When `gateway.route53.enabled = true`, the gateway upserts Route53 CNAME records for each label:
