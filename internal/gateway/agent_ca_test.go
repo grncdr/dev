@@ -67,6 +67,15 @@ func TestNextACMERetry_UsesRetryAfterWhenPresent(t *testing.T) {
 	}
 }
 
+func TestNextACMERetry_DoesNotSuppressContextCancellation(t *testing.T) {
+	now := time.Date(2026, 2, 2, 17, 0, 0, 0, time.UTC)
+	err := errors.New("solving challenges: context canceled")
+	got := nextACMERetry(err, now)
+	if !got.Equal(now) {
+		t.Fatalf("expected immediate retry for context cancellation, got %s", got)
+	}
+}
+
 func TestNormalizeResolvers_Default(t *testing.T) {
 	got := normalizeResolvers(nil)
 	if len(got) != 1 || got[0] != "1.1.1.1" {

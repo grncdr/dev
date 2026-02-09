@@ -39,6 +39,13 @@ type Server struct {
 	requestSeq       uint64
 }
 
+const (
+	registerProvisionTimeout    = 10 * time.Minute
+	registerProgressContentType = "application/x-ndjson"
+	startupProvisionAttempts    = 3
+	startupProvisionRetryDelay  = 5 * time.Second
+)
+
 type ServerOptions struct {
 	ListenAddr string
 	DataDir    string
@@ -152,6 +159,9 @@ func (s *Server) Serve() error {
 	if s.httpServer == nil || s.listener == nil {
 		return errors.New("gateway server not initialized")
 	}
+	recoveryCtx, stopRecovery := context.WithCancel(context.Background())
+	defer stopRecovery()
+	go s.recoverPendingProvisioning(recoveryCtx)
 	return s.httpServer.Serve(s.listener)
 }
 
@@ -226,25 +236,47 @@ func (s *Server) handleAgentRegister(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:  now,
 		LastSeenAt: now,
 	}
+	progress := newRegisterProgressWriter(w, r)
+	provisionCtx, cancelProvision := context.WithTimeout(context.Background(), registerProvisionTimeout)
+	defer cancelProvision()
+	progress.Event("provisioning_started", "starting DNS and certificate provisioning")
 	if s.dns != nil {
-		if err := s.dns.EnsureLabel(r.Context(), req.Label); err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"code": "dns_sync_failed", "error": err.Error()})
+		progress.Event("dns_sync_started", "ensuring DNS record")
+		if err := s.dns.EnsureLabel(provisionCtx, req.Label); err != nil {
+			progress.Error("dns_sync_failed", err.Error())
+			if !progress.Enabled() {
+				writeJSON(w, http.StatusBadGateway, map[string]string{"code": "dns_sync_failed", "error": err.Error()})
+			}
 			return
 		}
+		progress.Event("dns_sync_complete", "DNS record is in place")
 	}
 	if s.certs != nil {
-		if err := s.certs.EnsureLabel(r.Context(), req.Label); err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"code": "acme_sync_failed", "error": err.Error()})
+		progress.Event("acme_sync_started", "starting ACME DNS-01 issuance")
+		if err := s.certs.EnsureLabel(provisionCtx, req.Label); err != nil {
+			progress.Error("acme_sync_failed", err.Error())
+			if !progress.Enabled() {
+				writeJSON(w, http.StatusBadGateway, map[string]string{"code": "acme_sync_failed", "error": err.Error()})
+			}
 			return
 		}
+		progress.Event("acme_sync_complete", "certificate is ready")
 	}
+	progress.Event("lease_persist_started", "persisting lease")
 	if err := s.store.upsert(lease); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"code": "persist_failed", "error": err.Error()})
+		progress.Error("persist_failed", err.Error())
+		if !progress.Enabled() {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"code": "persist_failed", "error": err.Error()})
+		}
 		return
 	}
 	resp := map[string]string{"status": "ok"}
 	resp["public_host"] = s.dnsZone
 	resp["public_hostname"] = req.Label + "." + s.dnsZone
+	if progress.Enabled() {
+		progress.Result(resp)
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -706,4 +738,133 @@ func decodeJSON(r *http.Request, dst any) error {
 	}
 	defer r.Body.Close()
 	return json.NewDecoder(r.Body).Decode(dst)
+}
+
+func (s *Server) recoverPendingProvisioning(ctx context.Context) {
+	if s == nil || s.store == nil {
+		return
+	}
+	if s.dns == nil && s.certs == nil {
+		return
+	}
+	for _, lease := range s.store.list() {
+		if lease.Status != LeasePending || strings.TrimSpace(lease.Label) == "" {
+			continue
+		}
+		for attempt := 1; attempt <= startupProvisionAttempts; attempt++ {
+			err := s.provisionLabel(ctx, lease.Label)
+			if err == nil {
+				break
+			}
+			if attempt == startupProvisionAttempts {
+				break
+			}
+			timer := time.NewTimer(startupProvisionRetryDelay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+		}
+	}
+}
+
+func (s *Server) provisionLabel(ctx context.Context, label string) error {
+	provisionCtx, cancelProvision := context.WithTimeout(ctx, registerProvisionTimeout)
+	defer cancelProvision()
+	if s.dns != nil {
+		if err := s.dns.EnsureLabel(provisionCtx, label); err != nil {
+			return err
+		}
+	}
+	if s.certs != nil {
+		if err := s.certs.EnsureLabel(provisionCtx, label); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type registerProgressWriter struct {
+	enabled bool
+	encoder *json.Encoder
+	flusher http.Flusher
+}
+
+func newRegisterProgressWriter(w http.ResponseWriter, r *http.Request) *registerProgressWriter {
+	enabled := false
+	if r != nil {
+		if r.URL.Query().Get("stream") == "1" {
+			enabled = true
+		}
+		if strings.Contains(r.Header.Get("Accept"), registerProgressContentType) {
+			enabled = true
+		}
+	}
+	pw := &registerProgressWriter{enabled: enabled}
+	if !enabled {
+		return pw
+	}
+	w.Header().Set("Content-Type", registerProgressContentType)
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	pw.encoder = json.NewEncoder(w)
+	pw.flusher, _ = w.(http.Flusher)
+	if pw.flusher != nil {
+		pw.flusher.Flush()
+	}
+	return pw
+}
+
+func (w *registerProgressWriter) Enabled() bool {
+	return w != nil && w.enabled
+}
+
+func (w *registerProgressWriter) Event(stage, message string) {
+	if !w.Enabled() {
+		return
+	}
+	w.write(map[string]string{
+		"type":    "progress",
+		"stage":   stage,
+		"message": message,
+	})
+}
+
+func (w *registerProgressWriter) Error(code, message string) {
+	if !w.Enabled() {
+		return
+	}
+	w.write(map[string]string{
+		"type":   "result",
+		"status": "error",
+		"code":   code,
+		"error":  message,
+	})
+}
+
+func (w *registerProgressWriter) Result(payload map[string]string) {
+	if !w.Enabled() {
+		return
+	}
+	out := make(map[string]string, len(payload)+2)
+	out["type"] = "result"
+	for k, v := range payload {
+		out[k] = v
+	}
+	w.write(out)
+}
+
+func (w *registerProgressWriter) write(payload map[string]string) {
+	if !w.Enabled() || w.encoder == nil {
+		return
+	}
+	if err := w.encoder.Encode(payload); err != nil {
+		w.enabled = false
+		return
+	}
+	if w.flusher != nil {
+		w.flusher.Flush()
+	}
 }

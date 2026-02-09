@@ -31,6 +31,43 @@ type fakeDNSProvider struct {
 	removed []string
 }
 
+type fakeCertProvisioner struct {
+	mu            sync.Mutex
+	delay         time.Duration
+	canceledCount int
+	ensured       []string
+}
+
+func (f *fakeCertProvisioner) EnsureLabel(ctx context.Context, label string) error {
+	if f.delay > 0 {
+		timer := time.NewTimer(f.delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			f.mu.Lock()
+			f.canceledCount++
+			f.mu.Unlock()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	f.mu.Lock()
+	f.ensured = append(f.ensured, label)
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *fakeCertProvisioner) hasEnsured(label string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, value := range f.ensured {
+		if value == label {
+			return true
+		}
+	}
+	return false
+}
+
 func (f *fakeDNSProvider) EnsureLabel(_ context.Context, label string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -91,6 +128,89 @@ func TestServer_RegisterPersistsAcrossRestart(t *testing.T) {
 	}
 	if payload.Labels[0].Status != LeasePending {
 		t.Fatalf("expected pending label after restart, got %s", payload.Labels[0].Status)
+	}
+}
+
+func TestServer_RecoversPendingProvisioningOnRestart(t *testing.T) {
+	dir := t.TempDir()
+	firstCert := &fakeCertProvisioner{}
+	srv, err := NewServer(ServerOptions{
+		ListenAddr: "127.0.0.1:0",
+		DataDir:    dir,
+		DNSZone:    "tunnels.example.test",
+		Auth:       config.DaemonGatewayAuth{},
+		Certs:      firstCert,
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	go func() { _ = srv.Serve() }()
+	client := &http.Client{Timeout: 2 * time.Second}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		resp, err := client.Get("http://" + srv.Addr() + "/_registry/labels")
+		if err == nil {
+			_ = resp.Body.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("gateway did not become ready: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	body := bytes.NewBufferString(`{"project":"Foo Corp","slug":"main","label":"alpha","agent_id":"a1"}`)
+	resp, err := client.Post("http://"+srv.Addr()+"/_agent/register", "application/json", body)
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+
+	recoveryCert := &fakeCertProvisioner{}
+	srv2, err := NewServer(ServerOptions{
+		ListenAddr: "127.0.0.1:0",
+		DataDir:    dir,
+		DNSZone:    "tunnels.example.test",
+		Auth:       config.DaemonGatewayAuth{},
+		Certs:      recoveryCert,
+	})
+	if err != nil {
+		t.Fatalf("new restarted server: %v", err)
+	}
+	go func() { _ = srv2.Serve() }()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv2.Shutdown(ctx)
+	}()
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		resp, err := client.Get("http://" + srv2.Addr() + "/_registry/labels")
+		if err == nil {
+			_ = resp.Body.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("restarted gateway did not become ready: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		if recoveryCert.hasEnsured("alpha") {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected restart recovery to re-provision alpha")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -686,6 +806,116 @@ func TestServer_SyncsDNSOnRegisterAndUnregister(t *testing.T) {
 	}
 	if len(fakeDNS.removed) != 1 || fakeDNS.removed[0] != "alpha" {
 		t.Fatalf("expected remove alpha, got %+v", fakeDNS.removed)
+	}
+}
+
+func TestServer_RegisterProvisionContinuesAfterClientCancel(t *testing.T) {
+	dir := t.TempDir()
+	fakeCert := &fakeCertProvisioner{delay: 250 * time.Millisecond}
+	srv, err := NewServer(ServerOptions{
+		ListenAddr: "127.0.0.1:0",
+		DataDir:    dir,
+		DNSZone:    "tunnels.example.test",
+		Auth:       config.DaemonGatewayAuth{},
+		Certs:      fakeCert,
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	go func() { _ = srv.Serve() }()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
+
+	cancelClient := &http.Client{Timeout: 50 * time.Millisecond}
+	reqBody := bytes.NewBufferString(`{"project":"Foo Corp","slug":"main","label":"alpha","agent_id":"a1"}`)
+	_, _ = cancelClient.Post("http://"+srv.Addr()+"/_agent/register", "application/json", reqBody)
+
+	time.Sleep(500 * time.Millisecond)
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get("http://" + srv.Addr() + "/_registry/labels")
+	if err != nil {
+		t.Fatalf("registry labels: %v", err)
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Labels []Lease `json:"labels"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode labels: %v", err)
+	}
+	if len(payload.Labels) != 1 || payload.Labels[0].Label != "alpha" {
+		t.Fatalf("expected persisted alpha label, got %+v", payload.Labels)
+	}
+
+	fakeCert.mu.Lock()
+	defer fakeCert.mu.Unlock()
+	if fakeCert.canceledCount != 0 {
+		t.Fatalf("expected cert context not canceled by client disconnect, got %d cancellations", fakeCert.canceledCount)
+	}
+}
+
+func TestServer_RegisterStreamIncludesProvisionProgress(t *testing.T) {
+	dir := t.TempDir()
+	fakeDNS := &fakeDNSProvider{}
+	fakeCert := &fakeCertProvisioner{}
+	srv, err := NewServer(ServerOptions{
+		ListenAddr: "127.0.0.1:0",
+		DataDir:    dir,
+		DNSZone:    "tunnels.example.test",
+		Auth:       config.DaemonGatewayAuth{},
+		DNS:        fakeDNS,
+		Certs:      fakeCert,
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	go func() { _ = srv.Serve() }()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	reqBody := bytes.NewBufferString(`{"project":"Foo Corp","slug":"main","label":"alpha","agent_id":"a1"}`)
+	req, err := http.NewRequest(http.MethodPost, "http://"+srv.Addr()+"/_agent/register?stream=1", reqBody)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/x-ndjson")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("register stream: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if got := resp.Header.Get("Content-Type"); got != "application/x-ndjson" {
+		t.Fatalf("expected ndjson content type, got %q", got)
+	}
+
+	decoder := json.NewDecoder(resp.Body)
+	var events []map[string]string
+	for {
+		var event map[string]string
+		if err := decoder.Decode(&event); err != nil {
+			t.Fatalf("decode event: %v", err)
+		}
+		events = append(events, event)
+		if event["type"] == "result" {
+			break
+		}
+	}
+
+	if len(events) < 4 {
+		t.Fatalf("expected progress events and final result, got %+v", events)
+	}
+	if events[len(events)-1]["status"] != "ok" {
+		t.Fatalf("expected final ok status, got %+v", events[len(events)-1])
 	}
 }
 

@@ -94,16 +94,50 @@ func runTunnelOpen(opts *Options, slugArg, labelArg, gatewayURLArg string) error
 	client := daemon.NewClient(socketPath)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	status, err := client.TunnelOpen(ctx, req)
+	initial, err := client.TunnelOpen(ctx, req)
 	if err != nil {
 		return err
 	}
-
-	fmt.Printf("tunnel %s (%s): %s\n", status.Label, status.Slug, status.Status)
-	if publicURL := gatewayPublicURL(gatewayURL, status.PublicHost, label); publicURL != "" {
+	fmt.Printf("tunnel %s (%s): %s\n", initial.Label, initial.Slug, initial.Status)
+	if publicURL := gatewayPublicURL(gatewayURL, initial.PublicHost, label); publicURL != "" {
 		fmt.Printf("public base URL: %s\n", publicURL)
 	}
-	return nil
+
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer waitCancel()
+	last := daemon.TunnelStatus{
+		Status:          initial.Status,
+		RegisterStage:   initial.RegisterStage,
+		RegisterMessage: initial.RegisterMessage,
+		PublicHost:      initial.PublicHost,
+		LastError:       initial.LastError,
+	}
+	seenProgress := map[string]bool{}
+	for {
+		status, err := tunnelStatusForLabel(waitCtx, client, label)
+		if err != nil {
+			return err
+		}
+		printTunnelProgress(last, *status, seenProgress)
+		last = *status
+		if status.Status == "connected" {
+			if publicURL := gatewayPublicURL(gatewayURL, status.PublicHost, label); publicURL != "" {
+				fmt.Printf("public base URL: %s\n", publicURL)
+			}
+			return nil
+		}
+		if status.Status == "error" {
+			if strings.TrimSpace(status.LastError) != "" {
+				return errors.New(status.LastError)
+			}
+			return errors.New("tunnel failed")
+		}
+		select {
+		case <-waitCtx.Done():
+			return fmt.Errorf("timed out waiting for tunnel %s to connect", label)
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
 }
 
 func runTunnelClose(opts *Options, slugArg, labelArg, gatewayURLArg string) error {
@@ -184,4 +218,37 @@ func gatewayPublicURL(gatewayURL, publicHost, label string) string {
 		scheme = "https"
 	}
 	return fmt.Sprintf("%s://%s.%s/", scheme, label, host)
+}
+
+func tunnelStatusForLabel(ctx context.Context, client *daemon.Client, label string) (*daemon.TunnelStatus, error) {
+	all, err := client.TunnelsStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range all.Tunnels {
+		if all.Tunnels[i].Label == label {
+			return &all.Tunnels[i], nil
+		}
+	}
+	return nil, fmt.Errorf("tunnel %s is no longer active", label)
+}
+
+func printTunnelProgress(last, cur daemon.TunnelStatus, seenProgress map[string]bool) {
+	if cur.RegisterStage != "" && (cur.RegisterStage != last.RegisterStage || cur.RegisterMessage != last.RegisterMessage) {
+		key := cur.RegisterStage + "|" + cur.RegisterMessage
+		if !seenProgress[key] {
+			seenProgress[key] = true
+			if cur.RegisterMessage != "" {
+				fmt.Printf("provisioning[%s]: %s\n", cur.RegisterStage, cur.RegisterMessage)
+			} else {
+				fmt.Printf("provisioning[%s]\n", cur.RegisterStage)
+			}
+		}
+	}
+	if cur.LastError != "" && cur.LastError != last.LastError {
+		fmt.Printf("provisioning retry: %s\n", cur.LastError)
+	}
+	if cur.Status != last.Status {
+		fmt.Printf("tunnel status: %s\n", cur.Status)
+	}
 }

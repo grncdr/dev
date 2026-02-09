@@ -16,11 +16,13 @@ import (
 )
 
 type managedTunnel struct {
-	req        TunnelRequest
-	cancel     context.CancelFunc
-	status     string
-	publicHost string
-	lastError  string
+	req             TunnelRequest
+	cancel          context.CancelFunc
+	status          string
+	publicHost      string
+	lastError       string
+	registerStage   string
+	registerMessage string
 }
 
 func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
@@ -48,13 +50,15 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 	for label, running := range s.tunnels {
 		if label == req.Label {
 			return &TunnelStatus{
-				Slug:       running.req.Slug,
-				Label:      running.req.Label,
-				GatewayURL: running.req.GatewayURL,
-				PublicHost: running.publicHost,
-				Project:    running.req.Project,
-				Status:     running.status,
-				LastError:  running.lastError,
+				Slug:            running.req.Slug,
+				Label:           running.req.Label,
+				GatewayURL:      running.req.GatewayURL,
+				PublicHost:      running.publicHost,
+				Project:         running.req.Project,
+				Status:          running.status,
+				LastError:       running.lastError,
+				RegisterStage:   running.registerStage,
+				RegisterMessage: running.registerMessage,
 			}, nil
 		}
 		if running.req.Slug == req.Slug && label != req.Label {
@@ -101,6 +105,16 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 			defer s.tunnelMu.Unlock()
 			if cur, ok := s.tunnels[req.Label]; ok {
 				cur.publicHost = strings.TrimSpace(publicHost)
+				cur.registerStage = "register_complete"
+				cur.registerMessage = "gateway registration complete"
+			}
+		},
+		OnRegisterProgress: func(stage, message string) {
+			s.tunnelMu.Lock()
+			defer s.tunnelMu.Unlock()
+			if cur, ok := s.tunnels[req.Label]; ok {
+				cur.registerStage = strings.TrimSpace(stage)
+				cur.registerMessage = strings.TrimSpace(message)
 			}
 		},
 		OnDisconnected: func(err error) {
@@ -131,12 +145,14 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 	}()
 
 	return &TunnelStatus{
-		Slug:       req.Slug,
-		Label:      req.Label,
-		GatewayURL: req.GatewayURL,
-		PublicHost: mt.publicHost,
-		Project:    req.Project,
-		Status:     mt.status,
+		Slug:            req.Slug,
+		Label:           req.Label,
+		GatewayURL:      req.GatewayURL,
+		PublicHost:      mt.publicHost,
+		Project:         req.Project,
+		Status:          mt.status,
+		RegisterStage:   mt.registerStage,
+		RegisterMessage: mt.registerMessage,
 	}, nil
 }
 
@@ -182,12 +198,14 @@ func (s *Server) closeTunnel(req TunnelRequest) (*TunnelStatus, error) {
 	mt.cancel()
 	delete(s.tunnels, label)
 	return &TunnelStatus{
-		Slug:       mt.req.Slug,
-		Label:      mt.req.Label,
-		GatewayURL: mt.req.GatewayURL,
-		PublicHost: mt.publicHost,
-		Project:    mt.req.Project,
-		Status:     "stopped",
+		Slug:            mt.req.Slug,
+		Label:           mt.req.Label,
+		GatewayURL:      mt.req.GatewayURL,
+		PublicHost:      mt.publicHost,
+		Project:         mt.req.Project,
+		Status:          "stopped",
+		RegisterStage:   mt.registerStage,
+		RegisterMessage: mt.registerMessage,
 	}, nil
 }
 
@@ -197,13 +215,15 @@ func (s *Server) tunnelsStatus() *TunnelsResponse {
 	resp := &TunnelsResponse{Tunnels: []TunnelStatus{}}
 	for _, mt := range s.tunnels {
 		resp.Tunnels = append(resp.Tunnels, TunnelStatus{
-			Slug:       mt.req.Slug,
-			Label:      mt.req.Label,
-			GatewayURL: mt.req.GatewayURL,
-			PublicHost: mt.publicHost,
-			Project:    mt.req.Project,
-			Status:     mt.status,
-			LastError:  mt.lastError,
+			Slug:            mt.req.Slug,
+			Label:           mt.req.Label,
+			GatewayURL:      mt.req.GatewayURL,
+			PublicHost:      mt.publicHost,
+			Project:         mt.req.Project,
+			Status:          mt.status,
+			LastError:       mt.lastError,
+			RegisterStage:   mt.registerStage,
+			RegisterMessage: mt.registerMessage,
 		})
 	}
 	return resp

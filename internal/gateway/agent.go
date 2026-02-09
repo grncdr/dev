@@ -20,22 +20,28 @@ import (
 )
 
 type Agent struct {
-	GatewayURL     string
-	UpstreamURL    string
-	Project        string
-	Slug           string
-	Label          string
-	AgentID        string
-	Name           string
-	RetryDelay     time.Duration
-	HTTPClient     *http.Client
-	GatewayClient  *http.Client
-	UpstreamClient *http.Client
-	TLSConfig      *tls.Config
-	OnConnected    func()
-	OnDisconnected func(error)
-	OnRegistered   func(publicHost string)
+	GatewayURL         string
+	UpstreamURL        string
+	Project            string
+	Slug               string
+	Label              string
+	AgentID            string
+	Name               string
+	RetryDelay         time.Duration
+	HTTPClient         *http.Client
+	GatewayClient      *http.Client
+	UpstreamClient     *http.Client
+	TLSConfig          *tls.Config
+	OnConnected        func()
+	OnDisconnected     func(error)
+	OnRegistered       func(publicHost string)
+	OnRegisterProgress func(stage, message string)
 }
+
+const (
+	registerRequestTimeout = 5 * time.Minute
+	registerProgressMIME   = "application/x-ndjson"
+)
 
 func (a *Agent) Run(ctx context.Context) error {
 	if a.GatewayURL == "" || a.UpstreamURL == "" || a.Label == "" {
@@ -236,38 +242,101 @@ func (a *Agent) register(ctx context.Context) error {
 		return err
 	}
 	endpoint := base.ResolveReference(&url.URL{Path: "/_agent/register"})
+	query := endpoint.Query()
+	query.Set("stream", "1")
+	endpoint.RawQuery = query.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", registerProgressMIME)
 	client := a.HTTPClient
 	if a.GatewayClient != nil {
 		client = a.GatewayClient
 	}
-	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
-	}
+	client = clientWithMinimumTimeout(client, registerRequestTimeout)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	var out struct {
-		PublicHost string `json:"public_host"`
-	}
-	if resp.StatusCode < 300 {
-		_ = json.NewDecoder(resp.Body).Decode(&out)
-		if a.OnRegistered != nil {
-			a.OnRegistered(strings.TrimSpace(out.PublicHost))
-		}
-		return nil
-	}
 	if resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("register failed: %s %s", resp.Status, strings.TrimSpace(string(b)))
 	}
+
+	var out registerResponse
+	decoder := json.NewDecoder(resp.Body)
+	for {
+		var event registerResponse
+		if err := decoder.Decode(&event); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return fmt.Errorf("decode register response: %w", err)
+		}
+		if event.Type == "progress" {
+			if a.OnRegisterProgress != nil {
+				a.OnRegisterProgress(strings.TrimSpace(event.Stage), strings.TrimSpace(event.Message))
+			}
+			continue
+		}
+		out = event
+		if event.Type == "result" {
+			break
+		}
+		// Backward-compatible handling for older non-streaming JSON responses.
+		if event.Status != "" || event.PublicHost != "" || event.Error != "" || event.Code != "" {
+			break
+		}
+	}
+
+	if strings.EqualFold(strings.TrimSpace(out.Status), "error") || strings.TrimSpace(out.Code) != "" || strings.TrimSpace(out.Error) != "" {
+		return fmt.Errorf("register failed: %s", formatRegisterFailure(out))
+	}
+	if a.OnRegistered != nil {
+		a.OnRegistered(strings.TrimSpace(out.PublicHost))
+	}
 	return nil
+}
+
+type registerResponse struct {
+	Type           string `json:"type"`
+	Stage          string `json:"stage"`
+	Message        string `json:"message"`
+	Status         string `json:"status"`
+	Code           string `json:"code"`
+	Error          string `json:"error"`
+	PublicHost     string `json:"public_host"`
+	PublicHostname string `json:"public_hostname"`
+}
+
+func formatRegisterFailure(out registerResponse) string {
+	code := strings.TrimSpace(out.Code)
+	msg := strings.TrimSpace(out.Error)
+	switch {
+	case code != "" && msg != "":
+		return code + ": " + msg
+	case code != "":
+		return code
+	case msg != "":
+		return msg
+	default:
+		return "unknown register error"
+	}
+}
+
+func clientWithMinimumTimeout(client *http.Client, minTimeout time.Duration) *http.Client {
+	if client == nil {
+		return &http.Client{Timeout: minTimeout}
+	}
+	if client.Timeout >= minTimeout {
+		return client
+	}
+	clone := *client
+	clone.Timeout = minTimeout
+	return &clone
 }
 
 func (a *Agent) connectTunnel(ctx context.Context) (net.Conn, error) {

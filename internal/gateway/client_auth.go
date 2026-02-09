@@ -59,7 +59,7 @@ func MTLSClientForGatewayURL(gatewayURL string, daemonCfg *config.DaemonConfig) 
 		ServerName:   host,
 	}
 	client := &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout: 5 * time.Minute,
 		Transport: &http.Transport{
 			TLSClientConfig: tlsCfg,
 		},

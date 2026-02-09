@@ -23,13 +23,15 @@ type TunnelRequest struct {
 }
 
 type TunnelStatus struct {
-	Slug       string `json:"slug"`
-	Label      string `json:"label"`
-	GatewayURL string `json:"gateway_url"`
-	PublicHost string `json:"public_host,omitempty"`
-	Project    string `json:"project,omitempty"`
-	Status     string `json:"status"`
-	LastError  string `json:"last_error,omitempty"`
+	Slug            string `json:"slug"`
+	Label           string `json:"label"`
+	GatewayURL      string `json:"gateway_url"`
+	PublicHost      string `json:"public_host,omitempty"`
+	Project         string `json:"project,omitempty"`
+	Status          string `json:"status"`
+	LastError       string `json:"last_error,omitempty"`
+	RegisterStage   string `json:"register_stage,omitempty"`
+	RegisterMessage string `json:"register_message,omitempty"`
 }
 
 type TunnelsResponse struct {

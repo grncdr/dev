@@ -117,10 +117,16 @@ func (m *ACMEManager) EnsureLabel(ctx context.Context, label string) error {
 	if err := m.cfg.ManageSync(ctx, []string{name}); err != nil {
 		now := time.Now().UTC()
 		retryAt := nextACMERetry(err, now)
+		if retryAt.After(now) {
+			m.mu.Lock()
+			m.failed[name] = retryAt
+			m.mu.Unlock()
+			return fmt.Errorf("provision wildcard cert %s: %w (next retry after %s)", name, err, retryAt.Format(time.RFC3339))
+		}
 		m.mu.Lock()
-		m.failed[name] = retryAt
+		delete(m.failed, name)
 		m.mu.Unlock()
-		return fmt.Errorf("provision wildcard cert %s: %w (next retry after %s)", name, err, retryAt.Format(time.RFC3339))
+		return fmt.Errorf("provision wildcard cert %s: %w", name, err)
 	}
 	m.mu.Lock()
 	m.ensured[name] = true
@@ -184,6 +190,12 @@ var acmeRetryAfterRE = regexp.MustCompile(`retry after ([0-9]{4}-[0-9]{2}-[0-9]{
 func nextACMERetry(err error, now time.Time) time.Time {
 	if err != nil {
 		msg := err.Error()
+		lower := strings.ToLower(msg)
+		// Cancellation/interruption failures are transient and should be retried
+		// immediately instead of suppressing retries for 15 minutes.
+		if strings.Contains(lower, "context canceled") || strings.Contains(lower, "context deadline exceeded") {
+			return now
+		}
 		matches := acmeRetryAfterRE.FindStringSubmatch(msg)
 		if len(matches) == 2 {
 			if ts, parseErr := time.Parse("2006-01-02 15:04:05 MST", matches[1]); parseErr == nil && ts.After(now) {
