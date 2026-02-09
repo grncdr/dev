@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -68,19 +69,27 @@ func TestIdleTimeoutStopsAndRestartsProxiedProcess(t *testing.T) {
 		t.Fatalf("git init: %v", err)
 	}
 
-	cfg := `
+	// Use the test binary itself as a TCP listener (see testmain_test.go).
+	testBin, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	cfg := fmt.Sprintf(`
 [project]
 name = "demo"
 
 [process.web]
-command = "python3 -m http.server ${PORT}"
+command = "%s -test.run=^$ -test.timeout=30s"
 port = "random"
 health = { type = "tcp" }
 idle_timeout = 1.0
 
+[process.web.env]
+DEV_TEST_TCP_LISTEN = "1"
+
 [[process.web.proxy]]
 path = "/"
-`
+`, testBin)
 	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}

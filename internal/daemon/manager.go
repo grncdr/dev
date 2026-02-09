@@ -673,6 +673,16 @@ func (m *Manager) StatusWorktreeFromRef(slug, project, dirHint string) (*Worktre
 
 	m.mu.Lock()
 	procs, ok := m.processes[slug]
+	// Copy the map entries under the lock so we can iterate without racing
+	// against stopIdleProcess which deletes from the map.
+	type procEntry struct {
+		name string
+		info *processInfo
+	}
+	var entries []procEntry
+	for name, info := range procs {
+		entries = append(entries, procEntry{name, info})
+	}
 	m.mu.Unlock()
 
 	statuses := []ProcessStatus{}
@@ -680,7 +690,8 @@ func (m *Manager) StatusWorktreeFromRef(slug, project, dirHint string) (*Worktre
 		return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses}, nil
 	}
 
-	for name, info := range procs {
+	for _, e := range entries {
+		name, info := e.name, e.info
 		status := "unknown"
 		pid := 0
 		if info != nil && info.cmd != nil && info.cmd.Process != nil {
