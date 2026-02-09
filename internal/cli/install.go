@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -14,6 +15,26 @@ import (
 )
 
 const installHomeEnv = "DEV_INSTALL_HOME"
+
+var (
+	currentGOOS               = runtime.GOOS
+	getEUID                   = os.Geteuid
+	osExecutable              = os.Executable
+	runCommand                = exec.Command
+	runCertInstallFn          = runCertInstall
+	runDNSInstallFn           = runDNSInstall
+	installProxyPrivilegesFn  = installProxyPrivileges
+	reexecWithSudoFn          = reexecWithSudo
+	certComponentInstalledFn  = certComponentInstalled
+	dnsComponentInstalledFn   = dnsComponentInstalled
+	proxyComponentInstalledFn = proxyComponentInstalled
+)
+
+type installStatus struct {
+	certsInstalled bool
+	dnsInstalled   bool
+	proxyInstalled bool
+}
 
 func newInstallCmd() *cobra.Command {
 	var confirm bool
@@ -31,16 +52,37 @@ func newInstallCmd() *cobra.Command {
 }
 
 func runInstall(confirm bool) error {
-	if runtime.GOOS == "windows" {
+	if currentGOOS == "windows" {
 		return errors.New("install is not supported on windows")
 	}
 
-	if os.Geteuid() != 0 {
+	ensureInstallHome()
+
+	status, err := detectInstallStatus()
+	if err != nil {
+		return err
+	}
+
+	if status.certsInstalled {
+		fmt.Println("certs already installed")
+	}
+	if status.dnsInstalled {
+		fmt.Println("dns resolver already installed")
+	}
+	if currentGOOS == "linux" && status.proxyInstalled {
+		fmt.Println("proxy privileges already installed")
+	}
+	if status.allInstalled() {
+		fmt.Println("all components already installed")
+		return nil
+	}
+
+	if getEUID() != 0 {
 		if !confirm {
 			fmt.Println("dev install needs sudo to:")
-			fmt.Println("- write DNS resolver config")
-			fmt.Println("- trust a local CA in the system store")
-			fmt.Println("- enable binding to ports 80/443")
+			for _, action := range status.missingActions() {
+				fmt.Printf("- %s\n", action)
+			}
 			fmt.Print("Continue with sudo? [y/N]: ")
 			reader := bufio.NewReader(os.Stdin)
 			line, _ := reader.ReadString('\n')
@@ -48,33 +90,83 @@ func runInstall(confirm bool) error {
 				return errors.New("install cancelled")
 			}
 		}
-		return reexecWithSudo()
+		return reexecWithSudoFn()
 	}
 
-	ensureInstallHome()
-
-	if err := runCertInstall(); err != nil {
-		return err
+	if !status.certsInstalled {
+		if err := runCertInstallFn(); err != nil {
+			return err
+		}
 	}
-	if err := runDNSInstall(); err != nil {
-		return err
+	if !status.dnsInstalled {
+		if err := runDNSInstallFn(); err != nil {
+			return err
+		}
 	}
-	if err := installProxyPrivileges(); err != nil {
-		return err
+	if currentGOOS == "linux" && !status.proxyInstalled {
+		if err := installProxyPrivilegesFn(); err != nil {
+			return err
+		}
 	}
 
 	fmt.Println("install completed")
 	return nil
 }
 
+func detectInstallStatus() (installStatus, error) {
+	certsInstalled, err := certComponentInstalledFn()
+	if err != nil {
+		return installStatus{}, err
+	}
+	dnsInstalled, err := dnsComponentInstalledFn()
+	if err != nil {
+		return installStatus{}, err
+	}
+
+	status := installStatus{
+		certsInstalled: certsInstalled,
+		dnsInstalled:   dnsInstalled,
+		proxyInstalled: true,
+	}
+	if currentGOOS == "linux" {
+		proxyInstalled, err := proxyComponentInstalledFn()
+		if err != nil {
+			return installStatus{}, err
+		}
+		status.proxyInstalled = proxyInstalled
+	}
+	return status, nil
+}
+
+func (s installStatus) allInstalled() bool {
+	if currentGOOS == "linux" {
+		return s.certsInstalled && s.dnsInstalled && s.proxyInstalled
+	}
+	return s.certsInstalled && s.dnsInstalled
+}
+
+func (s installStatus) missingActions() []string {
+	actions := make([]string, 0, 3)
+	if !s.dnsInstalled {
+		actions = append(actions, "write DNS resolver config")
+	}
+	if !s.certsInstalled {
+		actions = append(actions, "trust a local CA in the system store")
+	}
+	if currentGOOS == "linux" && !s.proxyInstalled {
+		actions = append(actions, "enable binding to ports 80/443")
+	}
+	return actions
+}
+
 func reexecWithSudo() error {
-	exe, err := os.Executable()
+	exe, err := osExecutable()
 	if err != nil {
 		return err
 	}
 
 	home := os.Getenv("HOME")
-	cmd := exec.Command("sudo", "-E", exe, "install", "--confirm")
+	cmd := runCommand("sudo", "-E", exe, "install", "--confirm")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -95,15 +187,85 @@ func ensureInstallHome() {
 }
 
 func installProxyPrivileges() error {
-	if runtime.GOOS != "linux" {
+	if currentGOOS != "linux" {
 		return nil
 	}
-	exe, err := os.Executable()
+	exe, err := osExecutable()
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command("setcap", "cap_net_bind_service=+ep", exe)
+	cmd := runCommand("setcap", "cap_net_bind_service=+ep", exe)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func certComponentInstalled() (bool, error) {
+	dir, err := certsDir()
+	if err != nil {
+		return false, err
+	}
+	required := []string{
+		filepath.Join(dir, "ca-key.pem"),
+		filepath.Join(dir, "ca.pem"),
+		filepath.Join(dir, "localhost-key.pem"),
+		filepath.Join(dir, "localhost.pem"),
+	}
+	for _, path := range required {
+		if _, err := os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				return false, nil
+			}
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+func dnsComponentInstalled() (bool, error) {
+	var path, want string
+	switch currentGOOS {
+	case "darwin":
+		path = resolverPath()
+		want = resolverContent()
+	case "linux":
+		path = linuxResolverPath()
+		want = linuxResolverContent()
+	default:
+		return false, errors.New("dns install is only implemented for macOS and Linux")
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return strings.TrimSpace(string(data)) == strings.TrimSpace(want), nil
+}
+
+func proxyComponentInstalled() (bool, error) {
+	if currentGOOS != "linux" {
+		return true, nil
+	}
+
+	exe, err := osExecutable()
+	if err != nil {
+		return false, err
+	}
+
+	out, err := runCommand("getcap", exe).Output()
+	if err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return false, nil
+		}
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return strings.Contains(string(out), "cap_net_bind_service"), nil
 }
