@@ -7,6 +7,8 @@ import (
 )
 
 func TestBuildRuntimeVarsCoreNames(t *testing.T) {
+	t.Parallel()
+
 	vars := buildRuntimeVars(nil, "myproj", "feature/branch", "/repo/feature/branch", "feature/branch", ".localhost")
 
 	if vars["DEV_PROJECT"] != "myproj" {
@@ -27,6 +29,8 @@ func TestBuildRuntimeVarsCoreNames(t *testing.T) {
 }
 
 func TestBuildRuntimeVarsDNSName(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		slug     string
 		apexZone string
@@ -48,6 +52,8 @@ func TestBuildRuntimeVarsDNSName(t *testing.T) {
 }
 
 func TestBuildRuntimeVarsDNSName_UsesLocalDNSOverride(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.ProjectConfig{
 		Project: config.ProjectBlock{Name: "foocorp"},
 		LocalDNS: config.ProjectLocalDNSBlock{

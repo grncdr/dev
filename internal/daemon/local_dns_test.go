@@ -7,6 +7,8 @@ import (
 )
 
 func TestLocalDNSMatchesName(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name     string
 		apex     string
@@ -25,6 +27,8 @@ func TestLocalDNSMatchesName(t *testing.T) {
 }
 
 func TestLocalDNSAnswersTypes(t *testing.T) {
+	t.Parallel()
+
 	q := mdns.Question{Name: "minio.foocorp.localhost.", Qclass: mdns.ClassINET}
 
 	a := localDNSAnswers(mdns.Question{Name: q.Name, Qtype: mdns.TypeA, Qclass: q.Qclass})

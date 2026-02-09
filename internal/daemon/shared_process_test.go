@@ -29,11 +29,11 @@ name = "demo"
 
 [process.shared]
 singleton = true
-command = "sh -c \"sleep 60\""
+command = "sh -c \"trap 'exit 0' INT TERM; while :; do sleep 1; done\""
 
 [process.worker]
 singleton = false
-command = "sh -c \"sleep 60\""
+command = "sh -c \"trap 'exit 0' INT TERM; while :; do sleep 1; done\""
 `
 	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {
 		t.Fatal(err)

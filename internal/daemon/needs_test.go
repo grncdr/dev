@@ -21,10 +21,10 @@ func TestProcessNeedsStartsDependencies(t *testing.T) {
 name = "demo"
 
 [process.db]
-command = "sh -c \"sleep 60\""
+command = "sh -c \"trap 'exit 0' INT TERM; while :; do sleep 1; done\""
 
 [process.api]
-command = "sh -c \"sleep 60\""
+command = "sh -c \"trap 'exit 0' INT TERM; while :; do sleep 1; done\""
 needs = ["db"]
 `
 	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(cfg), 0o600); err != nil {
@@ -78,10 +78,10 @@ name = "demo"
 
 [process.database]
 singleton = true
-command = "sh -c \"sleep 60\""
+command = "sh -c \"trap 'exit 0' INT TERM; while :; do sleep 1; done\""
 
 [process.server]
-command = "sh -c \"sleep 60\""
+command = "sh -c \"trap 'exit 0' INT TERM; while :; do sleep 1; done\""
 needs = ["database"]
 `
 	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(cfg), 0o600); err != nil {

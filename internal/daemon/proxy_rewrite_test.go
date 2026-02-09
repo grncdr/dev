@@ -10,6 +10,8 @@ import (
 )
 
 func TestRewriteLocation(t *testing.T) {
+	t.Parallel()
+
 	value := "https://app.foo.localhost/path"
 	got, ok := rewriteLocation(value, ".localhost", "foocorp.dev")
 	if !ok {
@@ -21,6 +23,8 @@ func TestRewriteLocation(t *testing.T) {
 }
 
 func TestRewriteCookieDomain(t *testing.T) {
+	t.Parallel()
+
 	cookie := "session=abc; Path=/; Domain=.foo.localhost; HttpOnly"
 	got := rewriteCookieDomain(cookie, ".localhost", "foocorp.dev")
 	if got != "session=abc; Path=/; Domain=.foo.foocorp.dev; HttpOnly" {
@@ -29,6 +33,8 @@ func TestRewriteCookieDomain(t *testing.T) {
 }
 
 func TestRewriteCookieDomainForTunnel_SwapsTunnelAndLocalLabels(t *testing.T) {
+	t.Parallel()
+
 	cookie := "session=abc; Path=/; Domain=app.foocorp.localhost; HttpOnly"
 	got := rewriteCookieDomainForTunnel(cookie, "app.foocorp.localhost", "app.bobs-main-branch.public.example.com", ".localhost", "public.example.com")
 	if got != "session=abc; Path=/; Domain=app.bobs-main-branch.public.example.com; HttpOnly" {
@@ -37,6 +43,8 @@ func TestRewriteCookieDomainForTunnel_SwapsTunnelAndLocalLabels(t *testing.T) {
 }
 
 func TestRewriteLocationForTunnel_PreservesSubdomainsAndSwapsSuffix(t *testing.T) {
+	t.Parallel()
+
 	value := "https://api.app.foocorp.localhost/path"
 	got, ok := rewriteLocationForTunnel(value, "app.foocorp.localhost", "app.bobs-main-branch.public.example.com", ".localhost", "public.example.com")
 	if !ok {
@@ -48,6 +56,8 @@ func TestRewriteLocationForTunnel_PreservesSubdomainsAndSwapsSuffix(t *testing.T
 }
 
 func TestRewriteRequestOriginForTunnel_PreservesSubdomainsAndSwapsSuffix(t *testing.T) {
+	t.Parallel()
+
 	header := make(http.Header)
 	header.Set("Origin", "https://api.app.bobs-main-branch.public.example.com")
 
@@ -59,6 +69,8 @@ func TestRewriteRequestOriginForTunnel_PreservesSubdomainsAndSwapsSuffix(t *test
 }
 
 func TestDerivePublicApex(t *testing.T) {
+	t.Parallel()
+
 	got, ok := derivePublicApex("app.slug.localhost", "app.share.foocorp.dev", ".localhost")
 	if !ok {
 		t.Fatalf("expected derived apex")
@@ -69,6 +81,8 @@ func TestDerivePublicApex(t *testing.T) {
 }
 
 func TestRewriteRequestCookieDomainValue(t *testing.T) {
+	t.Parallel()
+
 	in := `$Version=1; session=abc; $Domain=".foo.foocorp.dev"; $Path="/"`
 	got := rewriteRequestCookieDomainValue(in, "foocorp.dev", "localhost")
 	want := `$Version=1; session=abc; $Domain=".foo.localhost"; $Path="/"`
@@ -78,6 +92,8 @@ func TestRewriteRequestCookieDomainValue(t *testing.T) {
 }
 
 func TestRewriteRequestOrigin(t *testing.T) {
+	t.Parallel()
+
 	header := make(http.Header)
 	header.Set("Origin", "https://app.slug.foocorp.dev")
 
@@ -89,6 +105,8 @@ func TestRewriteRequestOrigin(t *testing.T) {
 }
 
 func TestRewriteRequestOriginNoMatch(t *testing.T) {
+	t.Parallel()
+
 	header := make(http.Header)
 	header.Set("Origin", "https://app.slug.example.com")
 
@@ -100,6 +118,8 @@ func TestRewriteRequestOriginNoMatch(t *testing.T) {
 }
 
 func TestRewriteRequestOriginInvalidValue(t *testing.T) {
+	t.Parallel()
+
 	header := make(http.Header)
 	header.Set("Origin", "not a url")
 
@@ -111,6 +131,8 @@ func TestRewriteRequestOriginInvalidValue(t *testing.T) {
 }
 
 func TestRewriteResponseBody_Text(t *testing.T) {
+	t.Parallel()
+
 	body := []byte(`<a href="https://app.feature.localhost/path">x</a>`)
 	resp := &http.Response{
 		Header:        make(http.Header),
@@ -131,6 +153,8 @@ func TestRewriteResponseBody_Text(t *testing.T) {
 }
 
 func TestRewriteResponseBody_Gzip(t *testing.T) {
+	t.Parallel()
+
 	plain := []byte(`{"url":"https:\/\/app.feature.localhost\/api"}`)
 	var compressed bytes.Buffer
 	zw := gzip.NewWriter(&compressed)
@@ -169,6 +193,8 @@ func TestRewriteResponseBody_Gzip(t *testing.T) {
 }
 
 func TestRewriteResponseBody_SkipsBinary(t *testing.T) {
+	t.Parallel()
+
 	body := []byte{0x89, 0x50, 0x4E, 0x47}
 	resp := &http.Response{
 		Header:        make(http.Header),
@@ -189,6 +215,8 @@ func TestRewriteResponseBody_SkipsBinary(t *testing.T) {
 }
 
 func TestRewriteResponseBody_SkipsLarge(t *testing.T) {
+	t.Parallel()
+
 	body := bytes.Repeat([]byte("a"), maxRewriteBodyBytes+1)
 	resp := &http.Response{
 		Header:        make(http.Header),

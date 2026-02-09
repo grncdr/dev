@@ -7,6 +7,8 @@ import (
 )
 
 func TestTrimOpenFileToMax(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.log")
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
@@ -34,6 +36,8 @@ func TestTrimOpenFileToMax(t *testing.T) {
 }
 
 func TestAppendOpenFileWithRetention(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	path := filepath.Join(dir, "append.log")
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)

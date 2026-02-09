@@ -33,7 +33,7 @@ name = "demo"
 [process.http]
 singleton = false
 port = "random"
-command = "sh -c \"echo ${PORT} > port.txt; sleep 30\""
+command = "sh -c \"echo ${PORT} > port.txt; trap 'exit 0' INT TERM; while :; do sleep 1; done\""
 `
 	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {
 		t.Fatal(err)

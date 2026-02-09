@@ -27,7 +27,7 @@ func TestDaemonRestoresWorktreesAfterCleanShutdown(t *testing.T) {
 name = "demo"
 
 [process.sleeper]
-command = "sh -c \"sleep 60\""
+command = "sh -c \"trap 'exit 0' INT TERM; while :; do sleep 1; done\""
 port = "random"
 `
 	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {

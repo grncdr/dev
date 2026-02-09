@@ -7,6 +7,8 @@ import (
 )
 
 func TestApplyForwardedHeadersTransparent(t *testing.T) {
+	t.Parallel()
+
 	req := &http.Request{Header: make(http.Header)}
 	req.Header.Set("X-Forwarded-Host", "foo.localhost")
 	req.Header.Set("X-Forwarded-For", "127.0.0.1")
@@ -25,6 +27,8 @@ func TestApplyForwardedHeadersTransparent(t *testing.T) {
 }
 
 func TestApplyForwardedHeadersReverse(t *testing.T) {
+	t.Parallel()
+
 	req := &http.Request{Header: make(http.Header)}
 	req.Header.Set("X-Forwarded-Host", "foo.localhost")
 	req.Header.Set("X-Forwarded-For", "127.0.0.1")
@@ -43,6 +47,8 @@ func TestApplyForwardedHeadersReverse(t *testing.T) {
 }
 
 func TestAuthenticateGatewayTunnelRequest(t *testing.T) {
+	t.Parallel()
+
 	req := httptest.NewRequest(http.MethodGet, "https://label.public.example.test", nil)
 	req.SetBasicAuth("alice", "secret")
 	rr := httptest.NewRecorder()
@@ -56,6 +62,8 @@ func TestAuthenticateGatewayTunnelRequest(t *testing.T) {
 }
 
 func TestAuthenticateGatewayTunnelRequest_RejectsInvalidCredentials(t *testing.T) {
+	t.Parallel()
+
 	req := httptest.NewRequest(http.MethodGet, "https://label.public.example.test", nil)
 	req.SetBasicAuth("alice", "wrong")
 	rr := httptest.NewRecorder()

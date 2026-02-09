@@ -16,6 +16,8 @@ import (
 )
 
 func TestProxyCertProviderIssuesPerHostCertificates(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	caKeyPath, caCertPath, caKey, caCert := writeTestCA(t, dir)
 	defaultCert, err := issueLeafCert("localhost", caKey, caCert)

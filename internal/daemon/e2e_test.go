@@ -31,7 +31,7 @@ main_slug = "demo-main"
 
 [process.sleeper]
 singleton = false
-command = "sh -c \"echo ${SLEEPER_FLAG}; echo ${DEV_WORKTREE_DNS_NAME}; sleep 60\""
+command = "sh -c \"echo ${SLEEPER_FLAG}; echo ${DEV_WORKTREE_DNS_NAME}; trap 'exit 0' INT TERM; while :; do sleep 1; done\""
 port = "unix"
 
 [process.sleeper.env]
