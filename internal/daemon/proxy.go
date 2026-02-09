@@ -229,11 +229,16 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 		host, _, _ = strings.Cut(host, ":")
 	}
 	routeHost := host
+	rewriteLocalHost := host
 	isGatewayTunnel := false
 	gatewayAuthUsername := ""
 	gatewayAuthPassword := ""
 	if route, ok := s.localProxyRouteForTunnelRequest(host); ok {
-		routeHost = route.LocalHost
+		routeHost = route.RouteHost
+		if strings.TrimSpace(routeHost) == "" {
+			routeHost = route.LocalHost
+		}
+		rewriteLocalHost = route.LocalHost
 		isGatewayTunnel = true
 		gatewayAuthUsername = route.AuthUsername
 		gatewayAuthPassword = route.AuthPassword
@@ -280,15 +285,15 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 	target, _ := url.Parse("http://unix")
 	reverseProxy := httputil.NewSingleHostReverseProxy(target)
 	localApex := s.projectApexZone()
-	publicApex, hasPublicApex := derivePublicApex(routeHost, host, localApex)
+	publicApex, hasPublicApex := derivePublicApex(rewriteLocalHost, host, localApex)
 	originalDirector := reverseProxy.Director
 	reverseProxy.Director = func(req *http.Request) {
 		originalDirector(req)
-		req.Host = routeHost
+		req.Host = rewriteLocalHost
 		applyForwardedHeaders(req, rewriteMode)
 		if rewriteMode && hasPublicApex {
-			rewriteRequestCookieDomain(req.Header, publicApex, localApex)
-			rewriteRequestOrigin(req.Header, publicApex, localApex)
+			rewriteRequestCookieDomainForTunnel(req.Header, host, rewriteLocalHost, publicApex, localApex)
+			rewriteRequestOriginForTunnel(req.Header, host, rewriteLocalHost, publicApex, localApex)
 		}
 	}
 	reverseProxy.Transport = &http.Transport{
@@ -296,21 +301,21 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 			return net.Dial(network, address)
 		},
 	}
-	rewriteDomain, rewroteDomain := replaceDomainApex(routeHost, localApex, publicApex)
+	rewriteDomain, rewroteDomain := replaceHostLocalToPublic(rewriteLocalHost, rewriteLocalHost, host, localApex, publicApex)
 	if !rewroteDomain || rewriteDomain == "" {
 		rewriteDomain = host
 	}
 	reverseProxy.ModifyResponse = func(resp *http.Response) error {
 		if rewriteMode {
 			if loc := resp.Header.Get("Location"); loc != "" {
-				if rewritten, ok := rewriteLocation(loc, localApex, publicApex); ok {
+				if rewritten, ok := rewriteLocationForTunnel(loc, rewriteLocalHost, host, localApex, publicApex); ok {
 					resp.Header.Set("Location", rewritten)
 				}
 			}
 			if localApex != "" && hasPublicApex {
-				rewriteSetCookieDomain(resp.Header, localApex, publicApex)
+				rewriteSetCookieDomainForTunnel(resp.Header, rewriteLocalHost, host, localApex, publicApex)
 			}
-			if err := rewriteResponseBody(resp, routeHost, rewriteDomain); err != nil {
+			if err := rewriteResponseBody(resp, rewriteLocalHost, rewriteDomain); err != nil {
 				return err
 			}
 		}

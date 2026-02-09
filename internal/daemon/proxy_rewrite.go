@@ -30,6 +30,21 @@ func rewriteLocation(value, localApex, publicApex string) (string, bool) {
 	return value, false
 }
 
+func rewriteLocationForTunnel(value, localHost, publicHost, localApex, publicApex string) (string, bool) {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return value, false
+	}
+	if !parsed.IsAbs() {
+		return value, false
+	}
+	if rewritten, ok := replaceHostLocalToPublic(parsed.Host, localHost, publicHost, localApex, publicApex); ok {
+		parsed.Host = rewritten
+		return parsed.String(), true
+	}
+	return value, false
+}
+
 func rewriteSetCookieDomain(header http.Header, localApex, publicApex string) {
 	cookies := header.Values("Set-Cookie")
 	if len(cookies) == 0 {
@@ -38,6 +53,21 @@ func rewriteSetCookieDomain(header http.Header, localApex, publicApex string) {
 	updated := make([]string, 0, len(cookies))
 	for _, cookie := range cookies {
 		updated = append(updated, rewriteCookieDomain(cookie, localApex, publicApex))
+	}
+	header.Del("Set-Cookie")
+	for _, cookie := range updated {
+		header.Add("Set-Cookie", cookie)
+	}
+}
+
+func rewriteSetCookieDomainForTunnel(header http.Header, localHost, publicHost, localApex, publicApex string) {
+	cookies := header.Values("Set-Cookie")
+	if len(cookies) == 0 {
+		return
+	}
+	updated := make([]string, 0, len(cookies))
+	for _, cookie := range cookies {
+		updated = append(updated, rewriteCookieDomainForTunnel(cookie, localHost, publicHost, localApex, publicApex))
 	}
 	header.Del("Set-Cookie")
 	for _, cookie := range updated {
@@ -60,6 +90,21 @@ func rewriteRequestCookieDomain(header http.Header, publicApex, localApex string
 	}
 }
 
+func rewriteRequestCookieDomainForTunnel(header http.Header, publicHost, localHost, publicApex, localApex string) {
+	cookies := header.Values("Cookie")
+	if len(cookies) == 0 {
+		return
+	}
+	updated := make([]string, 0, len(cookies))
+	for _, cookie := range cookies {
+		updated = append(updated, rewriteRequestCookieDomainValueForTunnel(cookie, publicHost, localHost, publicApex, localApex))
+	}
+	header.Del("Cookie")
+	for _, cookie := range updated {
+		header.Add("Cookie", cookie)
+	}
+}
+
 func rewriteRequestOrigin(header http.Header, publicApex, localApex string) {
 	origin := strings.TrimSpace(header.Get("Origin"))
 	if origin == "" || strings.EqualFold(origin, "null") {
@@ -70,6 +115,23 @@ func rewriteRequestOrigin(header http.Header, publicApex, localApex string) {
 		return
 	}
 	rewrittenHost, ok := replaceHostApex(parsed.Host, publicApex, localApex)
+	if !ok {
+		return
+	}
+	parsed.Host = rewrittenHost
+	header.Set("Origin", parsed.String())
+}
+
+func rewriteRequestOriginForTunnel(header http.Header, publicHost, localHost, publicApex, localApex string) {
+	origin := strings.TrimSpace(header.Get("Origin"))
+	if origin == "" || strings.EqualFold(origin, "null") {
+		return
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || !parsed.IsAbs() || parsed.Host == "" {
+		return
+	}
+	rewrittenHost, ok := replaceHostPublicToLocal(parsed.Host, publicHost, localHost, publicApex, localApex)
 	if !ok {
 		return
 	}
@@ -103,6 +165,32 @@ func rewriteRequestCookieDomainValue(value, publicApex, localApex string) string
 	return strings.Join(parts, ";")
 }
 
+func rewriteRequestCookieDomainValueForTunnel(value, publicHost, localHost, publicApex, localApex string) string {
+	parts := strings.Split(value, ";")
+	for i, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		lower := strings.ToLower(trimmed)
+		if !strings.HasPrefix(lower, "$domain=") {
+			continue
+		}
+		raw := strings.TrimSpace(trimmed[len("$Domain="):])
+		quoted := strings.HasPrefix(raw, "\"") && strings.HasSuffix(raw, "\"") && len(raw) >= 2
+		domain := raw
+		if quoted {
+			domain = raw[1 : len(raw)-1]
+		}
+		rewritten, ok := replaceDomainPublicToLocal(domain, publicHost, localHost, publicApex, localApex)
+		if !ok {
+			continue
+		}
+		if quoted {
+			rewritten = `"` + rewritten + `"`
+		}
+		parts[i] = " $Domain=" + rewritten
+	}
+	return strings.Join(parts, ";")
+}
+
 func rewriteCookieDomain(value, localApex, publicApex string) string {
 	parts := strings.Split(value, ";")
 	for i, part := range parts {
@@ -114,6 +202,22 @@ func rewriteCookieDomain(value, localApex, publicApex string) string {
 			}
 			return strings.Join(parts, ";")
 		}
+	}
+	return value
+}
+
+func rewriteCookieDomainForTunnel(value, localHost, publicHost, localApex, publicApex string) string {
+	parts := strings.Split(value, ";")
+	for i, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if !strings.HasPrefix(strings.ToLower(trimmed), "domain=") {
+			continue
+		}
+		domainValue := strings.TrimSpace(trimmed[len("domain="):])
+		if rewritten, ok := replaceDomainLocalToPublic(domainValue, localHost, publicHost, localApex, publicApex); ok {
+			parts[i] = " Domain=" + rewritten
+		}
+		return strings.Join(parts, ";")
 	}
 	return value
 }
@@ -135,6 +239,134 @@ func replaceHostApex(hostPort, localApex, publicApex string) (string, bool) {
 		return net.JoinHostPort(rewritten, port), true
 	}
 	return rewritten, true
+}
+
+func replaceHostLocalToPublic(hostPort, localHost, publicHost, localApex, publicApex string) (string, bool) {
+	rewritten, ok := replaceHostApex(hostPort, localApex, publicApex)
+	if !ok {
+		return hostPort, false
+	}
+	localLabel, publicLabel, labelOK := gatewayLabelPair(localHost, publicHost, localApex, publicApex)
+	if !labelOK {
+		return rewritten, true
+	}
+	if withLabel, ok := replaceHostGatewayLabelForApex(rewritten, publicApex, localLabel, publicLabel); ok {
+		return withLabel, true
+	}
+	return rewritten, true
+}
+
+func replaceHostPublicToLocal(hostPort, publicHost, localHost, publicApex, localApex string) (string, bool) {
+	rewritten, ok := replaceHostApex(hostPort, publicApex, localApex)
+	if !ok {
+		return hostPort, false
+	}
+	localLabel, publicLabel, labelOK := gatewayLabelPair(localHost, publicHost, localApex, publicApex)
+	if !labelOK {
+		return rewritten, true
+	}
+	if withLabel, ok := replaceHostGatewayLabelForApex(rewritten, localApex, publicLabel, localLabel); ok {
+		return withLabel, true
+	}
+	return rewritten, true
+}
+
+func replaceDomainLocalToPublic(domain, localHost, publicHost, localApex, publicApex string) (string, bool) {
+	rewritten, ok := replaceDomainApex(domain, localApex, publicApex)
+	if !ok {
+		return domain, false
+	}
+	localLabel, publicLabel, labelOK := gatewayLabelPair(localHost, publicHost, localApex, publicApex)
+	if !labelOK {
+		return rewritten, true
+	}
+	if withLabel, ok := replaceDomainGatewayLabelForApex(rewritten, publicApex, localLabel, publicLabel); ok {
+		return withLabel, true
+	}
+	return rewritten, true
+}
+
+func replaceDomainPublicToLocal(domain, publicHost, localHost, publicApex, localApex string) (string, bool) {
+	rewritten, ok := replaceDomainApex(domain, publicApex, localApex)
+	if !ok {
+		return domain, false
+	}
+	localLabel, publicLabel, labelOK := gatewayLabelPair(localHost, publicHost, localApex, publicApex)
+	if !labelOK {
+		return rewritten, true
+	}
+	if withLabel, ok := replaceDomainGatewayLabelForApex(rewritten, localApex, publicLabel, localLabel); ok {
+		return withLabel, true
+	}
+	return rewritten, true
+}
+
+func gatewayLabelPair(localHost, publicHost, localApex, publicApex string) (localLabel, publicLabel string, ok bool) {
+	localLabels := strings.Split(normalizeProxyHost(localHost), ".")
+	publicLabels := strings.Split(normalizeProxyHost(publicHost), ".")
+	localApexLabels := strings.Split(strings.TrimPrefix(strings.ToLower(strings.TrimSpace(localApex)), "."), ".")
+	publicApexLabels := strings.Split(strings.TrimPrefix(strings.ToLower(strings.TrimSpace(publicApex)), "."), ".")
+	if len(localLabels) <= len(localApexLabels) || len(publicLabels) <= len(publicApexLabels) {
+		return "", "", false
+	}
+	localIdx := len(localLabels) - len(localApexLabels) - 1
+	publicIdx := len(publicLabels) - len(publicApexLabels) - 1
+	if localIdx < 0 || publicIdx < 0 {
+		return "", "", false
+	}
+	return localLabels[localIdx], publicLabels[publicIdx], true
+}
+
+func replaceHostGatewayLabelForApex(hostPort, apex, fromLabel, toLabel string) (string, bool) {
+	host := hostPort
+	port := ""
+	if strings.Contains(hostPort, ":") {
+		if h, p, err := net.SplitHostPort(hostPort); err == nil {
+			host = h
+			port = p
+		}
+	}
+	rewritten, ok := replaceDomainGatewayLabelForApex(host, apex, fromLabel, toLabel)
+	if !ok {
+		return hostPort, false
+	}
+	if port != "" {
+		return net.JoinHostPort(rewritten, port), true
+	}
+	return rewritten, true
+}
+
+func replaceDomainGatewayLabelForApex(domain, apex, fromLabel, toLabel string) (string, bool) {
+	domain = strings.TrimSpace(domain)
+	if domain == "" {
+		return domain, false
+	}
+	prefixDot := strings.HasPrefix(domain, ".")
+	base := strings.TrimPrefix(strings.ToLower(domain), ".")
+	apexBase := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(apex)), ".")
+	if base == "" || apexBase == "" {
+		return domain, false
+	}
+	labels := strings.Split(base, ".")
+	apexLabels := strings.Split(apexBase, ".")
+	if len(labels) <= len(apexLabels) {
+		return domain, false
+	}
+	for i := 1; i <= len(apexLabels); i++ {
+		if labels[len(labels)-i] != apexLabels[len(apexLabels)-i] {
+			return domain, false
+		}
+	}
+	labelIdx := len(labels) - len(apexLabels) - 1
+	if labelIdx < 0 || !strings.EqualFold(labels[labelIdx], strings.ToLower(strings.TrimSpace(fromLabel))) {
+		return domain, false
+	}
+	labels[labelIdx] = strings.ToLower(strings.TrimSpace(toLabel))
+	out := strings.Join(labels, ".")
+	if prefixDot {
+		return "." + out, true
+	}
+	return out, true
 }
 
 func replaceDomainApex(domain, localApex, publicApex string) (string, bool) {

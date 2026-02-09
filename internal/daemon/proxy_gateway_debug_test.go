@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"dev/internal/config"
@@ -86,7 +87,7 @@ proxy = { path = "/" }
 		t.Fatalf("read response body: %v", err)
 	}
 	bodyText := string(body)
-	if !strings.Contains(bodyText, "https://main.public.example.com/ping") {
+	if !strings.Contains(bodyText, "https://xyzz.public.example.com/ping") {
 		t.Fatalf("expected rewritten response body, got %q", bodyText)
 	}
 
@@ -108,7 +109,7 @@ proxy = { path = "/" }
 	if !strings.Contains(transcript, "HTTP/1.1 200 OK") {
 		t.Fatalf("expected response status line in transcript, got:\n%s", transcript)
 	}
-	if !strings.Contains(transcript, "redirect https://main.public.example.com/ping") {
+	if !strings.Contains(transcript, "redirect https://xyzz.public.example.com/ping") {
 		t.Fatalf("expected rewritten response body in transcript, got:\n%s", transcript)
 	}
 	if !strings.Contains(transcript, gatewayTranscriptExchangeDelimiterPrefix) {
@@ -270,5 +271,120 @@ proxy = { path = "/" }
 	}
 	if got := resp.Header.Get("WWW-Authenticate"); got == "" {
 		t.Fatalf("expected WWW-Authenticate header")
+	}
+}
+
+func TestHandleProxyHTTPS_GatewayRewriteWithMainDNSOverride(t *testing.T) {
+	base := t.TempDir()
+	cfgPath := filepath.Join(base, ".dev.toml")
+	cfgBody := `
+[project]
+name = "foocorp"
+
+[local-dns]
+overrides = { main = "foocorp" }
+
+[gateway]
+expose = { web = { mode = "rewrite" } }
+
+[process.web]
+proxy = { subdomain = "app", path = "/" }
+`
+	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var (
+		mu             sync.Mutex
+		upstreamHost   string
+		upstreamOrigin string
+		upstreamCookie string
+	)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		upstreamHost = r.Host
+		upstreamOrigin = r.Header.Get("Origin")
+		upstreamCookie = r.Header.Get("Cookie")
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Location", "https://api.app.foocorp.localhost/ping")
+		w.Header().Add("Set-Cookie", "session=abc; Domain=app.foocorp.localhost; Path=/; HttpOnly")
+		_, _ = w.Write([]byte("redirect https://api.app.foocorp.localhost/ping"))
+	}))
+	defer upstream.Close()
+
+	upstreamAddr := strings.TrimPrefix(upstream.URL, "http://")
+	mgr := NewManager()
+	mgr.paths["main"] = base
+	mgr.processes["main"] = map[string]*processInfo{
+		"web": {
+			network: "tcp",
+			address: upstreamAddr,
+			cmd:     &exec.Cmd{Process: &os.Process{Pid: 1}},
+			ready:   true,
+			exited:  make(chan struct{}),
+		},
+	}
+
+	s := &Server{
+		manager: mgr,
+		daemonConfig: &config.DaemonConfig{
+			LocalProxy: config.DaemonLocalProxyBlock{
+				ApexZone: ".localhost",
+				Allow:    "all",
+			},
+		},
+		tunnels: map[string]*managedTunnel{
+			"bobs-main-branch": {
+				req: TunnelRequest{
+					Slug:  "main",
+					Label: "bobs-main-branch",
+				},
+				status: "connected",
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "https://app.bobs-main-branch.public.example.com/ping", nil)
+	req.Host = "app.bobs-main-branch.public.example.com"
+	req.Header.Set("Origin", "https://api.app.bobs-main-branch.public.example.com")
+	req.Header.Set("Cookie", `$Version=1; sid=abc; $Domain=".api.app.bobs-main-branch.public.example.com"; $Path="/"`)
+	rec := httptest.NewRecorder()
+	s.handleProxyHTTPS(rec, req)
+	resp := rec.Result()
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	mu.Lock()
+	gotUpstreamHost := upstreamHost
+	gotUpstreamOrigin := upstreamOrigin
+	gotUpstreamCookie := upstreamCookie
+	mu.Unlock()
+	if gotUpstreamHost != "app.foocorp.localhost" {
+		t.Fatalf("expected upstream host app.foocorp.localhost, got %q", gotUpstreamHost)
+	}
+	if gotUpstreamOrigin != "https://api.app.foocorp.localhost" {
+		t.Fatalf("expected rewritten upstream Origin, got %q", gotUpstreamOrigin)
+	}
+	if !strings.Contains(gotUpstreamCookie, `$Domain=".api.app.foocorp.localhost"`) {
+		t.Fatalf("expected rewritten upstream cookie domain, got %q", gotUpstreamCookie)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if got := string(body); !strings.Contains(got, "https://api.app.bobs-main-branch.public.example.com/ping") {
+		t.Fatalf("expected rewritten body host, got %q", got)
+	}
+
+	if got := resp.Header.Get("Location"); got != "https://api.app.bobs-main-branch.public.example.com/ping" {
+		t.Fatalf("unexpected rewritten location: %q", got)
+	}
+	if got := resp.Header.Get("Set-Cookie"); got != "session=abc; Domain=app.bobs-main-branch.public.example.com; Path=/; HttpOnly" {
+		t.Fatalf("unexpected rewritten cookie: %q", got)
 	}
 }

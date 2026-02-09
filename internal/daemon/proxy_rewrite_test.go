@@ -28,6 +28,36 @@ func TestRewriteCookieDomain(t *testing.T) {
 	}
 }
 
+func TestRewriteCookieDomainForTunnel_SwapsTunnelAndLocalLabels(t *testing.T) {
+	cookie := "session=abc; Path=/; Domain=app.foocorp.localhost; HttpOnly"
+	got := rewriteCookieDomainForTunnel(cookie, "app.foocorp.localhost", "app.bobs-main-branch.public.example.com", ".localhost", "public.example.com")
+	if got != "session=abc; Path=/; Domain=app.bobs-main-branch.public.example.com; HttpOnly" {
+		t.Fatalf("unexpected cookie: %s", got)
+	}
+}
+
+func TestRewriteLocationForTunnel_PreservesSubdomainsAndSwapsSuffix(t *testing.T) {
+	value := "https://api.app.foocorp.localhost/path"
+	got, ok := rewriteLocationForTunnel(value, "app.foocorp.localhost", "app.bobs-main-branch.public.example.com", ".localhost", "public.example.com")
+	if !ok {
+		t.Fatalf("expected rewrite")
+	}
+	if got != "https://api.app.bobs-main-branch.public.example.com/path" {
+		t.Fatalf("unexpected rewrite: %s", got)
+	}
+}
+
+func TestRewriteRequestOriginForTunnel_PreservesSubdomainsAndSwapsSuffix(t *testing.T) {
+	header := make(http.Header)
+	header.Set("Origin", "https://api.app.bobs-main-branch.public.example.com")
+
+	rewriteRequestOriginForTunnel(header, "app.bobs-main-branch.public.example.com", "app.foocorp.localhost", "public.example.com", ".localhost")
+
+	if got := header.Get("Origin"); got != "https://api.app.foocorp.localhost" {
+		t.Fatalf("unexpected Origin rewrite: %s", got)
+	}
+}
+
 func TestDerivePublicApex(t *testing.T) {
 	got, ok := derivePublicApex("app.slug.localhost", "app.share.foocorp.dev", ".localhost")
 	if !ok {

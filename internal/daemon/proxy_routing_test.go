@@ -102,6 +102,9 @@ func TestLocalProxyRouteForTunnelRequest_IncludesAuthCredentials(t *testing.T) {
 	if route.LocalHost != "feature-branch.localhost" {
 		t.Fatalf("expected rewritten host, got %q", route.LocalHost)
 	}
+	if route.RouteHost != "feature-branch.localhost" {
+		t.Fatalf("expected canonical route host, got %q", route.RouteHost)
+	}
 	if route.AuthUsername != "alice" || route.AuthPassword != "secret" {
 		t.Fatalf("expected auth credentials from tunnel request, got %+v", route)
 	}
@@ -158,6 +161,17 @@ overrides = { main = "foocorp" }
 	got, ok := s.localProxyHostForTunnelRequest("app.foocorp.foocorp.dev")
 	if !ok || got != "app.foocorp.localhost" {
 		t.Fatalf("expected remapped host rewrite, got %q ok=%v", got, ok)
+	}
+
+	route, ok := s.localProxyRouteForTunnelRequest("app.foocorp.foocorp.dev")
+	if !ok {
+		t.Fatalf("expected route")
+	}
+	if route.LocalHost != "app.foocorp.localhost" {
+		t.Fatalf("expected remapped local host, got %q", route.LocalHost)
+	}
+	if route.RouteHost != "app.main.localhost" {
+		t.Fatalf("expected canonical route host to use tunnel slug, got %q", route.RouteHost)
 	}
 }
 

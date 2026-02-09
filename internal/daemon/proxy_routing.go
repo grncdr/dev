@@ -35,6 +35,7 @@ type proxyMatcher struct {
 
 type tunnelProxyRoute struct {
 	LocalHost    string
+	RouteHost    string
 	AuthUsername string
 	AuthPassword string
 }
@@ -108,6 +109,10 @@ func (s *Server) localProxyRouteForTunnelRequest(host string) (tunnelProxyRoute,
 		if !ok {
 			continue
 		}
+		canonicalSlug := strings.TrimSpace(mt.req.Slug)
+		if canonicalSlug == "" {
+			continue
+		}
 		apex := strings.TrimPrefix(strings.ToLower(s.projectApexZone()), ".")
 		if apex == "" {
 			apex = "localhost"
@@ -118,9 +123,11 @@ func (s *Server) localProxyRouteForTunnelRequest(host string) (tunnelProxyRoute,
 		}
 		if idx == 0 {
 			route.LocalHost = routeSlug + "." + apex
+			route.RouteHost = canonicalSlug + "." + apex
 			return route, true
 		}
 		route.LocalHost = labels[0] + "." + routeSlug + "." + apex
+		route.RouteHost = labels[0] + "." + canonicalSlug + "." + apex
 		return route, true
 	}
 	return tunnelProxyRoute{}, false

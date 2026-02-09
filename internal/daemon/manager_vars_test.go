@@ -1,9 +1,13 @@
 package daemon
 
-import "testing"
+import (
+	"testing"
+
+	"dev/internal/config"
+)
 
 func TestBuildRuntimeVarsCoreNames(t *testing.T) {
-	vars := buildRuntimeVars("myproj", "feature/branch", "/repo/feature/branch", "feature/branch", ".localhost")
+	vars := buildRuntimeVars(nil, "myproj", "feature/branch", "/repo/feature/branch", "feature/branch", ".localhost")
 
 	if vars["DEV_PROJECT"] != "myproj" {
 		t.Fatalf("expected DEV_PROJECT, got %q", vars["DEV_PROJECT"])
@@ -35,10 +39,25 @@ func TestBuildRuntimeVarsDNSName(t *testing.T) {
 		{"main", "", "main.localhost"},
 	}
 	for _, tc := range cases {
-		vars := buildRuntimeVars("proj", tc.slug, "/repo", "main", tc.apexZone)
+		vars := buildRuntimeVars(nil, "proj", tc.slug, "/repo", "main", tc.apexZone)
 		if vars["DEV_WORKTREE_DNS_NAME"] != tc.expected {
 			t.Errorf("slug=%q apexZone=%q: expected DEV_WORKTREE_DNS_NAME=%q, got %q",
 				tc.slug, tc.apexZone, tc.expected, vars["DEV_WORKTREE_DNS_NAME"])
 		}
+	}
+}
+
+func TestBuildRuntimeVarsDNSName_UsesLocalDNSOverride(t *testing.T) {
+	cfg := &config.ProjectConfig{
+		Project: config.ProjectBlock{Name: "foocorp"},
+		LocalDNS: config.ProjectLocalDNSBlock{
+			Overrides: map[string]string{
+				"main": "foocorp",
+			},
+		},
+	}
+	vars := buildRuntimeVars(cfg, "foocorp", "main", "/repo", "main", ".localhost")
+	if vars["DEV_WORKTREE_DNS_NAME"] != "foocorp.localhost" {
+		t.Fatalf("expected remapped dns name, got %q", vars["DEV_WORKTREE_DNS_NAME"])
 	}
 }

@@ -163,7 +163,7 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 	m.mu.Lock()
 	apexZone := m.apexZone
 	m.mu.Unlock()
-	runtimeVars := buildRuntimeVars(projectID, slug, path, branch, apexZone)
+	runtimeVars := buildRuntimeVars(cfg, projectID, slug, path, branch, apexZone)
 	templateVars := buildTemplateVars(runtimeVars, mainPath, worktreeState)
 	if err := runHook(cfg.Hooks.PreStart, cfg.Commands.Wrapper, "pre_start", path, runtimeVars); err != nil {
 		return nil, err
@@ -587,7 +587,7 @@ func (m *Manager) stopWorktreeFromRef(slug, project, dirHint string, processes [
 	m.mu.Lock()
 	apexZone := m.apexZone
 	m.mu.Unlock()
-	runtimeVars := buildRuntimeVars(projectID, slug, path, branch, apexZone)
+	runtimeVars := buildRuntimeVars(cfg, projectID, slug, path, branch, apexZone)
 
 	if err := runHook(cfg.Hooks.PreStop, cfg.Commands.Wrapper, "pre_stop", path, runtimeVars); err != nil {
 		return nil, err
@@ -987,8 +987,8 @@ func (m *Manager) Connect(slug, process string, conn net.Conn) error {
 	return err
 }
 
-func buildRuntimeVars(project, envSlug, worktreePath, branch, apexZone string) map[string]string {
-	dnsLabel := worktree.SlugDNSLabel(envSlug)
+func buildRuntimeVars(cfg *config.ProjectConfig, project, envSlug, worktreePath, branch, apexZone string) map[string]string {
+	dnsLabel := worktree.ProxyDNSLabelForSlug(cfg, envSlug)
 	zone := strings.TrimPrefix(apexZone, ".")
 	if zone == "" {
 		zone = "localhost"
