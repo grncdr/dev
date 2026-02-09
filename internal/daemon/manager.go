@@ -24,18 +24,22 @@ import (
 )
 
 type Manager struct {
-	mu        sync.Mutex
-	processes map[string]map[string]*processInfo
-	paths     map[string]string
-	apexZone  string
-	daemonCfg *config.DaemonConfig
+	mu                   sync.Mutex
+	processes            map[string]map[string]*processInfo
+	paths                map[string]string
+	pendingProxySessions map[string]map[string]int
+	apexZone             string
+	daemonCfg            *config.DaemonConfig
 }
+
+const defaultProxyProcessIdleTimeout = 5 * time.Minute
 
 func NewManager() *Manager {
 	return &Manager{
-		processes: make(map[string]map[string]*processInfo),
-		paths:     make(map[string]string),
-		apexZone:  ".localhost",
+		processes:            make(map[string]map[string]*processInfo),
+		paths:                make(map[string]string),
+		pendingProxySessions: make(map[string]map[string]int),
+		apexZone:             ".localhost",
 	}
 }
 
@@ -78,6 +82,10 @@ type processInfo struct {
 	address        string
 	health         *processHealthCheck
 	startupTimeout time.Duration
+	idleTimeout    time.Duration
+	lastActivity   time.Time
+	activeProxies  int
+	idleTimer      *time.Timer
 	pty            *os.File
 	logFile        *os.File
 	logSize        int64
@@ -299,15 +307,19 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 			address:        address,
 			health:         parseProcessHealth(proc["health"]),
 			startupTimeout: parseProcessStartupTimeout(proc["startup_timeout"]),
+			idleTimeout:    resolveProcessIdleTimeout(proc),
+			lastActivity:   time.Now(),
 			pty:            ptmx,
 			logFile:        logFile,
 			logSize:        logSize,
 			exited:         make(chan struct{}),
 			subs:           make(map[int]io.Writer),
 		}
+		info.activeProxies = m.consumePendingProxySessionsLocked(slug, name)
 		info.startOutputPump()
 		m.processes[slug][name] = info
 		m.mu.Unlock()
+		m.rescheduleIdleTimer(slug, name, info)
 
 		logProcessEvent("start", slug, name, cmd.Process.Pid, network, address)
 
@@ -323,6 +335,10 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 			}
 			meta.mu.Lock()
 			meta.exitErr = err
+			if meta.idleTimer != nil {
+				meta.idleTimer.Stop()
+				meta.idleTimer = nil
+			}
 			meta.mu.Unlock()
 			close(meta.exited)
 			logProcessExit(slugName, procName, proc.Process.Pid, exitCode, err)
@@ -594,14 +610,7 @@ func (m *Manager) stopWorktreeFromRef(slug, project, dirHint string, processes [
 			statuses = append(statuses, ProcessStatus{Name: name, Status: "stopped"})
 			continue
 		}
-		_ = info.cmd.Process.Signal(os.Interrupt)
-
-		select {
-		case <-time.After(2 * time.Second):
-			_ = info.cmd.Process.Kill()
-			<-info.exited
-		case <-info.exited:
-		}
+		stopManagedProcess(info)
 		statuses = append(statuses, ProcessStatus{Name: name, PID: info.cmd.Process.Pid, Status: "stopped"})
 	}
 
@@ -763,6 +772,186 @@ func (m *Manager) StopAllWorktrees() {
 	}
 }
 
+func (m *Manager) beginProxySession(slug, process string) {
+	m.mu.Lock()
+	info := m.processInfoLocked(slug, process)
+	if info == nil || info.cmd == nil || info.cmd.Process == nil || info.hasExited() {
+		if _, ok := m.pendingProxySessions[slug]; !ok {
+			m.pendingProxySessions[slug] = make(map[string]int)
+		}
+		m.pendingProxySessions[slug][process]++
+		m.mu.Unlock()
+		return
+	}
+	m.mu.Unlock()
+
+	info.mu.Lock()
+	if info.idleTimeout <= 0 || info.hasExited() {
+		info.mu.Unlock()
+		return
+	}
+	if info.idleTimer != nil {
+		info.idleTimer.Stop()
+		info.idleTimer = nil
+	}
+	info.activeProxies++
+	info.lastActivity = time.Now()
+	info.mu.Unlock()
+}
+
+func (m *Manager) endProxySession(slug, process string) {
+	m.mu.Lock()
+	info := m.processInfoLocked(slug, process)
+	if info == nil || info.cmd == nil || info.cmd.Process == nil || info.hasExited() {
+		m.decrementPendingProxySessionLocked(slug, process)
+		m.mu.Unlock()
+		return
+	}
+	m.mu.Unlock()
+	info.mu.Lock()
+	if info.idleTimeout <= 0 || info.hasExited() {
+		info.mu.Unlock()
+		return
+	}
+	if info.activeProxies > 0 {
+		info.activeProxies--
+	}
+	info.lastActivity = time.Now()
+	active := info.activeProxies
+	info.mu.Unlock()
+	if active == 0 {
+		m.rescheduleIdleTimer(slug, process, info)
+	}
+}
+
+func (m *Manager) processInfo(slug, process string) *processInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.processInfoLocked(slug, process)
+}
+
+func (m *Manager) processInfoLocked(slug, process string) *processInfo {
+	procs, ok := m.processes[slug]
+	if !ok {
+		return nil
+	}
+	return procs[process]
+}
+
+func (m *Manager) consumePendingProxySessionsLocked(slug, process string) int {
+	byProcess, ok := m.pendingProxySessions[slug]
+	if !ok {
+		return 0
+	}
+	count := byProcess[process]
+	if count <= 0 {
+		return 0
+	}
+	delete(byProcess, process)
+	if len(byProcess) == 0 {
+		delete(m.pendingProxySessions, slug)
+	} else {
+		m.pendingProxySessions[slug] = byProcess
+	}
+	return count
+}
+
+func (m *Manager) decrementPendingProxySessionLocked(slug, process string) {
+	byProcess, ok := m.pendingProxySessions[slug]
+	if !ok {
+		return
+	}
+	count := byProcess[process]
+	if count <= 1 {
+		delete(byProcess, process)
+	} else {
+		byProcess[process] = count - 1
+	}
+	if len(byProcess) == 0 {
+		delete(m.pendingProxySessions, slug)
+		return
+	}
+	m.pendingProxySessions[slug] = byProcess
+}
+
+func (m *Manager) rescheduleIdleTimer(slug, process string, info *processInfo) {
+	if info == nil {
+		return
+	}
+	info.mu.Lock()
+	if info.idleTimeout <= 0 || info.hasExited() {
+		info.mu.Unlock()
+		return
+	}
+	if info.activeProxies > 0 {
+		if info.idleTimer != nil {
+			info.idleTimer.Stop()
+			info.idleTimer = nil
+		}
+		info.mu.Unlock()
+		return
+	}
+	delay := info.idleTimeout - time.Since(info.lastActivity)
+	if delay <= 0 {
+		delay = 10 * time.Millisecond
+	}
+	if info.idleTimer != nil {
+		info.idleTimer.Stop()
+	}
+	info.idleTimer = time.AfterFunc(delay, func() {
+		m.stopIdleProcess(slug, process, info)
+	})
+	info.mu.Unlock()
+}
+
+func (m *Manager) stopIdleProcess(slug, process string, info *processInfo) {
+	if info == nil {
+		return
+	}
+	m.mu.Lock()
+	procs, ok := m.processes[slug]
+	if !ok || procs[process] != info {
+		m.mu.Unlock()
+		return
+	}
+	m.mu.Unlock()
+
+	info.mu.Lock()
+	if info.idleTimeout <= 0 || info.hasExited() {
+		info.mu.Unlock()
+		return
+	}
+	if info.activeProxies > 0 {
+		info.mu.Unlock()
+		m.rescheduleIdleTimer(slug, process, info)
+		return
+	}
+	if time.Since(info.lastActivity) < info.idleTimeout {
+		info.mu.Unlock()
+		m.rescheduleIdleTimer(slug, process, info)
+		return
+	}
+	info.mu.Unlock()
+
+	stopManagedProcess(info)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	procs, ok = m.processes[slug]
+	if !ok {
+		return
+	}
+	if procs[process] != info {
+		return
+	}
+	delete(procs, process)
+	if len(procs) == 0 {
+		delete(m.processes, slug)
+		return
+	}
+	m.processes[slug] = procs
+}
+
 func (m *Manager) Connect(slug, process string, conn net.Conn) error {
 	if conn == nil {
 		return errors.New("connection required")
@@ -884,6 +1073,43 @@ func envKey(name string) string {
 
 func defaultSocketPath(worktreeState, process string) string {
 	return filepath.Join(worktreeState, process+".sock")
+}
+
+func resolveProcessIdleTimeout(proc map[string]any) time.Duration {
+	if proc == nil {
+		return 0
+	}
+	if _, proxied := proc["proxy"]; !proxied {
+		return 0
+	}
+	if raw, ok := proc["idle_timeout"]; ok {
+		timeout := parseProcessSeconds(raw)
+		if timeout <= 0 {
+			return 0
+		}
+		return timeout
+	}
+	return defaultProxyProcessIdleTimeout
+}
+
+func stopManagedProcess(info *processInfo) {
+	if info == nil || info.cmd == nil || info.cmd.Process == nil {
+		return
+	}
+	info.mu.Lock()
+	if info.idleTimer != nil {
+		info.idleTimer.Stop()
+		info.idleTimer = nil
+	}
+	info.mu.Unlock()
+	_ = info.cmd.Process.Signal(os.Interrupt)
+
+	select {
+	case <-time.After(2 * time.Second):
+		_ = info.cmd.Process.Kill()
+		<-info.exited
+	case <-info.exited:
+	}
 }
 
 func allocateRandomPort() (string, error) {

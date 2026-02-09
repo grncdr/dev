@@ -178,8 +178,10 @@ func (s *Server) resolveProxyTargetForRequest(host, path string, fromGateway boo
 		targetSlug = mainSlug
 	}
 
+	s.manager.beginProxySession(targetSlug, best.Process)
 	network, address, err = s.manager.EnsureProcessForTarget(targetSlug, best.Process)
 	if err != nil {
+		s.manager.endProxySession(targetSlug, best.Process)
 		return "", "", "", "", "", "", err
 	}
 	return network, address, best.Process, best.GatewayMode, best.GatewayDebugLog, targetSlug, nil

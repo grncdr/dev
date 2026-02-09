@@ -146,6 +146,10 @@ func probeUntilReady(network, address string, health *processHealthCheck, startu
 }
 
 func parseProcessStartupTimeout(raw any) time.Duration {
+	return parseProcessSeconds(raw)
+}
+
+func parseProcessSeconds(raw any) time.Duration {
 	switch v := raw.(type) {
 	case int:
 		if v > 0 {

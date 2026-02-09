@@ -46,6 +46,7 @@ port = "unix"
 wrapper = "bundle exec $COMMAND"
 health = { type = "http", path = "/up" }
 startup_timeout = 45.0
+idle_timeout = 300.0
 needs = ["postgres"]
 
 [process.rails.env]
@@ -116,6 +117,7 @@ Notes:
   - `health = { type = "tcp" }` waits for a successful TCP connect (you can also set `port = <int>` inside health to probe a specific port).
 - `needs` declares dependencies that must be started before this process. It accepts a string or array of process names.
 - `startup_timeout` is optional per process (decimal seconds) and overrides health timeout when waiting for startup readiness.
+- `idle_timeout` is optional per proxied process (decimal seconds); default is `300` seconds (5 minutes). Set `idle_timeout = 0` to disable idle shutdown.
 - Proxy routing uses per-process matchers. Requests are matched by subdomain first (explicit beats `*` wildcard), then longest path match, then highest `priority`, then process name.
 - `gateway.expose` controls which processes accept gateway-tunneled requests.
   - Only processes listed in `gateway.expose` are reachable from the gateway.

@@ -33,6 +33,7 @@ command = "puma"
 port = "random"                         # "random" | "unix" | integer
 health = { type = "http", path = "/up" } # optional
 startup_timeout = 45.0                  # optional, seconds
+idle_timeout = 300.0                    # optional, seconds (proxied processes)
 needs = ["postgres"]                    # optional
 
 [[process.rails.proxy]]
@@ -124,6 +125,16 @@ When routing selects a process that is not running:
    - no health block -> TCP readiness probe on resolved target
 3. Timeout defaults to 30s, override with `startup_timeout` (decimal seconds).
 4. Request is forwarded only after readiness succeeds.
+
+## Idle Shutdown
+
+For proxied processes (`[[process.<name>.proxy]]` configured), daemon tracks proxy activity and applies idle shutdown:
+
+- Default idle timeout is `5m` (`300` seconds).
+- Override per process with `idle_timeout` (decimal seconds).
+- `idle_timeout = 0` disables idle shutdown for that process.
+- If no proxied HTTP requests or TCP proxy connections are active/seen within the timeout, daemon stops the process.
+- The next routed request/connection auto-starts the stopped process and waits for readiness before forwarding upstream.
 
 ## Raw TCP Forwarding
 
