@@ -66,28 +66,28 @@ func TestFormatProcessLine(t *testing.T) {
 		want         string
 	}{
 		{
-			name: "running_with_pid",
-			proc: daemon.ProcessStatus{Name: "rails", Status: "running", PID: 1234},
+			name:         "running_with_pid",
+			proc:         daemon.ProcessStatus{Name: "rails", Status: "running", PID: 1234},
 			fromWorktree: "",
-			want: "rails (running: PID 1234)",
+			want:         "rails (running: PID 1234)",
 		},
 		{
-			name: "non_running_with_pid",
-			proc: daemon.ProcessStatus{Name: "worker", Status: "exited", PID: 789},
+			name:         "non_running_with_pid",
+			proc:         daemon.ProcessStatus{Name: "worker", Status: "exited", PID: 789},
 			fromWorktree: "",
-			want: "worker (exited: PID 789)",
+			want:         "worker (exited: PID 789)",
 		},
 		{
-			name: "without_pid",
-			proc: daemon.ProcessStatus{Name: "webpack", Status: "stopped"},
+			name:         "without_pid",
+			proc:         daemon.ProcessStatus{Name: "webpack", Status: "stopped"},
 			fromWorktree: "",
-			want: "webpack (stopped)",
+			want:         "webpack (stopped)",
 		},
 		{
-			name: "from_worktree",
-			proc: daemon.ProcessStatus{Name: "postgres", Status: "stopped"},
+			name:         "from_worktree",
+			proc:         daemon.ProcessStatus{Name: "postgres", Status: "stopped"},
 			fromWorktree: "main",
-			want: "postgres (stopped) (from worktree: main)",
+			want:         "postgres (stopped) (from worktree: main)",
 		},
 	}
 

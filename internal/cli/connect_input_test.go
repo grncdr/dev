@@ -72,4 +72,3 @@ func TestForwardAttachInputTimeoutForwardsPrefix(t *testing.T) {
 		t.Fatalf("output = %q, want %q", got, want)
 	}
 }
-
