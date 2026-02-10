@@ -163,6 +163,15 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 		return nil, err
 	}
 	isMain := sameResolvedPath(path, mainPath)
+	mainSlug := slug
+	mainRuntimeKey := runtimeKey
+	if !isMain {
+		mainSlug, err = worktree.ResolveMainSlug(mainPath)
+		if err != nil {
+			return nil, fmt.Errorf("resolve main worktree slug: %w", err)
+		}
+		mainRuntimeKey = runtimeKeyForPath(mainPath)
+	}
 
 	worktreeState, err := resolveWorktreeState(cfg.Project.Name, slug)
 	if err != nil {
@@ -211,10 +220,6 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 	m.mu.Unlock()
 
 	if !isMain && len(mainSet) > 0 {
-		mainSlug, err := worktree.ResolveMainSlug(mainPath)
-		if err != nil {
-			return nil, fmt.Errorf("resolve main worktree slug: %w", err)
-		}
 		mainNames := make([]string, 0, len(mainSet))
 		for name := range mainSet {
 			mainNames = append(mainNames, name)
@@ -239,7 +244,14 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 		if err != nil {
 			return nil, fmt.Errorf("resolve port for %s: %w", name, err)
 		}
+		depPortVars, err := m.dependencyPortEnvVars(name, needs, runtimeKey, mainRuntimeKey, isMain)
+		if err != nil {
+			return nil, err
+		}
 		procVars := procenv.CloneEnv(templateVars)
+		for key, value := range depPortVars {
+			procVars[key] = value
+		}
 		if port != "" {
 			procVars["PORT"] = port
 		}
@@ -282,6 +294,7 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Dir = path
 		cmd.Env = append(os.Environ(), procenv.FormatEnv(runtimeVars)...)
+		cmd.Env = append(cmd.Env, procenv.FormatEnv(depPortVars)...)
 		configureManagedProcess(cmd)
 
 		if envVars, ok := proc["env"].(map[string]any); ok {
@@ -1326,6 +1339,38 @@ func buildTemplateVars(runtimeVars map[string]string, mainPath, worktreeState st
 	return vars
 }
 
+func (m *Manager) dependencyPortEnvVars(process string, needs *processNeeds, runtimeKey, mainRuntimeKey string, isMain bool) (map[string]string, error) {
+	vars := map[string]string{}
+	if needs == nil {
+		return vars, nil
+	}
+	for _, dep := range needs.needs[process] {
+		if err := needs.ensureExists(process, dep); err != nil {
+			return nil, err
+		}
+		depRuntimeKey := runtimeKey
+		if !isMain && needs.singleton[dep] {
+			depRuntimeKey = mainRuntimeKey
+		}
+		port, ok := m.runningProcessPort(depRuntimeKey, dep)
+		if !ok {
+			continue
+		}
+		vars["DEV_PORT_"+envKey(dep)] = port
+	}
+	return vars, nil
+}
+
+func (m *Manager) runningProcessPort(slug, process string) (string, bool) {
+	m.mu.Lock()
+	info := m.processInfoLocked(slug, process)
+	m.mu.Unlock()
+	if info == nil || info.cmd == nil || info.cmd.Process == nil || info.hasExited() {
+		return "", false
+	}
+	return targetPort(info.network, info.address)
+}
+
 func resolveProcessTarget(proc map[string]any, name, worktreeState string) (network, address, port string, err error) {
 	value, hasPort := proc["port"]
 	if !hasPort {
@@ -1373,6 +1418,17 @@ func tcpTarget(port int) (network, address, portString string, err error) {
 	}
 	portString = strconv.Itoa(port)
 	return "tcp", fmt.Sprintf("127.0.0.1:%s", portString), portString, nil
+}
+
+func targetPort(network, address string) (string, bool) {
+	if network != "tcp" || address == "" {
+		return "", false
+	}
+	_, port, err := net.SplitHostPort(address)
+	if err != nil || strings.TrimSpace(port) == "" {
+		return "", false
+	}
+	return port, true
 }
 
 func expandVars(input string, vars map[string]string) string {
