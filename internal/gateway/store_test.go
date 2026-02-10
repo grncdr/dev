@@ -6,6 +6,8 @@ import (
 )
 
 func TestLeaseStore_PersistAndRestoreAsPending(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	store, err := NewLeaseStore(dir)
 	if err != nil {

@@ -3,6 +3,8 @@ package worktree
 import "testing"
 
 func TestParseProjectSlug(t *testing.T) {
+	t.Parallel()
+
 	target, err := ParseProjectSlug("Foo_Bar:Feature/Branch-1")
 	if err != nil {
 		t.Fatalf("ParseProjectSlug: %v", err)
@@ -16,6 +18,8 @@ func TestParseProjectSlug(t *testing.T) {
 }
 
 func TestParseProjectSlug_ProjectWithSlash(t *testing.T) {
+	t.Parallel()
+
 	target, err := ParseProjectSlug("FooCorp/Monorepo:Feature/Branch-1")
 	if err != nil {
 		t.Fatalf("ParseProjectSlug: %v", err)
@@ -29,6 +33,8 @@ func TestParseProjectSlug_ProjectWithSlash(t *testing.T) {
 }
 
 func TestParseProjectSlugInvalid(t *testing.T) {
+	t.Parallel()
+
 	cases := []string{
 		"",
 		"missing",
@@ -46,6 +52,8 @@ func TestParseProjectSlugInvalid(t *testing.T) {
 }
 
 func TestSlugDNSLabel(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		slug  string
 		label string
@@ -64,6 +72,8 @@ func TestSlugDNSLabel(t *testing.T) {
 }
 
 func TestParseProcessIdentifier(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		input   string
 		slug    string

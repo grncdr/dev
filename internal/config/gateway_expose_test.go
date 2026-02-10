@@ -7,6 +7,8 @@ import (
 )
 
 func TestGatewayExposeModes_ParsesModesByProcess(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, ".dev.toml")
 	body := `
@@ -33,6 +35,8 @@ expose = { rails = { mode = "rewrite" }, webpack = { mode = "reverse_proxy" } }
 }
 
 func TestGatewayExposeModes_DefaultsModeToReverseProxy(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, ".dev.toml")
 	body := `
@@ -56,6 +60,8 @@ expose = { rails = {} }
 }
 
 func TestGatewayExposeModes_InvalidModeDoesNotExpose(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, ".dev.toml")
 	body := `
@@ -79,6 +85,8 @@ expose = { rails = { mode = "wat" } }
 }
 
 func TestGatewayExposeRules_ParsesDebugLog(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, ".dev.toml")
 	body := `

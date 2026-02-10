@@ -3,6 +3,8 @@ package cli
 import "testing"
 
 func TestListenLooksTLS(t *testing.T) {
+	t.Parallel()
+
 	cases := map[string]bool{
 		":443":        true,
 		"0.0.0.0:443": true,

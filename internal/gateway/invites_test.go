@@ -6,6 +6,8 @@ import (
 )
 
 func TestInviteStoreCreateAndConsume(t *testing.T) {
+	t.Parallel()
+
 	store, err := NewInviteStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("new invite store: %v", err)

@@ -3,6 +3,8 @@ package docs
 import "testing"
 
 func TestLookupConfig(t *testing.T) {
+	t.Parallel()
+
 	data, filename, err := Lookup("config")
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
@@ -16,6 +18,8 @@ func TestLookupConfig(t *testing.T) {
 }
 
 func TestLookupSupportsExtensionAndCase(t *testing.T) {
+	t.Parallel()
+
 	_, filename, err := Lookup("ConFiG.md")
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
@@ -26,6 +30,8 @@ func TestLookupSupportsExtensionAndCase(t *testing.T) {
 }
 
 func TestLookupUnknown(t *testing.T) {
+	t.Parallel()
+
 	_, _, err := Lookup("does-not-exist")
 	if err == nil {
 		t.Fatalf("expected error")

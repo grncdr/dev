@@ -9,6 +9,8 @@ import (
 )
 
 func TestRouteMappingLinesSorted(t *testing.T) {
+	t.Parallel()
+
 	byProcess := map[string][]string{
 		"web": {
 			"https://b.main.localhost/",
@@ -32,6 +34,8 @@ func TestRouteMappingLinesSorted(t *testing.T) {
 }
 
 func TestRouteMappingLinesAlignsProcessesByPathWidth(t *testing.T) {
+	t.Parallel()
+
 	byProcess := map[string][]string{
 		"server":       {"https://myserver.localhost/"},
 		"other-server": {"https://myserver.localhost/path"},
@@ -48,6 +52,8 @@ func TestRouteMappingLinesAlignsProcessesByPathWidth(t *testing.T) {
 }
 
 func TestRouteMappingLinesIncludesUngroupedRoutes(t *testing.T) {
+	t.Parallel()
+
 	byProcess := map[string][]string{
 		"db": {"tcp://127.0.0.1:15432"},
 	}
@@ -59,6 +65,8 @@ func TestRouteMappingLinesIncludesUngroupedRoutes(t *testing.T) {
 }
 
 func TestFormatProcessLine(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name         string
 		proc         daemon.ProcessStatus
@@ -101,6 +109,8 @@ func TestFormatProcessLine(t *testing.T) {
 }
 
 func TestResolveProcessStatusSingletonUsesMainWorktreeStatus(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.ProjectConfig{
 		Processes: map[string]map[string]any{
 			"db": {"singleton": true},
@@ -120,6 +130,8 @@ func TestResolveProcessStatusSingletonUsesMainWorktreeStatus(t *testing.T) {
 }
 
 func TestResolveProcessStatusNonSingletonUsesLocalStatus(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.ProjectConfig{
 		Processes: map[string]map[string]any{
 			"web": {"singleton": false},

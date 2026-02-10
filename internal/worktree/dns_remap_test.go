@@ -7,6 +7,8 @@ import (
 )
 
 func TestProxyDNSLabelForSlug(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.ProjectConfig{
 		Project: config.ProjectBlock{
 			MainSlug: "primary",
@@ -30,6 +32,8 @@ func TestProxyDNSLabelForSlug(t *testing.T) {
 }
 
 func TestProxySlugForDNSLabel(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.ProjectConfig{
 		Project: config.ProjectBlock{
 			MainSlug: "primary",

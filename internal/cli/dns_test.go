@@ -3,6 +3,8 @@ package cli
 import "testing"
 
 func TestResolverContent(t *testing.T) {
+	t.Parallel()
+
 	content := resolverContent()
 	if content == "" {
 		t.Fatalf("expected resolver content")

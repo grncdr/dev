@@ -7,6 +7,8 @@ import (
 )
 
 func TestGatewayPublicURL(t *testing.T) {
+	t.Parallel()
+
 	got := gatewayPublicURL("https://gateway.foocorp.dev", "tunnels.example.test", "alpha")
 	if got != "https://alpha.tunnels.example.test/" {
 		t.Fatalf("unexpected URL: %s", got)
@@ -14,6 +16,8 @@ func TestGatewayPublicURL(t *testing.T) {
 }
 
 func TestGatewayPublicURLRequiresPublicHost(t *testing.T) {
+	t.Parallel()
+
 	got := gatewayPublicURL("https://gateway.foocorp.dev", "", "alpha")
 	if got != "" {
 		t.Fatalf("expected empty URL, got %s", got)
@@ -21,6 +25,8 @@ func TestGatewayPublicURLRequiresPublicHost(t *testing.T) {
 }
 
 func TestParseShareAuthArg(t *testing.T) {
+	t.Parallel()
+
 	user, pass, err := parseShareAuthArg("alice:secret")
 	if err != nil {
 		t.Fatalf("parseShareAuthArg: %v", err)
@@ -31,6 +37,8 @@ func TestParseShareAuthArg(t *testing.T) {
 }
 
 func TestResolveShareAuth_PrefersCommandLine(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.ProjectConfig{
 		Gateway: map[string]any{
 			"auth": map[string]any{
@@ -49,6 +57,8 @@ func TestResolveShareAuth_PrefersCommandLine(t *testing.T) {
 }
 
 func TestResolveShareAuth_NoAuthDisablesDefaults(t *testing.T) {
+	t.Parallel()
+
 	cfg := &config.ProjectConfig{
 		Gateway: map[string]any{
 			"auth": map[string]any{
@@ -67,6 +77,8 @@ func TestResolveShareAuth_NoAuthDisablesDefaults(t *testing.T) {
 }
 
 func TestResolveShareAuth_RejectsConflictingFlags(t *testing.T) {
+	t.Parallel()
+
 	_, _, err := resolveShareAuth(nil, "alice:secret", true)
 	if err == nil {
 		t.Fatalf("expected conflict error")

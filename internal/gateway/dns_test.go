@@ -18,6 +18,8 @@ func (f *fakeRoute53Client) ChangeResourceRecordSets(_ context.Context, in *rout
 }
 
 func TestRoute53ProviderEnsureLabel(t *testing.T) {
+	t.Parallel()
+
 	client := &fakeRoute53Client{}
 	provider := NewRoute53ProviderWithClient(client, Route53Options{
 		HostedZoneID: "Z123",

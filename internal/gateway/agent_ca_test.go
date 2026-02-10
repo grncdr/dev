@@ -13,6 +13,8 @@ import (
 )
 
 func TestCertIssuerIssueClientCert(t *testing.T) {
+	t.Parallel()
+
 	issuer, err := NewCertIssuer(t.TempDir())
 	if err != nil {
 		t.Fatalf("new cert issuer: %v", err)
@@ -41,6 +43,8 @@ func TestCertIssuerIssueClientCert(t *testing.T) {
 }
 
 func TestEnsureALPNAddsHTTPProtocols(t *testing.T) {
+	t.Parallel()
+
 	got := ensureALPN([]string{"acme-tls/1"})
 	hasH2 := false
 	hasHTTP11 := false
@@ -58,6 +62,8 @@ func TestEnsureALPNAddsHTTPProtocols(t *testing.T) {
 }
 
 func TestNextACMERetry_UsesRetryAfterWhenPresent(t *testing.T) {
+	t.Parallel()
+
 	now := time.Date(2026, 2, 2, 17, 0, 0, 0, time.UTC)
 	err := errors.New(`HTTP 429 urn:ietf:params:acme:error:rateLimited - too many failed authorizations, retry after 2026-02-02 18:12:38 UTC`)
 	got := nextACMERetry(err, now)
@@ -68,6 +74,8 @@ func TestNextACMERetry_UsesRetryAfterWhenPresent(t *testing.T) {
 }
 
 func TestNextACMERetry_DoesNotSuppressContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	now := time.Date(2026, 2, 2, 17, 0, 0, 0, time.UTC)
 	err := errors.New("solving challenges: context canceled")
 	got := nextACMERetry(err, now)
@@ -77,6 +85,8 @@ func TestNextACMERetry_DoesNotSuppressContextCancellation(t *testing.T) {
 }
 
 func TestNormalizeResolvers_Default(t *testing.T) {
+	t.Parallel()
+
 	got := normalizeResolvers(nil)
 	if len(got) != 1 || got[0] != "1.1.1.1" {
 		t.Fatalf("expected default resolver 1.1.1.1, got %+v", got)
@@ -84,6 +94,8 @@ func TestNormalizeResolvers_Default(t *testing.T) {
 }
 
 func TestNormalizeResolvers_DedupesAndTrims(t *testing.T) {
+	t.Parallel()
+
 	got := normalizeResolvers([]string{" 1.1.1.1 ", "8.8.8.8:53", "1.1.1.1", ""})
 	if len(got) != 2 || got[0] != "1.1.1.1" || got[1] != "8.8.8.8:53" {
 		t.Fatalf("unexpected resolvers: %+v", got)

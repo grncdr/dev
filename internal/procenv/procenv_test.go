@@ -6,6 +6,8 @@ import (
 )
 
 func TestCloneEnv(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name  string
 		input map[string]string
@@ -51,6 +53,8 @@ func TestCloneEnv(t *testing.T) {
 }
 
 func TestFormatEnv(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name  string
 		input map[string]string
@@ -94,6 +98,8 @@ func TestFormatEnv(t *testing.T) {
 }
 
 func TestApplyWrapper(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		wrapper string

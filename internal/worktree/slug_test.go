@@ -7,6 +7,8 @@ import (
 )
 
 func TestValidateSlug(t *testing.T) {
+	t.Parallel()
+
 	valid := []string{
 		"feature-x",
 		"my_branch",
@@ -42,6 +44,8 @@ func TestValidateSlug(t *testing.T) {
 }
 
 func TestParseWorktreeList(t *testing.T) {
+	t.Parallel()
+
 	base := t.TempDir()
 	mainPath := filepath.Join(base, "foocorp")
 	featurePath := filepath.Join(mainPath, "feature-x")
@@ -79,6 +83,8 @@ branch refs/heads/feature-x
 }
 
 func TestMatchWorktree_PathBoundary(t *testing.T) {
+	t.Parallel()
+
 	entries := []Entry{
 		{Path: "/tmp/repo"},
 		{Path: "/tmp/repo-feature"},
@@ -93,12 +99,16 @@ func TestMatchWorktree_PathBoundary(t *testing.T) {
 }
 
 func TestResolveSlugRequiresCWD(t *testing.T) {
+	t.Parallel()
+
 	if _, err := ResolveSlug(""); err == nil {
 		t.Fatalf("expected ResolveSlug to fail when cwd is empty")
 	}
 }
 
 func TestMatchWorktreeRequiresCWD(t *testing.T) {
+	t.Parallel()
+
 	if _, err := matchWorktree([]Entry{{Path: "/tmp/repo"}}, ""); err == nil {
 		t.Fatalf("expected matchWorktree to fail when cwd is empty")
 	}
