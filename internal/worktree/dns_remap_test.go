@@ -57,6 +57,27 @@ func TestProxySlugForDNSLabel(t *testing.T) {
 	}
 }
 
+func TestProxySlugForDNSLabel_DottedOverride(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.ProjectConfig{
+		Project: config.ProjectBlock{
+			MainSlug: "primary",
+		},
+		LocalDNS: config.ProjectLocalDNSBlock{
+			Overrides: map[string]string{
+				"main": "www.foocorp",
+			},
+		},
+	}
+	if got := ProxyDNSLabelForSlug(cfg, "primary"); got != "www.foocorp" {
+		t.Fatalf("expected dotted override label, got %q", got)
+	}
+	if got, ok := ProxySlugForDNSLabel(cfg, "www.foocorp"); !ok || got != "primary" {
+		t.Fatalf("expected dotted override to map to primary, got %q ok=%v", got, ok)
+	}
+}
+
 func TestResolveSlugForDNSLabel_RegisteredSlashSlug(t *testing.T) {
 	t.Parallel()
 

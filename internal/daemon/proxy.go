@@ -135,9 +135,9 @@ func (s *Server) handleTCPProxyConn(conn net.Conn, process string) {
 		logError(http.StatusBadGateway, "tcp_proxy_main_slug_error", err)
 		return
 	}
-	s.manager.beginProxySession(mainSlug, process)
-	defer s.manager.endProxySession(mainSlug, process)
-	network, address, err := s.manager.EnsureProcessForTarget(mainSlug, process)
+	s.manager.beginProxySessionFromDir(mainSlug, s.mainPath, process)
+	defer s.manager.endProxySessionFromDir(mainSlug, s.mainPath, process)
+	network, address, err := s.manager.EnsureProcessForTargetFromDir(mainSlug, s.mainPath, process)
 	if err != nil {
 		logError(http.StatusBadGateway, "tcp_proxy_target_error", err)
 		return
@@ -249,7 +249,7 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	network, address, process, gatewayMode, gatewayDebugLog, targetSlug, err := s.resolveProxyTargetForRequest(routeHost, r.URL.Path, isGatewayTunnel)
+	network, address, process, gatewayMode, gatewayDebugLog, targetSlug, targetPath, err := s.resolveProxyTargetForRequest(routeHost, r.URL.Path, isGatewayTunnel)
 	if err != nil {
 		if errors.Is(err, errGatewayProcessNotExposed) {
 			writeErrorWithCode(w, http.StatusForbidden, "proxy_gateway_not_exposed", err)
@@ -258,7 +258,7 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 		writeErrorWithCode(w, http.StatusBadGateway, "proxy_target_error", err)
 		return
 	}
-	defer s.manager.endProxySession(targetSlug, process)
+	defer s.manager.endProxySessionFromDir(targetSlug, targetPath, process)
 	rewriteMode := isGatewayTunnel && gatewayMode == config.GatewayModeRewrite
 	transcriptRelPath := ""
 	if isGatewayTunnel {
@@ -267,7 +267,7 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 	debugGatewayTranscript := transcriptRelPath != ""
 	transcriptWorktreePath := ""
 	if debugGatewayTranscript {
-		if path, ok := s.manager.WorktreePath(targetSlug); ok {
+		if path, ok := s.manager.WorktreePathFromDir(targetSlug, targetPath); ok {
 			transcriptWorktreePath = path
 		}
 	}

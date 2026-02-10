@@ -42,6 +42,11 @@ type tunnelProxyRoute struct {
 
 var errGatewayProcessNotExposed = errors.New("gateway traffic not exposed for matched process")
 
+type proxyHostCandidate struct {
+	requestedSlug string
+	subdomain     string
+}
+
 func (s *Server) parseProxyHost(host string) (slug, subdomain string, err error) {
 	apex := strings.TrimPrefix(strings.ToLower(s.projectApexZone()), ".")
 	if apex == "" {
@@ -179,82 +184,130 @@ func sameResolvedPath(a, b string) bool {
 	return filepath.Clean(resolvedA) == filepath.Clean(resolvedB)
 }
 
-func (s *Server) resolveProxyTarget(host, path string) (network string, address string, process string, gatewayMode string, gatewayDebugLog string, targetSlug string, err error) {
+func (s *Server) resolveProxyTarget(host, path string) (network string, address string, process string, gatewayMode string, gatewayDebugLog string, targetSlug string, targetPath string, err error) {
 	return s.resolveProxyTargetForRequest(host, path, false)
 }
 
-func (s *Server) resolveProxyTargetForRequest(host, path string, fromGateway bool) (network string, address string, process string, gatewayMode string, gatewayDebugLog string, targetSlug string, err error) {
-	requestedSlug, subdomain, err := s.parseProxyHost(host)
+func (s *Server) resolveProxyTargetForRequest(host, path string, fromGateway bool) (network string, address string, process string, gatewayMode string, gatewayDebugLog string, targetSlug string, targetPath string, err error) {
+	candidates, err := s.parseProxyHostCandidates(host)
 	if err != nil {
-		return "", "", "", "", "", "", err
+		return "", "", "", "", "", "", "", err
 	}
-
-	slug, err := s.resolveRequestedSlug(requestedSlug)
-	if err != nil {
-		return "", "", "", "", "", "", err
-	}
-
-	cfg, repoPath, err := s.projectConfigForSlug(slug)
-	if err != nil {
-		return "", "", "", "", "", "", err
-	}
-
-	matchers := processProxyMatchers(cfg)
-	best, ok := selectProxyMatcher(matchers, subdomain, path)
-	if !ok {
-		return "", "", "", "", "", "", errors.New("no proxy matcher matched")
-	}
-	if fromGateway && best.GatewayMode == config.GatewayModeDisable {
-		return "", "", "", "", "", "", errGatewayProcessNotExposed
-	}
-
-	targetSlug = slug
-	if best.Singleton {
-		mainSlug, err := resolveMainWorktreeSlug(repoPath)
+	lastErr := error(nil)
+	for _, candidate := range candidates {
+		slug, slugHint, err := s.resolveRequestedSlug(candidate.requestedSlug)
 		if err != nil {
-			return "", "", "", "", "", "", err
+			lastErr = err
+			continue
 		}
-		targetSlug = mainSlug
-	}
 
-	s.manager.beginProxySession(targetSlug, best.Process)
-	network, address, err = s.manager.EnsureProcessForTarget(targetSlug, best.Process)
-	if err != nil {
-		s.manager.endProxySession(targetSlug, best.Process)
-		return "", "", "", "", "", "", err
+		cfg, repoPath, err := s.projectConfigForSlugFromDir(slug, slugHint)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		matchers := processProxyMatchers(cfg)
+		best, ok := selectProxyMatcher(matchers, candidate.subdomain, path)
+		if !ok {
+			continue
+		}
+		if fromGateway && best.GatewayMode == config.GatewayModeDisable {
+			return "", "", "", "", "", "", "", errGatewayProcessNotExposed
+		}
+
+		targetSlug = slug
+		targetPath = repoPath
+		if best.Singleton {
+			mainSlug, err := resolveMainWorktreeSlug(repoPath)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			targetSlug = mainSlug
+			mainPath, err := worktree.ResolveMainPathInDir(repoPath)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			targetPath = mainPath
+		}
+
+		s.manager.beginProxySessionFromDir(targetSlug, targetPath, best.Process)
+		network, address, err = s.manager.EnsureProcessForTargetFromDir(targetSlug, targetPath, best.Process)
+		if err != nil {
+			s.manager.endProxySessionFromDir(targetSlug, targetPath, best.Process)
+			lastErr = err
+			continue
+		}
+		return network, address, best.Process, best.GatewayMode, best.GatewayDebugLog, targetSlug, targetPath, nil
 	}
-	return network, address, best.Process, best.GatewayMode, best.GatewayDebugLog, targetSlug, nil
+	if lastErr != nil {
+		return "", "", "", "", "", "", "", lastErr
+	}
+	return "", "", "", "", "", "", "", errors.New("no proxy matcher matched")
 }
 
-func (s *Server) resolveRequestedSlug(requestedSlug string) (string, error) {
+func (s *Server) parseProxyHostCandidates(host string) ([]proxyHostCandidate, error) {
+	apex := strings.TrimPrefix(strings.ToLower(s.projectApexZone()), ".")
+	if apex == "" {
+		apex = "localhost"
+	}
+	lower := strings.ToLower(host)
+	if strings.Contains(lower, ":") {
+		lower, _, _ = strings.Cut(lower, ":")
+	}
+	suffix := "." + apex
+	if !strings.HasSuffix(lower, suffix) {
+		return nil, errors.New("host does not match apex zone")
+	}
+	rest := strings.TrimSuffix(lower, suffix)
+	rest = strings.TrimSuffix(rest, ".")
+	if rest == "" {
+		return nil, errors.New("missing worktree slug")
+	}
+	labels := strings.Split(rest, ".")
+	out := make([]proxyHostCandidate, 0, len(labels))
+	for i := 0; i < len(labels); i++ {
+		requested := strings.Join(labels[i:], ".")
+		subdomain := strings.Join(labels[:i], ".")
+		out = append(out, proxyHostCandidate{
+			requestedSlug: requested,
+			subdomain:     subdomain,
+		})
+	}
+	return out, nil
+}
+
+func (s *Server) resolveRequestedSlug(requestedSlug string) (string, string, error) {
 	if requestedSlug == "" {
-		return "", errors.New("missing requested slug")
+		return "", "", errors.New("missing requested slug")
 	}
 	mainPath, err := worktree.ResolveMainPathInDir(s.mainPath)
 	if err != nil {
-		return requestedSlug, nil
+		return requestedSlug, "", nil
 	}
 	cfgPath := filepath.Join(mainPath, config.DefaultProjectConfig)
 	cfg, _, err := config.LoadProjectConfig(cfgPath)
 	if err != nil {
-		return requestedSlug, nil
+		return requestedSlug, "", nil
 	}
 	if mappedSlug, ok, err := worktree.ResolveSlugForDNSLabel(cfg, s.daemonConfig, requestedSlug); err == nil && ok {
-		return mappedSlug, nil
+		return mappedSlug, mainPath, nil
 	} else if err != nil {
-		return "", err
+		return "", "", err
 	}
 	mainSlug, err := resolveMainWorktreeSlug(mainPath)
 	if err != nil {
-		return requestedSlug, nil
+		return requestedSlug, "", nil
 	}
 	if strings.EqualFold(requestedSlug, "main") {
-		return mainSlug, nil
+		return mainSlug, mainPath, nil
 	}
 	if strings.EqualFold(requestedSlug, mainSlug) {
-		return mainSlug, nil
+		return mainSlug, mainPath, nil
 	}
-	return requestedSlug, nil
+	return requestedSlug, "", nil
 }
 
 func resolveMainWorktreeSlug(mainPath string) (string, error) {
@@ -310,10 +363,18 @@ func processProxyMatchers(cfg *config.ProjectConfig) []proxyMatcher {
 }
 
 func (s *Server) projectConfigForSlug(slug string) (*config.ProjectConfig, string, error) {
+	return s.projectConfigForSlugFromDir(slug, "")
+}
+
+func (s *Server) projectConfigForSlugFromDir(slug, dirHint string) (*config.ProjectConfig, string, error) {
 	repoPath := ""
 	ok := false
 	if s.manager != nil {
-		repoPath, ok = s.manager.WorktreePath(slug)
+		repoPath, ok = s.manager.WorktreePathFromDir(slug, dirHint)
+	}
+	if !ok || repoPath == "" {
+		repoPath = strings.TrimSpace(dirHint)
+		ok = repoPath != ""
 	}
 	if !ok || repoPath == "" {
 		var err error

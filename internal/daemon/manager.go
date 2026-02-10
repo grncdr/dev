@@ -944,6 +944,19 @@ func (m *Manager) runtimeKeyForSlugLocked(slug string) (string, error) {
 	return "", fmt.Errorf("worktree slug %q is running in multiple paths (%s); use a local DNS override in .dev.toml or .dev.local.toml to disambiguate", slug, strings.Join(paths, ", "))
 }
 
+func (m *Manager) runtimeKeyForTargetLocked(slug, dirHint string) (string, error) {
+	key := runtimeKeyForPath(dirHint)
+	if key != "" {
+		if _, ok := m.processes[key]; ok {
+			return key, nil
+		}
+		if _, ok := m.worktrees[key]; ok {
+			return key, nil
+		}
+	}
+	return m.runtimeKeyForSlugLocked(slug)
+}
+
 func (m *Manager) unregisterWorktreeLocked(key string) {
 	wt, ok := m.worktrees[key]
 	if !ok {
@@ -955,8 +968,12 @@ func (m *Manager) unregisterWorktreeLocked(key string) {
 }
 
 func (m *Manager) TargetFor(slug, process string) (network string, address string, err error) {
+	return m.TargetForFromDir(slug, "", process)
+}
+
+func (m *Manager) TargetForFromDir(slug, dirHint, process string) (network string, address string, err error) {
 	m.mu.Lock()
-	runtimeKey, keyErr := m.runtimeKeyForSlugLocked(slug)
+	runtimeKey, keyErr := m.runtimeKeyForTargetLocked(slug, dirHint)
 	if keyErr != nil {
 		m.mu.Unlock()
 		return "", "", keyErr
@@ -974,8 +991,12 @@ func (m *Manager) TargetFor(slug, process string) (network string, address strin
 }
 
 func (m *Manager) EnsureProcessForTarget(slug, process string) (network string, address string, err error) {
+	return m.EnsureProcessForTargetFromDir(slug, "", process)
+}
+
+func (m *Manager) EnsureProcessForTargetFromDir(slug, dirHint, process string) (network string, address string, err error) {
 	m.mu.Lock()
-	runtimeKey, keyErr := m.runtimeKeyForSlugLocked(slug)
+	runtimeKey, keyErr := m.runtimeKeyForTargetLocked(slug, dirHint)
 	procs := map[string]*processInfo(nil)
 	ok := false
 	if keyErr == nil {
@@ -998,19 +1019,21 @@ func (m *Manager) EnsureProcessForTarget(slug, process string) (network string, 
 	if ok && info != nil && info.cmd != nil && info.cmd.Process != nil && (info.address == "" || info.network == "") {
 		return "", "", errors.New("process is running without proxy target; set port = \"unix\", \"random\", or an integer")
 	}
-	dirHint, _ := m.WorktreePath(slug)
+	if strings.TrimSpace(dirHint) == "" {
+		dirHint, _ = m.WorktreePath(slug)
+	}
 	status, err := m.StartWorktreeFromDir(slug, dirHint)
 	if err != nil {
 		return "", "", err
 	}
 	for _, proc := range status.Processes {
 		if proc.Name == process {
-			network, address, err := m.TargetFor(slug, process)
+			network, address, err := m.TargetForFromDir(slug, dirHint, process)
 			if err != nil {
 				return "", "", err
 			}
 			m.mu.Lock()
-			currentKey, keyErr := m.runtimeKeyForSlugLocked(slug)
+			currentKey, keyErr := m.runtimeKeyForTargetLocked(slug, dirHint)
 			if keyErr != nil {
 				m.mu.Unlock()
 				return "", "", keyErr
@@ -1027,9 +1050,13 @@ func (m *Manager) EnsureProcessForTarget(slug, process string) (network string, 
 }
 
 func (m *Manager) WorktreePath(slug string) (string, bool) {
+	return m.WorktreePathFromDir(slug, "")
+}
+
+func (m *Manager) WorktreePathFromDir(slug, dirHint string) (string, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	runtimeKey, err := m.runtimeKeyForSlugLocked(slug)
+	runtimeKey, err := m.runtimeKeyForTargetLocked(slug, dirHint)
 	if err != nil {
 		return "", false
 	}
@@ -1048,8 +1075,12 @@ func (m *Manager) StopAllWorktrees() {
 }
 
 func (m *Manager) beginProxySession(slug, process string) {
+	m.beginProxySessionFromDir(slug, "", process)
+}
+
+func (m *Manager) beginProxySessionFromDir(slug, dirHint, process string) {
 	m.mu.Lock()
-	runtimeKey, keyErr := m.runtimeKeyForSlugLocked(slug)
+	runtimeKey, keyErr := m.runtimeKeyForTargetLocked(slug, dirHint)
 	if keyErr != nil {
 		m.mu.Unlock()
 		return
@@ -1080,8 +1111,12 @@ func (m *Manager) beginProxySession(slug, process string) {
 }
 
 func (m *Manager) endProxySession(slug, process string) {
+	m.endProxySessionFromDir(slug, "", process)
+}
+
+func (m *Manager) endProxySessionFromDir(slug, dirHint, process string) {
 	m.mu.Lock()
-	runtimeKey, keyErr := m.runtimeKeyForSlugLocked(slug)
+	runtimeKey, keyErr := m.runtimeKeyForTargetLocked(slug, dirHint)
 	if keyErr != nil {
 		m.mu.Unlock()
 		return

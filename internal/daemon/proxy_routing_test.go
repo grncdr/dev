@@ -3,6 +3,7 @@ package daemon
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -351,7 +352,7 @@ proxy = { path = "/" }
 	})
 	mgr.mu.Unlock()
 	s := &Server{manager: mgr}
-	_, _, _, _, _, _, err := s.resolveProxyTargetForRequest("main.localhost", "/", true)
+	_, _, _, _, _, _, _, err := s.resolveProxyTargetForRequest("main.localhost", "/", true)
 	if !errors.Is(err, errGatewayProcessNotExposed) {
 		t.Fatalf("expected gateway-not-exposed error, got %v", err)
 	}
@@ -442,7 +443,7 @@ overrides = { main = "foocorp" }
 
 	daemonCfg := &config.DaemonConfig{StateDir: filepath.Join(base, "state")}
 	s := &Server{mainPath: repo, daemonConfig: daemonCfg}
-	got, err := s.resolveRequestedSlug("foocorp")
+	got, _, err := s.resolveRequestedSlug("foocorp")
 	if err != nil {
 		t.Fatalf("resolveRequestedSlug: %v", err)
 	}
@@ -480,12 +481,169 @@ name = "foocorp"
 	daemonCfg := &config.DaemonConfig{StateDir: filepath.Join(base, "state")}
 	registerWorktreeForTest(t, daemonCfg, "foocorp", "feature/cloud-mailings", filepath.Join(base, "wt-cloud-mailings"), repo)
 	s := &Server{mainPath: repo, daemonConfig: daemonCfg}
-	got, err := s.resolveRequestedSlug("cloud-mailings")
+	got, _, err := s.resolveRequestedSlug("cloud-mailings")
 	if err != nil {
 		t.Fatalf("resolveRequestedSlug: %v", err)
 	}
 	if got != "feature/cloud-mailings" {
 		t.Fatalf("expected feature/cloud-mailings, got %s", got)
+	}
+}
+
+func TestResolveProxyTargetForRequest_AllowsDistinctMainOverridesAcrossProjects(t *testing.T) {
+	base := t.TempDir()
+	repoA := filepath.Join(base, "repo-a")
+	repoB := filepath.Join(base, "repo-b")
+	if err := os.MkdirAll(repoA, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(repoB, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(repoA, "init"); err != nil {
+		t.Fatalf("git init repoA: %v", err)
+	}
+	if err := runGit(repoB, "init"); err != nil {
+		t.Fatalf("git init repoB: %v", err)
+	}
+
+	cfgA := `
+[project]
+name = "org/repo-a"
+
+[local-dns]
+overrides = { main = "www" }
+
+[process.web]
+command = "echo a"
+proxy = { path = "/" }
+port = "unix"
+`
+	if err := os.WriteFile(filepath.Join(repoA, ".dev.toml"), []byte(cfgA), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfgB := `
+[project]
+name = "org/repo-b"
+
+[local-dns]
+overrides = { main = "blog" }
+
+[process.web]
+command = "echo b"
+proxy = { path = "/" }
+port = "unix"
+`
+	if err := os.WriteFile(filepath.Join(repoB, ".dev.toml"), []byte(cfgB), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewManager()
+	keyA := runtimeKeyForPath(repoA)
+	keyB := runtimeKeyForPath(repoB)
+	m.mu.Lock()
+	m.registerWorktreeLocked(keyA, runtimeWorktree{Slug: "main", Project: "org-repo-a", Path: repoA, DNSLabel: "www"})
+	m.registerWorktreeLocked(keyB, runtimeWorktree{Slug: "main", Project: "org-repo-b", Path: repoB, DNSLabel: "blog"})
+	m.processes[keyA] = map[string]*processInfo{
+		"web": {
+			network: "tcp",
+			address: "127.0.0.1:1",
+			cmd:     &exec.Cmd{Process: &os.Process{Pid: 1}},
+			ready:   true,
+			exited:  make(chan struct{}),
+		},
+	}
+	m.processes[keyB] = map[string]*processInfo{
+		"web": {
+			network: "tcp",
+			address: "127.0.0.1:1",
+			cmd:     &exec.Cmd{Process: &os.Process{Pid: 1}},
+			ready:   true,
+			exited:  make(chan struct{}),
+		},
+	}
+	m.mu.Unlock()
+
+	s := &Server{
+		manager:      m,
+		mainPath:     repoA,
+		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
+	}
+	_, _, process, _, _, targetSlug, _, err := s.resolveProxyTargetForRequest("www.localhost", "/", false)
+	if err != nil {
+		t.Fatalf("resolveProxyTargetForRequest: %v", err)
+	}
+	if targetSlug != "main" {
+		t.Fatalf("expected target slug main, got %q", targetSlug)
+	}
+	if process != "web" {
+		t.Fatalf("expected process web, got %q", process)
+	}
+}
+
+func TestResolveProxyTargetForRequest_AllowsDottedMainOverride(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(repo, "init"); err != nil {
+		t.Fatalf("git init repo: %v", err)
+	}
+
+	cfg := `
+[project]
+name = "org/repo"
+main_slug = "primary"
+
+[local-dns]
+overrides = { main = "www.foocorp" }
+
+[process.web]
+command = "echo ok"
+proxy = { path = "/" }
+port = "unix"
+`
+	if err := os.WriteFile(filepath.Join(repo, ".dev.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	daemonCfg := &config.DaemonConfig{StateDir: filepath.Join(base, "state"), LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}}
+	registerWorktreeForTest(t, daemonCfg, "org-repo", "primary", repo, repo)
+
+	mgr := NewManager()
+	runtimeKey := runtimeKeyForPath(repo)
+	mgr.mu.Lock()
+	mgr.registerWorktreeLocked(runtimeKey, runtimeWorktree{
+		Slug:     "primary",
+		Project:  "org-repo",
+		Path:     repo,
+		DNSLabel: "www.foocorp",
+	})
+	mgr.processes[runtimeKey] = map[string]*processInfo{
+		"web": {
+			network: "tcp",
+			address: "127.0.0.1:1",
+			cmd:     &exec.Cmd{Process: &os.Process{Pid: 1}},
+			ready:   true,
+			exited:  make(chan struct{}),
+		},
+	}
+	mgr.mu.Unlock()
+
+	s := &Server{
+		manager:      mgr,
+		mainPath:     repo,
+		daemonConfig: daemonCfg,
+	}
+	_, _, process, _, _, targetSlug, _, err := s.resolveProxyTargetForRequest("www.foocorp.localhost", "/", false)
+	if err != nil {
+		t.Fatalf("resolveProxyTargetForRequest: %v", err)
+	}
+	if targetSlug != "primary" {
+		t.Fatalf("expected target slug primary, got %q", targetSlug)
+	}
+	if process != "web" {
+		t.Fatalf("expected process web, got %q", process)
 	}
 }
 

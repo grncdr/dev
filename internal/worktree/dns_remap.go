@@ -120,11 +120,27 @@ func remappedDNSLabelForSlug(cfg *config.ProjectConfig, slug string) (string, bo
 }
 
 func normalizeDNSRemapValue(value string) (string, error) {
-	normalized, err := NormalizeIdentifierSegment(value)
-	if err != nil {
-		return "", err
+	trimmed := strings.TrimSpace(strings.ToLower(value))
+	if trimmed == "" {
+		return "", fmt.Errorf("invalid dns remap value %q", value)
 	}
-	return SlugDNSLabel(normalized), nil
+	parts := strings.Split(trimmed, ".")
+	normalizedParts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return "", fmt.Errorf("invalid dns remap value %q", value)
+		}
+		normalized, err := NormalizeIdentifierSegment(part)
+		if err != nil {
+			return "", err
+		}
+		if strings.Contains(normalized, "/") {
+			return "", fmt.Errorf("invalid dns remap label %q", part)
+		}
+		normalizedParts = append(normalizedParts, SlugDNSLabel(normalized))
+	}
+	return strings.Join(normalizedParts, "."), nil
 }
 
 func configuredMainSlug(cfg *config.ProjectConfig) (string, bool) {

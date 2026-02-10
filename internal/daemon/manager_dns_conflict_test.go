@@ -10,6 +10,8 @@ import (
 	"dev/internal/config"
 )
 
+const longRunningTestCommand = "sleep 300"
+
 func TestLocalDNSHostConflictsLocked_DetectsHostCollision(t *testing.T) {
 	base := t.TempDir()
 	repoA := filepath.Join(base, "repo-a")
@@ -139,5 +141,73 @@ port = 4000
 
 	if len(conflicts) != 0 {
 		t.Fatalf("expected no DNS host conflicts, got %+v", conflicts)
+	}
+}
+
+func TestStartWorktreeFromDir_FailsOnConflictingLocalDNSHosts(t *testing.T) {
+	base := t.TempDir()
+	repoA := filepath.Join(base, "repo-a")
+	repoB := filepath.Join(base, "repo-b")
+	if err := os.MkdirAll(repoA, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(repoB, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(repoA, "init"); err != nil {
+		t.Fatalf("git init repoA: %v", err)
+	}
+	if err := runGit(repoB, "init"); err != nil {
+		t.Fatalf("git init repoB: %v", err)
+	}
+
+	cfgA := `
+[project]
+name = "org/repo-a"
+
+[local-dns]
+overrides = { main = "www" }
+
+[process.web]
+command = "` + longRunningTestCommand + `"
+proxy = { path = "/" }
+port = "unix"
+`
+	if err := os.WriteFile(filepath.Join(repoA, ".dev.toml"), []byte(cfgA), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfgB := `
+[project]
+name = "org/repo-b"
+
+[local-dns]
+overrides = { main = "www" }
+
+[process.web]
+command = "` + longRunningTestCommand + `"
+proxy = { path = "/" }
+port = "unix"
+`
+	if err := os.WriteFile(filepath.Join(repoB, ".dev.toml"), []byte(cfgB), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewManager()
+	if _, err := m.StartWorktreeFromDir("main", repoA); err != nil {
+		t.Fatalf("start repoA: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = m.StopWorktreeFromDir("main", repoA)
+	})
+
+	_, err := m.StartWorktreeFromDir("main", repoB)
+	if err == nil {
+		t.Fatalf("expected local DNS conflict when starting repoB")
+	}
+	if !strings.Contains(err.Error(), "local DNS host conflict") {
+		t.Fatalf("expected local DNS conflict error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "www.localhost") {
+		t.Fatalf("expected conflicting host in error, got %v", err)
 	}
 }
