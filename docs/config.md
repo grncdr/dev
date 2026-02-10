@@ -182,12 +182,29 @@ apex_zone = ".localhost"
 listen_http = "0.0.0.0:80"
 listen_https = "0.0.0.0:443"
 allow = "loopback"
+
+[global-hooks]
+pre_worktree_add = "bin/pre-worktree-add-user"
+post_worktree_add = "bin/post-worktree-add-user"
+pre_worktree_cleanup = "bin/pre-worktree-cleanup-user"
+post_worktree_cleanup = "bin/post-worktree-cleanup-user"
+
+[project-hooks."foocorp/monorepo"]
+pre_worktree_add = "bin/project-pre-worktree-add-user"
+post_worktree_add = "bin/project-post-worktree-add-user"
+pre_worktree_cleanup = "bin/project-pre-worktree-cleanup-user"
+post_worktree_cleanup = "bin/project-post-worktree-cleanup-user"
 ```
 
 Notes:
 - `local-proxy.enabled` defaults to `true`; set to `false` to disable the local proxy.
 - `local-proxy.apex_zone` is daemon-level and defaults to `.localhost`.
 - `worktree_dir` is daemon-level and controls where managed worktrees are created.
+- `global-hooks` configures user-level worktree lifecycle hooks that apply to all projects.
+- `project-hooks."<project-name>"` configures additional user-level hooks for a specific project name (for example `project-hooks."foocorp/monorepo"`).
+- Worktree hook execution order:
+  - `dev worktree add`: project hook first, then daemon `global-hooks`, then daemon `project-hooks`.
+  - `dev worktree cleanup`: daemon `global-hooks` first, then daemon `project-hooks`, then project hook.
 - `gateway.auth` in project config provides default `dev share` Basic Auth credentials.
   - `dev share --auth <username:password>` overrides project defaults.
   - `dev share --no-auth` disables project defaults for that share invocation.

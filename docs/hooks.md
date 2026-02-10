@@ -1,6 +1,6 @@
 # dev Hooks
 
-This document describes all user-configurable hooks in `.dev.toml`.
+This document describes user-configurable hooks in `.dev.toml` and `daemon.toml`.
 
 ```toml
 [hooks]
@@ -25,6 +25,22 @@ post_stop = "bin/post-stop"
 - `pre_stop`: runs before `dev stop`/`dev worktree stop` stops processes.
 - `post_stop`: runs after process stop flow completes.
 
+Daemon-level hook config (`~/.config/dev/daemon.toml`) supports worktree lifecycle hooks only:
+
+```toml
+[global-hooks]
+pre_worktree_add = "bin/pre-worktree-add-user"
+post_worktree_add = "bin/post-worktree-add-user"
+pre_worktree_cleanup = "bin/pre-worktree-cleanup-user"
+post_worktree_cleanup = "bin/post-worktree-cleanup-user"
+
+[project-hooks."my/project"]
+pre_worktree_add = "bin/project-pre-worktree-add-user"
+post_worktree_add = "bin/project-post-worktree-add-user"
+pre_worktree_cleanup = "bin/project-pre-worktree-cleanup-user"
+post_worktree_cleanup = "bin/project-post-worktree-cleanup-user"
+```
+
 ## Working Directory
 
 Each hook command executes with its current working directory set to the target worktree context:
@@ -38,6 +54,7 @@ Each hook command executes with its current working directory set to the target 
 ## Wrapper behavior
 
 If `[commands].wrapper` is configured, hook commands are executed through that wrapper (same behavior as managed process commands).
+Daemon-level hooks in `daemon.toml` do not use the project wrapper.
 
 ## Hook Environment Variables
 
@@ -69,3 +86,8 @@ For `pre_start`, `post_start`, `pre_stop`, and `post_stop`, dev provides the sam
 
 - `pre_*` hook failure aborts the operation.
 - `post_*` hook failure returns an error after mutation may already have happened.
+
+## Worktree Hook Order
+
+- `dev worktree add`: project hook, then daemon `global-hooks`, then daemon `project-hooks`.
+- `dev worktree cleanup`: daemon `global-hooks`, then daemon `project-hooks`, then project hook.

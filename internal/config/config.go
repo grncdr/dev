@@ -33,10 +33,12 @@ type ProjectBlock struct {
 }
 
 type DaemonConfig struct {
-	StateDir    string                `toml:"state_dir" json:"state_dir,omitempty"`
-	Gateway     DaemonGatewayBlock    `toml:"gateway" json:"gateway,omitempty"`
-	LocalProxy  DaemonLocalProxyBlock `toml:"local-proxy" json:"local_proxy,omitempty"`
-	WorktreeDir string                `toml:"worktree_dir" json:"worktree_dir,omitempty"`
+	StateDir     string                `toml:"state_dir" json:"state_dir,omitempty"`
+	Gateway      DaemonGatewayBlock    `toml:"gateway" json:"gateway,omitempty"`
+	LocalProxy   DaemonLocalProxyBlock `toml:"local-proxy" json:"local_proxy,omitempty"`
+	WorktreeDir  string                `toml:"worktree_dir" json:"worktree_dir,omitempty"`
+	GlobalHooks  HooksBlock            `toml:"global-hooks" json:"global_hooks,omitempty"`
+	ProjectHooks map[string]HooksBlock `toml:"project-hooks" json:"project_hooks,omitempty"`
 }
 
 type DaemonGatewayBlock struct {
@@ -258,6 +260,56 @@ func ResolveWorktreeDir(cfg *DaemonConfig) (string, error) {
 		return "", errors.New("daemon.worktree_dir must be an absolute path")
 	}
 	return filepath.Clean(expanded), nil
+}
+
+type WorktreeLifecycleHookCommands struct {
+	PreWorktreeAdd      []string
+	PostWorktreeAdd     []string
+	PreWorktreeCleanup  []string
+	PostWorktreeCleanup []string
+}
+
+func ResolveDaemonWorktreeLifecycleHooks(daemonCfg *DaemonConfig, projectKeys ...string) WorktreeLifecycleHookCommands {
+	resolved := WorktreeLifecycleHookCommands{}
+	if daemonCfg == nil {
+		return resolved
+	}
+	appendLifecycleHookCommands(&resolved, daemonCfg.GlobalHooks)
+	seenProjectKeys := map[string]struct{}{}
+	for _, key := range projectKeys {
+		projectKey := strings.TrimSpace(key)
+		if projectKey == "" {
+			continue
+		}
+		if _, seen := seenProjectKeys[projectKey]; seen {
+			continue
+		}
+		seenProjectKeys[projectKey] = struct{}{}
+		projectHooks, ok := daemonCfg.ProjectHooks[projectKey]
+		if !ok {
+			continue
+		}
+		appendLifecycleHookCommands(&resolved, projectHooks)
+	}
+	return resolved
+}
+
+func appendLifecycleHookCommands(dst *WorktreeLifecycleHookCommands, src HooksBlock) {
+	if dst == nil {
+		return
+	}
+	if hook := strings.TrimSpace(src.PreWorktreeAdd); hook != "" {
+		dst.PreWorktreeAdd = append(dst.PreWorktreeAdd, hook)
+	}
+	if hook := strings.TrimSpace(src.PostWorktreeAdd); hook != "" {
+		dst.PostWorktreeAdd = append(dst.PostWorktreeAdd, hook)
+	}
+	if hook := strings.TrimSpace(src.PreWorktreeCleanup); hook != "" {
+		dst.PreWorktreeCleanup = append(dst.PreWorktreeCleanup, hook)
+	}
+	if hook := strings.TrimSpace(src.PostWorktreeCleanup); hook != "" {
+		dst.PostWorktreeCleanup = append(dst.PostWorktreeCleanup, hook)
+	}
 }
 
 func ResolveDaemonConfigPath() string {

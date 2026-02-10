@@ -219,6 +219,100 @@ post_worktree_cleanup = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_DNS_NAME} > 
 	}
 }
 
+func TestWorktreeLifecycleHooks_DaemonOrdering(t *testing.T) {
+	base := t.TempDir()
+	repoDir := filepath.Join(base, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if err := runGitForTest(repoDir, "init"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	orderLog := filepath.Join(base, "hook-order.log")
+	projectConfig := `
+[project]
+name = "demo"
+
+[hooks]
+pre_worktree_add = "sh -c \"echo project-pre-add >> ` + orderLog + `\""
+post_worktree_add = "sh -c \"echo project-post-add >> ` + orderLog + `\""
+pre_worktree_cleanup = "sh -c \"echo project-pre-cleanup >> ` + orderLog + `\""
+post_worktree_cleanup = "sh -c \"echo project-post-cleanup >> ` + orderLog + `\""
+`
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(projectConfig), 0o600); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	if err := runGitForTest(repoDir, "add", "."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := runGitForTest(repoDir, "commit", "-m", "init"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	worktreeRoot := filepath.Join(base, "managed")
+	daemonConfigPath := filepath.Join(base, "daemon.toml")
+	daemonConfig := `
+state_dir = "` + filepath.Join(base, "state") + `"
+worktree_dir = "` + worktreeRoot + `"
+
+[global-hooks]
+pre_worktree_add = "sh -c \"echo daemon-global-pre-add >> ` + orderLog + `\""
+post_worktree_add = "sh -c \"echo daemon-global-post-add >> ` + orderLog + `\""
+pre_worktree_cleanup = "sh -c \"echo daemon-global-pre-cleanup >> ` + orderLog + `\""
+post_worktree_cleanup = "sh -c \"echo daemon-global-post-cleanup >> ` + orderLog + `\""
+
+[project-hooks."demo"]
+pre_worktree_add = "sh -c \"echo daemon-project-pre-add >> ` + orderLog + `\""
+post_worktree_add = "sh -c \"echo daemon-project-post-add >> ` + orderLog + `\""
+pre_worktree_cleanup = "sh -c \"echo daemon-project-pre-cleanup >> ` + orderLog + `\""
+post_worktree_cleanup = "sh -c \"echo daemon-project-post-cleanup >> ` + orderLog + `\""
+`
+	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
+		t.Fatalf("write daemon config: %v", err)
+	}
+	opts := &Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	if err := runWorktreeAdd(opts, "feature", "", &out, &errOut); err != nil {
+		t.Fatalf("runWorktreeAdd: %v", err)
+	}
+	if err := runWorktreeCleanup(opts, "feature", &worktreeCleanupOptions{Force: true}, &out, &errOut); err != nil {
+		t.Fatalf("runWorktreeCleanup: %v", err)
+	}
+
+	data, err := os.ReadFile(orderLog)
+	if err != nil {
+		t.Fatalf("read hook order log: %v", err)
+	}
+	got := strings.Split(strings.TrimSpace(string(data)), "\n")
+	want := []string{
+		"project-pre-add",
+		"daemon-global-pre-add",
+		"daemon-project-pre-add",
+		"project-post-add",
+		"daemon-global-post-add",
+		"daemon-project-post-add",
+		"daemon-global-pre-cleanup",
+		"daemon-project-pre-cleanup",
+		"project-pre-cleanup",
+		"daemon-global-post-cleanup",
+		"daemon-project-post-cleanup",
+		"project-post-cleanup",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("unexpected hook line count: got %d (%v), want %d (%v)", len(got), got, len(want), want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected hook order at %d: got %q, want %q (all=%v)", i, got[i], want[i], got)
+		}
+	}
+}
+
 func TestWorktreeLifecycleProjectAndSlugWithSlashes(t *testing.T) {
 	base := t.TempDir()
 	repoDir := filepath.Join(base, "foocorp", "monorepo")

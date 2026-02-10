@@ -103,6 +103,14 @@ password = "bar"
 enabled = true
 hosted_zone_id = "Z123"
 ttl = 60
+
+[global-hooks]
+pre_worktree_add = "echo global-pre-add"
+post_worktree_cleanup = "echo global-post-cleanup"
+
+[project-hooks."demo/repo"]
+post_worktree_add = "echo project-post-add"
+pre_worktree_cleanup = "echo project-pre-cleanup"
 `
 	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
@@ -129,6 +137,43 @@ ttl = 60
 	}
 	if cfg.WorktreeDir != worktreeDir {
 		t.Fatalf("expected worktree_dir %q, got %q", worktreeDir, cfg.WorktreeDir)
+	}
+	if cfg.GlobalHooks.PreWorktreeAdd != "echo global-pre-add" || cfg.GlobalHooks.PostWorktreeCleanup != "echo global-post-cleanup" {
+		t.Fatalf("unexpected global hooks decode: %#v", cfg.GlobalHooks)
+	}
+	projectHooks, ok := cfg.ProjectHooks["demo/repo"]
+	if !ok {
+		t.Fatalf("expected project hooks entry for demo/repo")
+	}
+	if projectHooks.PostWorktreeAdd != "echo project-post-add" || projectHooks.PreWorktreeCleanup != "echo project-pre-cleanup" {
+		t.Fatalf("unexpected project hooks decode: %#v", projectHooks)
+	}
+}
+
+func TestResolveDaemonWorktreeLifecycleHooks(t *testing.T) {
+	cfg := &DaemonConfig{
+		GlobalHooks: HooksBlock{
+			PreWorktreeAdd:      "echo global-pre-add",
+			PostWorktreeCleanup: "echo global-post-cleanup",
+		},
+		ProjectHooks: map[string]HooksBlock{
+			"demo/repo": {
+				PreWorktreeAdd:      "echo project-pre-add",
+				PostWorktreeCleanup: "echo project-post-cleanup",
+			},
+		},
+	}
+	hooks := ResolveDaemonWorktreeLifecycleHooks(cfg, "demo/repo")
+	if len(hooks.PreWorktreeAdd) != 2 || hooks.PreWorktreeAdd[0] != "echo global-pre-add" || hooks.PreWorktreeAdd[1] != "echo project-pre-add" {
+		t.Fatalf("unexpected pre_worktree_add hooks: %#v", hooks.PreWorktreeAdd)
+	}
+	if len(hooks.PostWorktreeCleanup) != 2 || hooks.PostWorktreeCleanup[0] != "echo global-post-cleanup" || hooks.PostWorktreeCleanup[1] != "echo project-post-cleanup" {
+		t.Fatalf("unexpected post_worktree_cleanup hooks: %#v", hooks.PostWorktreeCleanup)
+	}
+
+	dupe := ResolveDaemonWorktreeLifecycleHooks(cfg, "demo/repo", "demo/repo")
+	if len(dupe.PreWorktreeAdd) != 2 || len(dupe.PostWorktreeCleanup) != 2 {
+		t.Fatalf("expected duplicate project keys to be deduplicated, got %#v", dupe)
 	}
 }
 

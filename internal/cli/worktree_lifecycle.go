@@ -151,6 +151,7 @@ func runWorktreeRegister(opts *Options, targetArg string, out, errOut io.Writer)
 	if err != nil {
 		return err
 	}
+	daemonHooks := config.ResolveDaemonWorktreeLifecycleHooks(daemonCfg, cfg.Project.Name, target.Project)
 	branch := worktree.BranchName(current.Branch)
 	hookEnv := lifecycleHookEnv(target.Project, target.Slug, current.Path, branch, "add", false, proxyApexZone(daemonCfg))
 	if err := worktree.Register(daemonCfg, worktree.Registration{
@@ -163,6 +164,9 @@ func runWorktreeRegister(opts *Options, targetArg string, out, errOut io.Writer)
 		return err
 	}
 	if err := runLifecycleHook(cfg.Hooks.PostWorktreeAdd, cfg.Commands.Wrapper, "post_worktree_add", current.Path, hookEnv, out, errOut); err != nil {
+		return fmt.Errorf("worktree registered at %s, but %w", current.Path, err)
+	}
+	if err := runLifecycleHooks(daemonHooks.PostWorktreeAdd, "", "post_worktree_add", current.Path, hookEnv, out, errOut); err != nil {
 		return fmt.Errorf("worktree registered at %s, but %w", current.Path, err)
 	}
 
@@ -228,6 +232,7 @@ func runWorktreeAdd(opts *Options, targetArg, branchArg string, out, errOut io.W
 	if err != nil {
 		return err
 	}
+	daemonHooks := config.ResolveDaemonWorktreeLifecycleHooks(daemonCfg, cfg.Project.Name, target.Project)
 
 	branchName := strings.TrimSpace(branchArg)
 	if branchName == "" {
@@ -243,6 +248,9 @@ func runWorktreeAdd(opts *Options, targetArg, branchArg string, out, errOut io.W
 
 	hookEnv := lifecycleHookEnv(target.Project, target.Slug, targetPath, branchName, "add", false, proxyApexZone(daemonCfg))
 	if err := runLifecycleHook(cfg.Hooks.PreWorktreeAdd, cfg.Commands.Wrapper, "pre_worktree_add", mainPath, hookEnv, out, errOut); err != nil {
+		return err
+	}
+	if err := runLifecycleHooks(daemonHooks.PreWorktreeAdd, "", "pre_worktree_add", mainPath, hookEnv, out, errOut); err != nil {
 		return err
 	}
 
@@ -267,6 +275,9 @@ func runWorktreeAdd(opts *Options, targetArg, branchArg string, out, errOut io.W
 	}
 
 	if err := runLifecycleHook(cfg.Hooks.PostWorktreeAdd, cfg.Commands.Wrapper, "post_worktree_add", targetPath, hookEnv, out, errOut); err != nil {
+		return fmt.Errorf("worktree created at %s, but %w", targetPath, err)
+	}
+	if err := runLifecycleHooks(daemonHooks.PostWorktreeAdd, "", "post_worktree_add", targetPath, hookEnv, out, errOut); err != nil {
 		return fmt.Errorf("worktree created at %s, but %w", targetPath, err)
 	}
 
@@ -311,6 +322,7 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 	if err != nil {
 		return err
 	}
+	daemonHooks := config.ResolveDaemonWorktreeLifecycleHooks(daemonCfg, cfg.Project.Name, resolved.project)
 	hookEnv := lifecycleHookEnv(resolved.project, resolved.slug, resolved.path, resolved.branch, "cleanup", resolved.implicit, proxyApexZone(daemonCfg))
 
 	if cleanup.DryRun {
@@ -321,6 +333,9 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 		return nil
 	}
 
+	if err := runLifecycleHooks(daemonHooks.PreWorktreeCleanup, "", "pre_worktree_cleanup", resolved.path, hookEnv, out, errOut); err != nil {
+		return err
+	}
 	if err := runLifecycleHook(cfg.Hooks.PreWorktreeCleanup, cfg.Commands.Wrapper, "pre_worktree_cleanup", resolved.path, hookEnv, out, errOut); err != nil {
 		return err
 	}
@@ -348,6 +363,9 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 		return fmt.Errorf("worktree cleaned up at %s, but %w", resolved.path, err)
 	}
 
+	if err := runLifecycleHooks(daemonHooks.PostWorktreeCleanup, "", "post_worktree_cleanup", resolved.mainPath, hookEnv, out, errOut); err != nil {
+		return fmt.Errorf("worktree cleaned up at %s, but %w", resolved.path, err)
+	}
 	if err := runLifecycleHook(cfg.Hooks.PostWorktreeCleanup, cfg.Commands.Wrapper, "post_worktree_cleanup", resolved.mainPath, hookEnv, out, errOut); err != nil {
 		return fmt.Errorf("worktree cleaned up at %s, but %w", resolved.path, err)
 	}
@@ -707,6 +725,15 @@ func runLifecycleHook(command, wrapper, phase, dir string, env map[string]string
 	cmd.Stderr = &prefixedLineWriter{prefix: "[hook " + phase + "] ", writer: errOut}
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s hook failed: %w", phase, err)
+	}
+	return nil
+}
+
+func runLifecycleHooks(commands []string, wrapper, phase, dir string, env map[string]string, out, errOut io.Writer) error {
+	for _, command := range commands {
+		if err := runLifecycleHook(command, wrapper, phase, dir, env, out, errOut); err != nil {
+			return err
+		}
 	}
 	return nil
 }
