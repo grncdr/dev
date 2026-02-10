@@ -13,8 +13,10 @@ import (
 	"math/big"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -25,6 +27,8 @@ import (
 const (
 	certValidity = 3650 * 24 * time.Hour
 )
+
+var osChown = os.Chown
 
 func newCertCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -90,8 +94,71 @@ func runCertInstall() error {
 		}
 	}
 
+	if err := chownCertMaterialToInvoker(dir, caKeyPath, caCertPath, leafKeyPath, leafCertPath); err != nil {
+		return err
+	}
+
 	fmt.Printf("certs written to %s\n", dir)
 	return nil
+}
+
+func chownCertMaterialToInvoker(dir string, paths ...string) error {
+	uid, gid, ok, err := invokingUserOwnership()
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
+	allPaths := make([]string, 0, len(paths)+1)
+	allPaths = append(allPaths, paths...)
+	allPaths = append(allPaths, dir)
+	for _, path := range allPaths {
+		if err := osChown(path, uid, gid); err != nil {
+			return fmt.Errorf("set ownership on %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
+func invokingUserOwnership() (uid int, gid int, ok bool, err error) {
+	if getEUID() != 0 {
+		return 0, 0, false, nil
+	}
+
+	sudoUID := os.Getenv("SUDO_UID")
+	sudoGID := os.Getenv("SUDO_GID")
+	if sudoUID != "" && sudoGID != "" {
+		uid, err := strconv.Atoi(sudoUID)
+		if err != nil {
+			return 0, 0, false, fmt.Errorf("parse SUDO_UID %q: %w", sudoUID, err)
+		}
+		gid, err := strconv.Atoi(sudoGID)
+		if err != nil {
+			return 0, 0, false, fmt.Errorf("parse SUDO_GID %q: %w", sudoGID, err)
+		}
+		return uid, gid, true, nil
+	}
+
+	sudoUser := os.Getenv("SUDO_USER")
+	if sudoUser == "" {
+		return 0, 0, false, nil
+	}
+
+	u, err := user.Lookup(sudoUser)
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("lookup SUDO_USER %q: %w", sudoUser, err)
+	}
+	uid, err = strconv.Atoi(u.Uid)
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("parse uid for SUDO_USER %q: %w", sudoUser, err)
+	}
+	gid, err = strconv.Atoi(u.Gid)
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("parse gid for SUDO_USER %q: %w", sudoUser, err)
+	}
+	return uid, gid, true, nil
 }
 
 func runCertExport(out io.Writer) error {

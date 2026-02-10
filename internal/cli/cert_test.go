@@ -2,8 +2,10 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -59,5 +61,96 @@ func TestRunCertExportMissingCA(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "run dev cert install") {
 		t.Fatalf("expected install hint, got: %v", err)
+	}
+}
+
+func TestInvokingUserOwnership_FromSudoEnv(t *testing.T) {
+	prevGetEUID := getEUID
+	getEUID = func() int { return 0 }
+	defer func() { getEUID = prevGetEUID }()
+
+	t.Setenv("SUDO_UID", "1001")
+	t.Setenv("SUDO_GID", "1002")
+	t.Setenv("SUDO_USER", "")
+
+	uid, gid, ok, err := invokingUserOwnership()
+	if err != nil {
+		t.Fatalf("invokingUserOwnership: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected ownership resolution")
+	}
+	if uid != 1001 || gid != 1002 {
+		t.Fatalf("unexpected uid/gid: got %d/%d", uid, gid)
+	}
+}
+
+func TestInvokingUserOwnership_InvalidSudoUID(t *testing.T) {
+	prevGetEUID := getEUID
+	getEUID = func() int { return 0 }
+	defer func() { getEUID = prevGetEUID }()
+
+	t.Setenv("SUDO_UID", "bad")
+	t.Setenv("SUDO_GID", "1002")
+	t.Setenv("SUDO_USER", "")
+
+	_, _, _, err := invokingUserOwnership()
+	if err == nil {
+		t.Fatalf("expected parse error")
+	}
+}
+
+func TestChownCertMaterialToInvoker_ChownsFilesAndDir(t *testing.T) {
+	prevGetEUID := getEUID
+	prevChown := osChown
+	getEUID = func() int { return 0 }
+	defer func() {
+		getEUID = prevGetEUID
+		osChown = prevChown
+	}()
+
+	t.Setenv("SUDO_UID", "2001")
+	t.Setenv("SUDO_GID", "2002")
+	t.Setenv("SUDO_USER", "")
+
+	var calls []string
+	osChown = func(path string, uid, gid int) error {
+		calls = append(calls, path)
+		if uid != 2001 || gid != 2002 {
+			t.Fatalf("unexpected uid/gid: %d/%d", uid, gid)
+		}
+		return nil
+	}
+
+	if err := chownCertMaterialToInvoker("/tmp/certs", "/tmp/certs/ca.pem", "/tmp/certs/leaf.pem"); err != nil {
+		t.Fatalf("chownCertMaterialToInvoker: %v", err)
+	}
+
+	want := []string{"/tmp/certs/ca.pem", "/tmp/certs/leaf.pem", "/tmp/certs"}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("unexpected chown paths: got %#v want %#v", calls, want)
+	}
+}
+
+func TestChownCertMaterialToInvoker_ChownError(t *testing.T) {
+	prevGetEUID := getEUID
+	prevChown := osChown
+	getEUID = func() int { return 0 }
+	defer func() {
+		getEUID = prevGetEUID
+		osChown = prevChown
+	}()
+
+	t.Setenv("SUDO_UID", "2001")
+	t.Setenv("SUDO_GID", "2002")
+	t.Setenv("SUDO_USER", "")
+
+	osChown = func(path string, uid, gid int) error {
+		return errors.New("boom")
+	}
+
+	err := chownCertMaterialToInvoker("/tmp/certs", "/tmp/certs/ca.pem")
+	if err == nil || !strings.Contains(err.Error(), "set ownership on /tmp/certs/ca.pem") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
