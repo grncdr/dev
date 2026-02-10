@@ -341,7 +341,15 @@ proxy = { path = "/" }
 		t.Fatal(err)
 	}
 	mgr := NewManager()
-	mgr.paths["main"] = dir
+	runtimeKey := runtimeKeyForPath(dir)
+	mgr.mu.Lock()
+	mgr.registerWorktreeLocked(runtimeKey, runtimeWorktree{
+		Slug:     "main",
+		Project:  "foocorp",
+		Path:     dir,
+		DNSLabel: "main",
+	})
+	mgr.mu.Unlock()
 	s := &Server{manager: mgr}
 	_, _, _, _, _, _, err := s.resolveProxyTargetForRequest("main.localhost", "/", true)
 	if !errors.Is(err, errGatewayProcessNotExposed) {
@@ -365,7 +373,15 @@ proxy = { subdomain = "mailpit" }
 	}
 
 	mgr := NewManager()
-	mgr.paths["monorepo"] = dir
+	runtimeKey := runtimeKeyForPath(dir)
+	mgr.mu.Lock()
+	mgr.registerWorktreeLocked(runtimeKey, runtimeWorktree{
+		Slug:     "monorepo",
+		Project:  "foocorp",
+		Path:     dir,
+		DNSLabel: "monorepo",
+	})
+	mgr.mu.Unlock()
 	s := &Server{manager: mgr}
 
 	cfg, repoPath, err := s.projectConfigForSlug("monorepo")
@@ -424,13 +440,52 @@ overrides = { main = "foocorp" }
 		t.Fatalf("git commit: %v", err)
 	}
 
-	s := &Server{mainPath: repo}
+	daemonCfg := &config.DaemonConfig{StateDir: filepath.Join(base, "state")}
+	s := &Server{mainPath: repo, daemonConfig: daemonCfg}
 	got, err := s.resolveRequestedSlug("foocorp")
 	if err != nil {
 		t.Fatalf("resolveRequestedSlug: %v", err)
 	}
 	if got != "primary" {
 		t.Fatalf("expected primary, got %s", got)
+	}
+}
+
+func TestResolveRequestedSlug_MapsRegisteredSlugDNSLabel(t *testing.T) {
+	base := t.TempDir()
+	repo := filepath.Join(base, "monorepo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(repo, "init"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	cfg := `
+[project]
+name = "foocorp"
+`
+	if err := os.WriteFile(filepath.Join(repo, ".dev.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("demo"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(repo, "add", "."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := runGit(repo, "commit", "-m", "init"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	daemonCfg := &config.DaemonConfig{StateDir: filepath.Join(base, "state")}
+	registerWorktreeForTest(t, daemonCfg, "foocorp", "feature/cloud-mailings", filepath.Join(base, "wt-cloud-mailings"), repo)
+	s := &Server{mainPath: repo, daemonConfig: daemonCfg}
+	got, err := s.resolveRequestedSlug("cloud-mailings")
+	if err != nil {
+		t.Fatalf("resolveRequestedSlug: %v", err)
+	}
+	if got != "feature/cloud-mailings" {
+		t.Fatalf("expected feature/cloud-mailings, got %s", got)
 	}
 }
 

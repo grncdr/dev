@@ -26,7 +26,7 @@ func (m *Manager) runningWorktrees() []resumeWorktree {
 	defer m.mu.Unlock()
 
 	out := make([]resumeWorktree, 0, len(m.processes))
-	for slug, procs := range m.processes {
+	for runtimeKey, procs := range m.processes {
 		running := false
 		for _, info := range procs {
 			if info != nil && info.cmd != nil && info.cmd.Process != nil {
@@ -37,9 +37,15 @@ func (m *Manager) runningWorktrees() []resumeWorktree {
 		if !running {
 			continue
 		}
-		entry := resumeWorktree{Slug: slug}
-		if path, ok := m.paths[slug]; ok {
-			entry.Path = path
+		entry := resumeWorktree{}
+		if wt, ok := m.worktrees[runtimeKey]; ok {
+			entry.Slug = wt.Slug
+			entry.Path = wt.Path
+		} else {
+			entry.Path = runtimeKey
+		}
+		if entry.Slug == "" {
+			entry.Slug = runtimeKey
 		}
 		out = append(out, entry)
 	}

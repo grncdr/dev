@@ -239,8 +239,10 @@ func (s *Server) resolveRequestedSlug(requestedSlug string) (string, error) {
 	if err != nil {
 		return requestedSlug, nil
 	}
-	if mappedSlug, ok := worktree.ProxySlugForDNSLabel(cfg, requestedSlug); ok {
+	if mappedSlug, ok, err := worktree.ResolveSlugForDNSLabel(cfg, s.daemonConfig, requestedSlug); err == nil && ok {
 		return mappedSlug, nil
+	} else if err != nil {
+		return "", err
 	}
 	mainSlug, err := resolveMainWorktreeSlug(mainPath)
 	if err != nil {

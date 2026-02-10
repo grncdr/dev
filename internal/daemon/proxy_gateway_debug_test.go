@@ -41,8 +41,15 @@ proxy = { path = "/" }
 
 	upstreamAddr := strings.TrimPrefix(upstream.URL, "http://")
 	mgr := NewManager()
-	mgr.paths["main"] = base
-	mgr.processes["main"] = map[string]*processInfo{
+	runtimeKey := runtimeKeyForPath(base)
+	mgr.mu.Lock()
+	mgr.registerWorktreeLocked(runtimeKey, runtimeWorktree{
+		Slug:     "main",
+		Project:  "foocorp",
+		Path:     base,
+		DNSLabel: "main",
+	})
+	mgr.processes[runtimeKey] = map[string]*processInfo{
 		"web": {
 			network: "tcp",
 			address: upstreamAddr,
@@ -51,6 +58,7 @@ proxy = { path = "/" }
 			exited:  make(chan struct{}),
 		},
 	}
+	mgr.mu.Unlock()
 
 	s := &Server{
 		manager: mgr,
@@ -144,8 +152,15 @@ proxy = { path = "/" }
 
 	upstreamAddr := strings.TrimPrefix(upstream.URL, "http://")
 	mgr := NewManager()
-	mgr.paths["main"] = base
-	mgr.processes["main"] = map[string]*processInfo{
+	runtimeKey := runtimeKeyForPath(base)
+	mgr.mu.Lock()
+	mgr.registerWorktreeLocked(runtimeKey, runtimeWorktree{
+		Slug:     "main",
+		Project:  "foocorp",
+		Path:     base,
+		DNSLabel: "main",
+	})
+	mgr.processes[runtimeKey] = map[string]*processInfo{
 		"web": {
 			network: "tcp",
 			address: upstreamAddr,
@@ -154,6 +169,7 @@ proxy = { path = "/" }
 			exited:  make(chan struct{}),
 		},
 	}
+	mgr.mu.Unlock()
 
 	s := &Server{
 		manager: mgr,
@@ -227,8 +243,15 @@ proxy = { path = "/" }
 
 	upstreamAddr := strings.TrimPrefix(upstream.URL, "http://")
 	mgr := NewManager()
-	mgr.paths["main"] = base
-	mgr.processes["main"] = map[string]*processInfo{
+	runtimeKey := runtimeKeyForPath(base)
+	mgr.mu.Lock()
+	mgr.registerWorktreeLocked(runtimeKey, runtimeWorktree{
+		Slug:     "main",
+		Project:  "foocorp",
+		Path:     base,
+		DNSLabel: "main",
+	})
+	mgr.processes[runtimeKey] = map[string]*processInfo{
 		"web": {
 			network: "tcp",
 			address: upstreamAddr,
@@ -237,6 +260,7 @@ proxy = { path = "/" }
 			exited:  make(chan struct{}),
 		},
 	}
+	mgr.mu.Unlock()
 
 	s := &Server{
 		manager: mgr,
@@ -315,8 +339,15 @@ proxy = { subdomain = "app", path = "/" }
 
 	upstreamAddr := strings.TrimPrefix(upstream.URL, "http://")
 	mgr := NewManager()
-	mgr.paths["main"] = base
-	mgr.processes["main"] = map[string]*processInfo{
+	runtimeKey := runtimeKeyForPath(base)
+	mgr.mu.Lock()
+	mgr.registerWorktreeLocked(runtimeKey, runtimeWorktree{
+		Slug:     "main",
+		Project:  "foocorp",
+		Path:     base,
+		DNSLabel: "foocorp",
+	})
+	mgr.processes[runtimeKey] = map[string]*processInfo{
 		"web": {
 			network: "tcp",
 			address: upstreamAddr,
@@ -325,6 +356,7 @@ proxy = { subdomain = "app", path = "/" }
 			exited:  make(chan struct{}),
 		},
 	}
+	mgr.mu.Unlock()
 
 	s := &Server{
 		manager: mgr,

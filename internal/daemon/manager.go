@@ -26,7 +26,9 @@ import (
 type Manager struct {
 	mu                   sync.Mutex
 	processes            map[string]map[string]*processInfo
-	paths                map[string]string
+	worktrees            map[string]runtimeWorktree
+	slugIndex            map[string]map[string]struct{}
+	dnsLabelIndex        map[string]map[string]struct{}
 	pendingProxySessions map[string]map[string]int
 	apexZone             string
 	daemonCfg            *config.DaemonConfig
@@ -34,13 +36,24 @@ type Manager struct {
 
 const defaultProxyProcessIdleTimeout = 5 * time.Minute
 
+var errWorktreeNotRunning = errors.New("worktree not running")
+
 func NewManager() *Manager {
 	return &Manager{
 		processes:            make(map[string]map[string]*processInfo),
-		paths:                make(map[string]string),
+		worktrees:            make(map[string]runtimeWorktree),
+		slugIndex:            make(map[string]map[string]struct{}),
+		dnsLabelIndex:        make(map[string]map[string]struct{}),
 		pendingProxySessions: make(map[string]map[string]int),
 		apexZone:             ".localhost",
 	}
+}
+
+type runtimeWorktree struct {
+	Slug     string
+	Project  string
+	Path     string
+	DNSLabel string
 }
 
 func (m *Manager) SetApexZone(zone string) {
@@ -128,9 +141,6 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 	if err != nil {
 		return nil, err
 	}
-	if err := m.ensureSlugPathCompatible(slug, path); err != nil {
-		return nil, err
-	}
 
 	cfgPath := filepath.Join(path, config.DefaultProjectConfig)
 	cfg, _, err := config.LoadProjectConfig(cfgPath)
@@ -146,6 +156,8 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 	if err != nil {
 		return nil, fmt.Errorf("resolve project identifier: %w", err)
 	}
+	runtimeKey := runtimeKeyForPath(path)
+	dnsLabel := worktree.ProxyDNSLabelForSlug(cfg, slug)
 	branch, err := resolveWorktreeBranch(path)
 	if err != nil {
 		return nil, err
@@ -170,13 +182,6 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 	}
 	statuses := []ProcessStatus{}
 
-	m.mu.Lock()
-	if _, ok := m.processes[slug]; !ok {
-		m.processes[slug] = make(map[string]*processInfo)
-	}
-	m.paths[slug] = path
-	m.mu.Unlock()
-
 	selected := selectProcesses(cfg.Processes, processes, all)
 	needs, err := buildProcessNeeds(cfg.Processes)
 	if err != nil {
@@ -186,6 +191,25 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 	if err != nil {
 		return nil, err
 	}
+	m.mu.Lock()
+	hostConflicts := m.localDNSHostConflictsLocked(runtimeKey, cfg, slug, localSet, apexZone)
+	m.mu.Unlock()
+	if len(hostConflicts) > 0 {
+		return nil, formatLocalDNSConflictError(hostConflicts)
+	}
+
+	m.mu.Lock()
+	if _, ok := m.processes[runtimeKey]; !ok {
+		m.processes[runtimeKey] = make(map[string]*processInfo)
+	}
+	m.registerWorktreeLocked(runtimeKey, runtimeWorktree{
+		Slug:     slug,
+		Project:  projectID,
+		Path:     path,
+		DNSLabel: dnsLabel,
+	})
+	m.mu.Unlock()
+
 	if !isMain && len(mainSet) > 0 {
 		mainSlug, err := worktree.ResolveMainSlug(mainPath)
 		if err != nil {
@@ -248,7 +272,7 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 		}
 
 		m.mu.Lock()
-		if existing := m.processes[slug][name]; existing != nil && existing.cmd != nil && existing.cmd.Process != nil && !existing.hasExited() {
+		if existing := m.processes[runtimeKey][name]; existing != nil && existing.cmd != nil && existing.cmd.Process != nil && !existing.hasExited() {
 			statuses = append(statuses, ProcessStatus{Name: name, PID: existing.cmd.Process.Pid, Status: "running"})
 			m.mu.Unlock()
 			continue
@@ -316,11 +340,11 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 			exited:         make(chan struct{}),
 			subs:           make(map[int]io.Writer),
 		}
-		info.activeProxies = m.consumePendingProxySessionsLocked(slug, name)
+		info.activeProxies = m.consumePendingProxySessionsLocked(runtimeKey, name)
 		info.startOutputPump()
-		m.processes[slug][name] = info
+		m.processes[runtimeKey][name] = info
 		m.mu.Unlock()
-		m.rescheduleIdleTimer(slug, name, info)
+		m.rescheduleIdleTimer(runtimeKey, name, info)
 
 		logProcessEvent("start", slug, name, cmd.Process.Pid, network, address)
 
@@ -368,13 +392,177 @@ func (m *Manager) resolveWorktreePath(slug, project, dirHint string) (string, er
 	return worktree.ResolvePathWithProjectHint(slug, project, dirHint, daemonCfg)
 }
 
-func (m *Manager) ensureSlugPathCompatible(slug, path string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if existing, ok := m.paths[slug]; ok && existing != "" && !sameResolvedPath(existing, path) {
-		return fmt.Errorf("worktree slug %q is already associated with %s", slug, existing)
+func runtimeKeyForPath(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return ""
 	}
-	return nil
+	resolved, err := filepath.EvalSymlinks(trimmed)
+	if err == nil && strings.TrimSpace(resolved) != "" {
+		return filepath.Clean(resolved)
+	}
+	return filepath.Clean(trimmed)
+}
+
+func (m *Manager) registerWorktreeLocked(key string, wt runtimeWorktree) {
+	if key == "" {
+		return
+	}
+	if previous, ok := m.worktrees[key]; ok {
+		m.removeIndexLocked(m.slugIndex, previous.Slug, key)
+		m.removeIndexLocked(m.dnsLabelIndex, previous.DNSLabel, key)
+	}
+	m.worktrees[key] = wt
+	m.addIndexLocked(m.slugIndex, wt.Slug, key)
+	m.addIndexLocked(m.dnsLabelIndex, wt.DNSLabel, key)
+}
+
+func (m *Manager) addIndexLocked(index map[string]map[string]struct{}, value, key string) {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" || key == "" {
+		return
+	}
+	entries, ok := index[value]
+	if !ok {
+		entries = map[string]struct{}{}
+		index[value] = entries
+	}
+	entries[key] = struct{}{}
+}
+
+func (m *Manager) removeIndexLocked(index map[string]map[string]struct{}, value, key string) {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" || key == "" {
+		return
+	}
+	entries, ok := index[value]
+	if !ok {
+		return
+	}
+	delete(entries, key)
+	if len(entries) == 0 {
+		delete(index, value)
+		return
+	}
+	index[value] = entries
+}
+
+type localDNSHostConflict struct {
+	Host         string
+	ExistingSlug string
+	ExistingPath string
+}
+
+func (m *Manager) localDNSHostConflictsLocked(runtimeKey string, cfg *config.ProjectConfig, slug string, selected map[string]bool, apexZone string) []localDNSHostConflict {
+	candidateHosts := proxyHostsForConfig(cfg, slug, selected, apexZone)
+	if len(candidateHosts) == 0 {
+		return nil
+	}
+
+	conflicts := []localDNSHostConflict{}
+	for key, wt := range m.worktrees {
+		if key == runtimeKey {
+			continue
+		}
+		procs, ok := m.processes[key]
+		if !ok || len(procs) == 0 {
+			continue
+		}
+		existingSelected := map[string]bool{}
+		for name, info := range procs {
+			if info == nil || info.cmd == nil || info.cmd.Process == nil || info.hasExited() {
+				continue
+			}
+			existingSelected[name] = true
+		}
+		if len(existingSelected) == 0 {
+			continue
+		}
+		existingCfgPath := filepath.Join(wt.Path, config.DefaultProjectConfig)
+		existingCfg, _, err := config.LoadProjectConfig(existingCfgPath)
+		if err != nil {
+			continue
+		}
+		existingHosts := proxyHostsForConfig(existingCfg, wt.Slug, existingSelected, apexZone)
+		for host := range candidateHosts {
+			if _, ok := existingHosts[host]; ok {
+				conflicts = append(conflicts, localDNSHostConflict{
+					Host:         host,
+					ExistingSlug: wt.Slug,
+					ExistingPath: wt.Path,
+				})
+			}
+		}
+	}
+	sort.Slice(conflicts, func(i, j int) bool {
+		if conflicts[i].Host != conflicts[j].Host {
+			return conflicts[i].Host < conflicts[j].Host
+		}
+		if conflicts[i].ExistingSlug != conflicts[j].ExistingSlug {
+			return conflicts[i].ExistingSlug < conflicts[j].ExistingSlug
+		}
+		return conflicts[i].ExistingPath < conflicts[j].ExistingPath
+	})
+	return dedupeLocalDNSConflicts(conflicts)
+}
+
+func proxyHostsForConfig(cfg *config.ProjectConfig, slug string, selected map[string]bool, apexZone string) map[string]struct{} {
+	hosts := map[string]struct{}{}
+	if cfg == nil || len(selected) == 0 {
+		return hosts
+	}
+	routeSlug := localProxyRouteSlug(slug, cfg)
+	for process, routes := range localProxyRoutesByProcess(processProxyMatchers(cfg), routeSlug, apexZone) {
+		if !selected[process] {
+			continue
+		}
+		for _, route := range routes {
+			if !strings.HasPrefix(route, "https://") {
+				continue
+			}
+			hostPath := strings.TrimPrefix(route, "https://")
+			host, _, _ := strings.Cut(hostPath, "/")
+			host = strings.TrimSpace(strings.ToLower(host))
+			if host == "" {
+				continue
+			}
+			hosts[host] = struct{}{}
+		}
+	}
+	return hosts
+}
+
+func dedupeLocalDNSConflicts(conflicts []localDNSHostConflict) []localDNSHostConflict {
+	if len(conflicts) == 0 {
+		return conflicts
+	}
+	out := make([]localDNSHostConflict, 0, len(conflicts))
+	last := localDNSHostConflict{}
+	hasLast := false
+	for _, conflict := range conflicts {
+		if hasLast && conflict == last {
+			continue
+		}
+		out = append(out, conflict)
+		last = conflict
+		hasLast = true
+	}
+	return out
+}
+
+func formatLocalDNSConflictError(conflicts []localDNSHostConflict) error {
+	if len(conflicts) == 0 {
+		return nil
+	}
+	parts := make([]string, 0, len(conflicts))
+	for _, conflict := range conflicts {
+		if conflict.ExistingPath != "" {
+			parts = append(parts, fmt.Sprintf("%s (already routed to slug %q at %s)", conflict.Host, conflict.ExistingSlug, conflict.ExistingPath))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s (already routed to slug %q)", conflict.Host, conflict.ExistingSlug))
+	}
+	return fmt.Errorf("local DNS host conflict: %s. Configure `local-dns.overrides` in `.dev.toml` or `.dev.local.toml` to map this worktree slug to a unique host label", strings.Join(parts, ", "))
 }
 
 func resolveProjectIdentifier(cfg *config.ProjectConfig) (string, error) {
@@ -565,9 +753,6 @@ func (m *Manager) stopWorktreeFromRef(slug, project, dirHint string, processes [
 	if err != nil {
 		return nil, err
 	}
-	if err := m.ensureSlugPathCompatible(slug, path); err != nil {
-		return nil, err
-	}
 
 	cfgPath := filepath.Join(path, config.DefaultProjectConfig)
 	cfg, _, err := config.LoadProjectConfig(cfgPath)
@@ -592,9 +777,19 @@ func (m *Manager) stopWorktreeFromRef(slug, project, dirHint string, processes [
 	if err := runHook(cfg.Hooks.PreStop, cfg.Commands.Wrapper, "pre_stop", path, runtimeVars); err != nil {
 		return nil, err
 	}
+	runtimeKey := runtimeKeyForPath(path)
+	dnsLabel := worktree.ProxyDNSLabelForSlug(cfg, slug)
+	m.mu.Lock()
+	m.registerWorktreeLocked(runtimeKey, runtimeWorktree{
+		Slug:     slug,
+		Project:  projectID,
+		Path:     path,
+		DNSLabel: dnsLabel,
+	})
+	m.mu.Unlock()
 
 	m.mu.Lock()
-	procs, ok := m.processes[slug]
+	procs, ok := m.processes[runtimeKey]
 	m.mu.Unlock()
 
 	statuses := []ProcessStatus{}
@@ -616,14 +811,15 @@ func (m *Manager) stopWorktreeFromRef(slug, project, dirHint string, processes [
 	}
 
 	m.mu.Lock()
-	if existing, ok := m.processes[slug]; ok {
+	if existing, ok := m.processes[runtimeKey]; ok {
 		for name := range selected {
 			delete(existing, name)
 		}
 		if len(existing) == 0 {
-			delete(m.processes, slug)
+			delete(m.processes, runtimeKey)
+			m.unregisterWorktreeLocked(runtimeKey)
 		} else {
-			m.processes[slug] = existing
+			m.processes[runtimeKey] = existing
 		}
 	}
 	m.mu.Unlock()
@@ -652,9 +848,6 @@ func (m *Manager) StatusWorktreeFromRef(slug, project, dirHint string) (*Worktre
 	if err != nil {
 		return nil, err
 	}
-	if err := m.ensureSlugPathCompatible(slug, path); err != nil {
-		return nil, err
-	}
 	cfgPath := filepath.Join(path, config.DefaultProjectConfig)
 	cfg, _, err := config.LoadProjectConfig(cfgPath)
 	if err != nil {
@@ -665,14 +858,19 @@ func (m *Manager) StatusWorktreeFromRef(slug, project, dirHint string) (*Worktre
 		return nil, fmt.Errorf("resolve project identifier: %w", err)
 	}
 
-	if _, ok := m.WorktreePath(slug); !ok {
-		m.mu.Lock()
-		m.paths[slug] = path
-		m.mu.Unlock()
-	}
+	runtimeKey := runtimeKeyForPath(path)
+	dnsLabel := worktree.ProxyDNSLabelForSlug(cfg, slug)
+	m.mu.Lock()
+	m.registerWorktreeLocked(runtimeKey, runtimeWorktree{
+		Slug:     slug,
+		Project:  projectID,
+		Path:     path,
+		DNSLabel: dnsLabel,
+	})
+	m.mu.Unlock()
 
 	m.mu.Lock()
-	procs, ok := m.processes[slug]
+	procs, ok := m.processes[runtimeKey]
 	// Copy the map entries under the lock so we can iterate without racing
 	// against stopIdleProcess which deletes from the map.
 	type procEntry struct {
@@ -716,10 +914,55 @@ func resolveWorktreeState(project, slug string) (string, error) {
 	return filepath.Join(base, "logs", project, slug), nil
 }
 
+func normalizeRuntimeIndexValue(value string) string {
+	return strings.TrimSpace(strings.ToLower(value))
+}
+
+func (m *Manager) runtimeKeyForSlugLocked(slug string) (string, error) {
+	normalized := normalizeRuntimeIndexValue(slug)
+	if normalized == "" {
+		return "", errors.New("slug is required")
+	}
+	keys, ok := m.slugIndex[normalized]
+	if !ok || len(keys) == 0 {
+		return "", errWorktreeNotRunning
+	}
+	if len(keys) == 1 {
+		for key := range keys {
+			return key, nil
+		}
+	}
+	paths := make([]string, 0, len(keys))
+	for key := range keys {
+		if wt, ok := m.worktrees[key]; ok && wt.Path != "" {
+			paths = append(paths, wt.Path)
+		} else {
+			paths = append(paths, key)
+		}
+	}
+	sort.Strings(paths)
+	return "", fmt.Errorf("worktree slug %q is running in multiple paths (%s); use a local DNS override in .dev.toml or .dev.local.toml to disambiguate", slug, strings.Join(paths, ", "))
+}
+
+func (m *Manager) unregisterWorktreeLocked(key string) {
+	wt, ok := m.worktrees[key]
+	if !ok {
+		return
+	}
+	delete(m.worktrees, key)
+	m.removeIndexLocked(m.slugIndex, wt.Slug, key)
+	m.removeIndexLocked(m.dnsLabelIndex, wt.DNSLabel, key)
+}
+
 func (m *Manager) TargetFor(slug, process string) (network string, address string, err error) {
 	m.mu.Lock()
+	runtimeKey, keyErr := m.runtimeKeyForSlugLocked(slug)
+	if keyErr != nil {
+		m.mu.Unlock()
+		return "", "", keyErr
+	}
 	defer m.mu.Unlock()
-	procs, ok := m.processes[slug]
+	procs, ok := m.processes[runtimeKey]
 	if !ok {
 		return "", "", errors.New("worktree not running")
 	}
@@ -732,12 +975,20 @@ func (m *Manager) TargetFor(slug, process string) (network string, address strin
 
 func (m *Manager) EnsureProcessForTarget(slug, process string) (network string, address string, err error) {
 	m.mu.Lock()
-	procs, ok := m.processes[slug]
+	runtimeKey, keyErr := m.runtimeKeyForSlugLocked(slug)
+	procs := map[string]*processInfo(nil)
+	ok := false
+	if keyErr == nil {
+		procs, ok = m.processes[runtimeKey]
+	}
 	var info *processInfo
 	if ok {
 		info = procs[process]
 	}
 	m.mu.Unlock()
+	if keyErr != nil && !errors.Is(keyErr, errWorktreeNotRunning) {
+		return "", "", keyErr
+	}
 	if ok && info != nil && info.address != "" && info.network != "" && info.cmd != nil && info.cmd.Process != nil && !info.hasExited() {
 		if err := waitForProcessReady(info); err != nil {
 			return "", "", err
@@ -759,7 +1010,12 @@ func (m *Manager) EnsureProcessForTarget(slug, process string) (network string, 
 				return "", "", err
 			}
 			m.mu.Lock()
-			current := m.processes[slug][process]
+			currentKey, keyErr := m.runtimeKeyForSlugLocked(slug)
+			if keyErr != nil {
+				m.mu.Unlock()
+				return "", "", keyErr
+			}
+			current := m.processes[currentKey][process]
 			m.mu.Unlock()
 			if err := waitForProcessReady(current); err != nil {
 				return "", "", err
@@ -773,8 +1029,15 @@ func (m *Manager) EnsureProcessForTarget(slug, process string) (network string, 
 func (m *Manager) WorktreePath(slug string) (string, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	path, ok := m.paths[slug]
-	return path, ok && path != ""
+	runtimeKey, err := m.runtimeKeyForSlugLocked(slug)
+	if err != nil {
+		return "", false
+	}
+	wt, ok := m.worktrees[runtimeKey]
+	if !ok {
+		return "", false
+	}
+	return wt.Path, strings.TrimSpace(wt.Path) != ""
 }
 
 func (m *Manager) StopAllWorktrees() {
@@ -786,12 +1049,17 @@ func (m *Manager) StopAllWorktrees() {
 
 func (m *Manager) beginProxySession(slug, process string) {
 	m.mu.Lock()
-	info := m.processInfoLocked(slug, process)
+	runtimeKey, keyErr := m.runtimeKeyForSlugLocked(slug)
+	if keyErr != nil {
+		m.mu.Unlock()
+		return
+	}
+	info := m.processInfoLocked(runtimeKey, process)
 	if info == nil || info.cmd == nil || info.cmd.Process == nil || info.hasExited() {
-		if _, ok := m.pendingProxySessions[slug]; !ok {
-			m.pendingProxySessions[slug] = make(map[string]int)
+		if _, ok := m.pendingProxySessions[runtimeKey]; !ok {
+			m.pendingProxySessions[runtimeKey] = make(map[string]int)
 		}
-		m.pendingProxySessions[slug][process]++
+		m.pendingProxySessions[runtimeKey][process]++
 		m.mu.Unlock()
 		return
 	}
@@ -813,9 +1081,14 @@ func (m *Manager) beginProxySession(slug, process string) {
 
 func (m *Manager) endProxySession(slug, process string) {
 	m.mu.Lock()
-	info := m.processInfoLocked(slug, process)
+	runtimeKey, keyErr := m.runtimeKeyForSlugLocked(slug)
+	if keyErr != nil {
+		m.mu.Unlock()
+		return
+	}
+	info := m.processInfoLocked(runtimeKey, process)
 	if info == nil || info.cmd == nil || info.cmd.Process == nil || info.hasExited() {
-		m.decrementPendingProxySessionLocked(slug, process)
+		m.decrementPendingProxySessionLocked(runtimeKey, process)
 		m.mu.Unlock()
 		return
 	}
@@ -832,26 +1105,26 @@ func (m *Manager) endProxySession(slug, process string) {
 	active := info.activeProxies
 	info.mu.Unlock()
 	if active == 0 {
-		m.rescheduleIdleTimer(slug, process, info)
+		m.rescheduleIdleTimer(runtimeKey, process, info)
 	}
 }
 
-func (m *Manager) processInfo(slug, process string) *processInfo {
+func (m *Manager) processInfo(runtimeKey, process string) *processInfo {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.processInfoLocked(slug, process)
+	return m.processInfoLocked(runtimeKey, process)
 }
 
-func (m *Manager) processInfoLocked(slug, process string) *processInfo {
-	procs, ok := m.processes[slug]
+func (m *Manager) processInfoLocked(runtimeKey, process string) *processInfo {
+	procs, ok := m.processes[runtimeKey]
 	if !ok {
 		return nil
 	}
 	return procs[process]
 }
 
-func (m *Manager) consumePendingProxySessionsLocked(slug, process string) int {
-	byProcess, ok := m.pendingProxySessions[slug]
+func (m *Manager) consumePendingProxySessionsLocked(runtimeKey, process string) int {
+	byProcess, ok := m.pendingProxySessions[runtimeKey]
 	if !ok {
 		return 0
 	}
@@ -861,15 +1134,15 @@ func (m *Manager) consumePendingProxySessionsLocked(slug, process string) int {
 	}
 	delete(byProcess, process)
 	if len(byProcess) == 0 {
-		delete(m.pendingProxySessions, slug)
+		delete(m.pendingProxySessions, runtimeKey)
 	} else {
-		m.pendingProxySessions[slug] = byProcess
+		m.pendingProxySessions[runtimeKey] = byProcess
 	}
 	return count
 }
 
-func (m *Manager) decrementPendingProxySessionLocked(slug, process string) {
-	byProcess, ok := m.pendingProxySessions[slug]
+func (m *Manager) decrementPendingProxySessionLocked(runtimeKey, process string) {
+	byProcess, ok := m.pendingProxySessions[runtimeKey]
 	if !ok {
 		return
 	}
@@ -880,13 +1153,13 @@ func (m *Manager) decrementPendingProxySessionLocked(slug, process string) {
 		byProcess[process] = count - 1
 	}
 	if len(byProcess) == 0 {
-		delete(m.pendingProxySessions, slug)
+		delete(m.pendingProxySessions, runtimeKey)
 		return
 	}
-	m.pendingProxySessions[slug] = byProcess
+	m.pendingProxySessions[runtimeKey] = byProcess
 }
 
-func (m *Manager) rescheduleIdleTimer(slug, process string, info *processInfo) {
+func (m *Manager) rescheduleIdleTimer(runtimeKey, process string, info *processInfo) {
 	if info == nil {
 		return
 	}
@@ -911,17 +1184,17 @@ func (m *Manager) rescheduleIdleTimer(slug, process string, info *processInfo) {
 		info.idleTimer.Stop()
 	}
 	info.idleTimer = time.AfterFunc(delay, func() {
-		m.stopIdleProcess(slug, process, info)
+		m.stopIdleProcess(runtimeKey, process, info)
 	})
 	info.mu.Unlock()
 }
 
-func (m *Manager) stopIdleProcess(slug, process string, info *processInfo) {
+func (m *Manager) stopIdleProcess(runtimeKey, process string, info *processInfo) {
 	if info == nil {
 		return
 	}
 	m.mu.Lock()
-	procs, ok := m.processes[slug]
+	procs, ok := m.processes[runtimeKey]
 	if !ok || procs[process] != info {
 		m.mu.Unlock()
 		return
@@ -935,12 +1208,12 @@ func (m *Manager) stopIdleProcess(slug, process string, info *processInfo) {
 	}
 	if info.activeProxies > 0 {
 		info.mu.Unlock()
-		m.rescheduleIdleTimer(slug, process, info)
+		m.rescheduleIdleTimer(runtimeKey, process, info)
 		return
 	}
 	if time.Since(info.lastActivity) < info.idleTimeout {
 		info.mu.Unlock()
-		m.rescheduleIdleTimer(slug, process, info)
+		m.rescheduleIdleTimer(runtimeKey, process, info)
 		return
 	}
 	info.mu.Unlock()
@@ -949,7 +1222,7 @@ func (m *Manager) stopIdleProcess(slug, process string, info *processInfo) {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	procs, ok = m.processes[slug]
+	procs, ok = m.processes[runtimeKey]
 	if !ok {
 		return
 	}
@@ -958,10 +1231,11 @@ func (m *Manager) stopIdleProcess(slug, process string, info *processInfo) {
 	}
 	delete(procs, process)
 	if len(procs) == 0 {
-		delete(m.processes, slug)
+		delete(m.processes, runtimeKey)
+		m.unregisterWorktreeLocked(runtimeKey)
 		return
 	}
-	m.processes[slug] = procs
+	m.processes[runtimeKey] = procs
 }
 
 func (m *Manager) Connect(slug, process string, conn net.Conn) error {
@@ -974,7 +1248,12 @@ func (m *Manager) Connect(slug, process string, conn net.Conn) error {
 	}
 
 	m.mu.Lock()
-	info := m.processes[slug][process]
+	runtimeKey, keyErr := m.runtimeKeyForSlugLocked(slug)
+	if keyErr != nil {
+		m.mu.Unlock()
+		return keyErr
+	}
+	info := m.processes[runtimeKey][process]
 	m.mu.Unlock()
 	if info == nil || info.pty == nil {
 		return errors.New("process not running")

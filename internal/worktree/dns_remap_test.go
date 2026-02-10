@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"path/filepath"
 	"testing"
 
 	"dev/internal/config"
@@ -53,5 +54,31 @@ func TestProxySlugForDNSLabel(t *testing.T) {
 	}
 	if _, ok := ProxySlugForDNSLabel(cfg, "missing"); ok {
 		t.Fatalf("expected no mapping for missing label")
+	}
+}
+
+func TestResolveSlugForDNSLabel_RegisteredSlashSlug(t *testing.T) {
+	t.Parallel()
+
+	stateDir := t.TempDir()
+	daemonCfg := &config.DaemonConfig{StateDir: stateDir}
+	projectCfg := &config.ProjectConfig{
+		Project: config.ProjectBlock{Name: "foocorp"},
+	}
+	if err := Register(daemonCfg, Registration{
+		Project:  "foocorp",
+		Slug:     "feature/cloud-mailings",
+		Path:     filepath.Join(stateDir, "feature-cloud-mailings"),
+		MainPath: filepath.Join(stateDir, "main"),
+	}); err != nil {
+		t.Fatalf("register worktree: %v", err)
+	}
+
+	got, ok, err := ResolveSlugForDNSLabel(projectCfg, daemonCfg, "cloud-mailings")
+	if err != nil {
+		t.Fatalf("ResolveSlugForDNSLabel error: %v", err)
+	}
+	if !ok || got != "feature/cloud-mailings" {
+		t.Fatalf("expected feature/cloud-mailings, got %q ok=%v", got, ok)
 	}
 }
