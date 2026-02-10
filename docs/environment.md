@@ -82,3 +82,19 @@ Notes:
 - Values in `[process.<name>.env]` are added to that process at runtime.
 - dev expands template variables in command/env values before launching the process.
 - If you need shell behavior (pipes, redirects, conditionals), run a shell explicitly in `command` or hook definitions (for example `sh -c "..."`).
+
+### `${VAR}` vs `$VAR` in commands
+
+- Prefer `${VAR}` in `command` and `[process.<name>.env]` values.
+- `${VAR}` is expanded by dev before process launch, so it works even when no shell is involved.
+- `$VAR` is shell syntax and only expands when the command is executed by a shell (for example `sh -c "..."`).
+
+Examples:
+
+```toml
+# No shell needed: dev expands ${PORT} before exec.
+command = "python3 -m http.server ${PORT}"
+
+# Shell is needed here for pipe/redirect behavior.
+command = "sh -c 'python3 -m http.server ${PORT} | tee server.log'"
+```
