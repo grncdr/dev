@@ -33,15 +33,11 @@ type logSource struct {
 func newLogsCmd(opts *Options) *cobra.Command {
 	view := &logViewOptions{}
 	cmd := &cobra.Command{
-		Use:   "logs [process|slug:process|project:slug:process]",
+		Use:   "logs [process|slug:process|project:slug:process]...",
 		Short: "view process logs",
-		Args:  cobra.MaximumNArgs(1),
+		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			target := ""
-			if len(args) > 0 {
-				target = args[0]
-			}
-			return runLogs(opts, target, view)
+			return runLogs(opts, args, view)
 		},
 	}
 	addLogFlags(cmd, view)
@@ -84,16 +80,10 @@ func effectiveFollow(view *logViewOptions) bool {
 	return view.FollowFlag
 }
 
-func runLogs(opts *Options, target string, view *logViewOptions) error {
-	slug := ""
-	process := ""
-	if strings.TrimSpace(target) != "" {
-		id, err := worktree.ParseProcessIdentifier(target)
-		if err != nil {
-			return err
-		}
-		slug = id.Slug
-		process = id.Process
+func runLogs(opts *Options, targets []string, view *logViewOptions) error {
+	projectFromTarget, slug, processes, err := selectLogsTargets(targets)
+	if err != nil {
+		return err
 	}
 	if slug == "" {
 		resolved, err := resolveSlug(opts, "")
@@ -121,6 +111,9 @@ func runLogs(opts *Options, target string, view *logViewOptions) error {
 	if project == "" {
 		return errors.New("project.name is required")
 	}
+	if projectFromTarget != "" && projectFromTarget != project {
+		return fmt.Errorf("target project %q does not match resolved project %q", projectFromTarget, project)
+	}
 	stateRoot, err := config.ResolveStateDir(nil)
 	if err != nil {
 		return err
@@ -128,11 +121,13 @@ func runLogs(opts *Options, target string, view *logViewOptions) error {
 	worktreeDir := filepath.Join(stateRoot, "logs", project, slug)
 
 	sources := []logSource{}
-	if process != "" {
-		sources = append(sources, logSource{
-			Name: process,
-			Path: filepath.Join(worktreeDir, process+".log"),
-		})
+	if len(processes) > 0 {
+		for _, process := range processes {
+			sources = append(sources, logSource{
+				Name: process,
+				Path: filepath.Join(worktreeDir, process+".log"),
+			})
+		}
 	} else {
 		names := make([]string, 0, len(cfg.Processes))
 		for name := range cfg.Processes {
@@ -147,6 +142,43 @@ func runLogs(opts *Options, target string, view *logViewOptions) error {
 		}
 	}
 	return viewLogs(sources, effectiveFollow(view), view.All, view.Lines)
+}
+
+func selectLogsTargets(targets []string) (project string, slug string, processes []string, err error) {
+	processes = make([]string, 0, len(targets))
+	seen := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		trimmed := strings.TrimSpace(target)
+		if trimmed == "" {
+			continue
+		}
+		id, err := worktree.ParseProcessIdentifier(trimmed)
+		if err != nil {
+			return "", "", nil, err
+		}
+
+		if id.Slug != "" {
+			if slug == "" {
+				slug = id.Slug
+			} else if slug != id.Slug {
+				return "", "", nil, fmt.Errorf("all targets must reference the same slug (got %q and %q)", slug, id.Slug)
+			}
+		}
+		if id.Project != "" {
+			if project == "" {
+				project = id.Project
+			} else if project != id.Project {
+				return "", "", nil, fmt.Errorf("all targets must reference the same project (got %q and %q)", project, id.Project)
+			}
+		}
+
+		if _, ok := seen[id.Process]; ok {
+			continue
+		}
+		seen[id.Process] = struct{}{}
+		processes = append(processes, id.Process)
+	}
+	return project, slug, processes, nil
 }
 
 func viewLogs(sources []logSource, follow bool, all bool, lines int) error {
