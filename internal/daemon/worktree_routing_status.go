@@ -142,25 +142,29 @@ func gatewayRoutesByProcess(localByProcess map[string][]string, exposedByProcess
 func (s *Server) tunnelStatusForSlug(slug string) *TunnelStatus {
 	s.tunnelMu.Lock()
 	defer s.tunnelMu.Unlock()
-	if len(s.tunnels) == 0 {
+	if len(s.agents) == 0 {
 		return nil
 	}
 	var selected *TunnelStatus
-	for _, mt := range s.tunnels {
-		if mt == nil || mt.req.Slug != slug {
+	for _, conn := range s.agents {
+		if conn == nil {
 			continue
 		}
-		candidate := &TunnelStatus{
-			Slug:       mt.req.Slug,
-			Label:      mt.req.Label,
-			GatewayURL: mt.req.GatewayURL,
-			PublicHost: mt.publicHost,
-			Project:    mt.req.Project,
-			Status:     mt.status,
-			LastError:  mt.lastError,
+		candidate := conn.StatusForSlug(slug)
+		if candidate == nil {
+			continue
 		}
-		if selected == nil || (selected.Status != "connected" && candidate.Status == "connected") {
-			selected = candidate
+		daemonCandidate := &TunnelStatus{
+			Slug:       candidate.Slug,
+			Label:      candidate.Label,
+			GatewayURL: candidate.GatewayURL,
+			PublicHost: candidate.PublicHost,
+			Project:    candidate.Project,
+			Status:     candidate.Status,
+			LastError:  candidate.LastError,
+		}
+		if selected == nil || (selected.Status != "connected" && daemonCandidate.Status == "connected") {
+			selected = daemonCandidate
 		}
 	}
 	return selected

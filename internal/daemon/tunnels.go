@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -12,18 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"dev/internal/agent"
 	"dev/internal/gateway"
+	"dev/internal/worktree"
 )
-
-type managedTunnel struct {
-	req             TunnelRequest
-	cancel          context.CancelFunc
-	status          string
-	publicHost      string
-	lastError       string
-	registerStage   string
-	registerMessage string
-}
 
 func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 	if strings.TrimSpace(req.Slug) == "" {
@@ -46,118 +37,60 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 		return nil, errors.New("no proxy upstream available")
 	}
 
-	s.tunnelMu.Lock()
-	defer s.tunnelMu.Unlock()
-	if s.tunnels == nil {
-		s.tunnels = map[string]*managedTunnel{}
-	}
-	for label, running := range s.tunnels {
-		if label == req.Label {
-			return &TunnelStatus{
-				Slug:            running.req.Slug,
-				Label:           running.req.Label,
-				GatewayURL:      running.req.GatewayURL,
-				PublicHost:      running.publicHost,
-				Project:         running.req.Project,
-				Status:          running.status,
-				LastError:       running.lastError,
-				RegisterStage:   running.registerStage,
-				RegisterMessage: running.registerMessage,
-			}, nil
-		}
-		if running.req.Slug == req.Slug && label != req.Label {
-			return nil, fmt.Errorf("slug %s already has label %s", req.Slug, label)
-		}
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	mt := &managedTunnel{
-		req:    req,
-		cancel: cancel,
-		status: "connecting",
-	}
-	s.tunnels[req.Label] = mt
-
-	gatewayClient, gatewayTLS, err := gateway.MTLSClientForGatewayURL(req.GatewayURL, s.daemonConfig)
+	localBaseHost, err := s.resolveTunnelLocalBaseHost(req.Slug)
 	if err != nil {
-		delete(s.tunnels, req.Label)
 		return nil, err
 	}
 
-	agent := &gateway.Agent{
-		GatewayURL:     req.GatewayURL,
-		UpstreamURL:    req.Upstream,
-		Project:        req.Project,
-		Slug:           req.Slug,
-		Label:          req.Label,
-		AgentID:        fmt.Sprintf("dev-%d", time.Now().UnixNano()),
-		Name:           req.Name,
-		RetryDelay:     500 * time.Millisecond,
-		GatewayClient:  gatewayClient,
-		TLSConfig:      gatewayTLS,
-		UpstreamClient: tunnelHTTPClient(req.Upstream),
-		OnConnected: func() {
-			s.tunnelMu.Lock()
-			defer s.tunnelMu.Unlock()
-			if cur, ok := s.tunnels[req.Label]; ok {
-				cur.status = "connected"
-				cur.lastError = ""
-			}
-		},
-		OnRegistered: func(publicHost string) {
-			s.tunnelMu.Lock()
-			defer s.tunnelMu.Unlock()
-			if cur, ok := s.tunnels[req.Label]; ok {
-				cur.publicHost = strings.TrimSpace(publicHost)
-				cur.registerStage = "register_complete"
-				cur.registerMessage = "gateway registration complete"
-			}
-		},
-		OnRegisterProgress: func(stage, message string) {
-			s.tunnelMu.Lock()
-			defer s.tunnelMu.Unlock()
-			if cur, ok := s.tunnels[req.Label]; ok {
-				cur.registerStage = strings.TrimSpace(stage)
-				cur.registerMessage = strings.TrimSpace(message)
-			}
-		},
-		OnDisconnected: func(err error) {
-			s.tunnelMu.Lock()
-			defer s.tunnelMu.Unlock()
-			if cur, ok := s.tunnels[req.Label]; ok {
-				cur.status = "connecting"
-				if err != nil {
-					cur.lastError = err.Error()
-				}
-			}
-		},
+	gatewayURL := strings.TrimSpace(req.GatewayURL)
+	s.tunnelMu.Lock()
+	defer s.tunnelMu.Unlock()
+	if s.agents == nil {
+		s.agents = map[string]*agent.Connection{}
 	}
-	go func() {
-		err := agent.Run(ctx)
-		s.tunnelMu.Lock()
-		defer s.tunnelMu.Unlock()
-		cur, ok := s.tunnels[req.Label]
-		if !ok {
-			return
+	for url, conn := range s.agents {
+		if conn == nil {
+			continue
 		}
-		if err != nil {
-			cur.status = "error"
-			cur.lastError = err.Error()
-			return
+		for _, status := range conn.Statuses() {
+			if status.Label == req.Label {
+				out := toDaemonTunnelStatus(status)
+				return &out, nil
+			}
+			if status.Slug == req.Slug && status.Label != req.Label {
+				return nil, fmt.Errorf("slug %s already has label %s (gateway %s)", req.Slug, status.Label, url)
+			}
 		}
-		cur.status = "stopped"
-	}()
+	}
+	conn, ok := s.agents[gatewayURL]
+	if !ok || conn == nil {
+		conn = agent.NewConnection(gatewayURL)
+		s.agents[gatewayURL] = conn
+	}
 
-	return &TunnelStatus{
-		Slug:            req.Slug,
-		Label:           req.Label,
-		GatewayURL:      req.GatewayURL,
-		PublicHost:      mt.publicHost,
-		Project:         req.Project,
-		Status:          mt.status,
-		RegisterStage:   mt.registerStage,
-		RegisterMessage: mt.registerMessage,
-	}, nil
+	gatewayClient, gatewayTLS, err := gateway.MTLSClientForGatewayURL(req.GatewayURL, s.daemonConfig)
+	if err != nil {
+		return nil, err
+	}
+	opened, err := conn.Open(agent.TunnelSpec{
+		Slug:          req.Slug,
+		Label:         req.Label,
+		GatewayURL:    req.GatewayURL,
+		Project:       req.Project,
+		Name:          req.Name,
+		UpstreamURL:   req.Upstream,
+		LocalBaseHost: localBaseHost,
+		AuthUsername:  req.AuthUsername,
+		AuthPassword:  req.AuthPassword,
+	}, gatewayClient, gatewayTLS, tunnelHTTPClient(req.Upstream))
+	if err != nil {
+		if conn.Empty() {
+			delete(s.agents, gatewayURL)
+		}
+		return nil, err
+	}
+	resp := toDaemonTunnelStatus(opened)
+	return &resp, nil
 }
 
 func tunnelHTTPClient(upstream string) *http.Client {
@@ -183,52 +116,37 @@ func (s *Server) closeTunnel(req TunnelRequest) (*TunnelStatus, error) {
 
 	s.tunnelMu.Lock()
 	defer s.tunnelMu.Unlock()
-
-	if s.tunnels == nil {
+	if s.agents == nil {
 		return nil, errors.New("tunnel not found")
 	}
-	if label == "" {
-		for key, tunnel := range s.tunnels {
-			if tunnel.req.Slug == slug {
-				label = key
-				break
-			}
+	for gatewayURL, conn := range s.agents {
+		if conn == nil {
+			continue
 		}
+		status, err := conn.Close(label, slug)
+		if err != nil {
+			continue
+		}
+		if conn.Empty() {
+			delete(s.agents, gatewayURL)
+		}
+		resp := toDaemonTunnelStatus(status)
+		return &resp, nil
 	}
-	mt, ok := s.tunnels[label]
-	if !ok {
-		return nil, errors.New("tunnel not found")
-	}
-	mt.cancel()
-	delete(s.tunnels, label)
-	return &TunnelStatus{
-		Slug:            mt.req.Slug,
-		Label:           mt.req.Label,
-		GatewayURL:      mt.req.GatewayURL,
-		PublicHost:      mt.publicHost,
-		Project:         mt.req.Project,
-		Status:          "stopped",
-		RegisterStage:   mt.registerStage,
-		RegisterMessage: mt.registerMessage,
-	}, nil
+	return nil, errors.New("tunnel not found")
 }
 
 func (s *Server) tunnelsStatus() *TunnelsResponse {
 	s.tunnelMu.Lock()
 	defer s.tunnelMu.Unlock()
 	resp := &TunnelsResponse{Tunnels: []TunnelStatus{}}
-	for _, mt := range s.tunnels {
-		resp.Tunnels = append(resp.Tunnels, TunnelStatus{
-			Slug:            mt.req.Slug,
-			Label:           mt.req.Label,
-			GatewayURL:      mt.req.GatewayURL,
-			PublicHost:      mt.publicHost,
-			Project:         mt.req.Project,
-			Status:          mt.status,
-			LastError:       mt.lastError,
-			RegisterStage:   mt.registerStage,
-			RegisterMessage: mt.registerMessage,
-		})
+	for _, conn := range s.agents {
+		if conn == nil {
+			continue
+		}
+		for _, status := range conn.Statuses() {
+			resp.Tunnels = append(resp.Tunnels, toDaemonTunnelStatus(status))
+		}
 	}
 	return resp
 }
@@ -236,30 +154,76 @@ func (s *Server) tunnelsStatus() *TunnelsResponse {
 func (s *Server) stopAllTunnels() {
 	s.tunnelMu.Lock()
 	defer s.tunnelMu.Unlock()
-	for label, mt := range s.tunnels {
-		mt.cancel()
-		delete(s.tunnels, label)
+	for gatewayURL, conn := range s.agents {
+		if conn != nil {
+			conn.StopAll()
+		}
+		delete(s.agents, gatewayURL)
 	}
 }
 
 func (s *Server) runningTunnelsForResume() []TunnelRequest {
 	s.tunnelMu.Lock()
 	defer s.tunnelMu.Unlock()
-	if len(s.tunnels) == 0 {
+	if len(s.agents) == 0 {
 		return nil
 	}
-	out := make([]TunnelRequest, 0, len(s.tunnels))
-	for _, mt := range s.tunnels {
-		if mt == nil {
+	out := make([]TunnelRequest, 0, len(s.agents))
+	for _, conn := range s.agents {
+		if conn == nil {
 			continue
 		}
-		req := mt.req
-		if strings.TrimSpace(req.Label) == "" || strings.TrimSpace(req.Slug) == "" || strings.TrimSpace(req.GatewayURL) == "" {
-			continue
+		for _, spec := range conn.RunningRequests() {
+			req := TunnelRequest{
+				Slug:         spec.Slug,
+				Label:        spec.Label,
+				GatewayURL:   spec.GatewayURL,
+				Project:      spec.Project,
+				Name:         spec.Name,
+				Upstream:     spec.UpstreamURL,
+				AuthUsername: spec.AuthUsername,
+				AuthPassword: spec.AuthPassword,
+			}
+			if strings.TrimSpace(req.Label) == "" || strings.TrimSpace(req.Slug) == "" || strings.TrimSpace(req.GatewayURL) == "" {
+				continue
+			}
+			out = append(out, req)
 		}
-		out = append(out, req)
 	}
 	return out
+}
+
+func (s *Server) resolveTunnelLocalBaseHost(slug string) (string, error) {
+	cfg, repoPath, err := s.projectConfigForSlug(slug)
+	if err != nil {
+		return "", err
+	}
+	resolvedSlug := slug
+	if sameResolvedPath(repoPath, s.mainPath) {
+		if mainSlug, err := resolveMainWorktreeSlug(repoPath); err == nil {
+			resolvedSlug = mainSlug
+		}
+	}
+	label := worktree.ProxyDNSLabelForSlug(cfg, resolvedSlug)
+	apex := strings.TrimPrefix(strings.ToLower(s.projectApexZone()), ".")
+	if apex == "" {
+		apex = "localhost"
+	}
+	return label + "." + apex, nil
+}
+
+func toDaemonTunnelStatus(status agent.TunnelStatus) TunnelStatus {
+	return TunnelStatus{
+		Slug:            status.Slug,
+		Label:           status.Label,
+		GatewayURL:      status.GatewayURL,
+		PublicHost:      status.PublicHost,
+		Project:         status.Project,
+		Status:          status.Status,
+		LastError:       status.LastError,
+		RegisterStage:   status.RegisterStage,
+		RegisterMessage: status.RegisterMessage,
+	}
 }
 
 func (s *Server) localProxyUpstreamURL() string {

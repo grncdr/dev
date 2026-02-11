@@ -15,6 +15,7 @@ import (
 
 	mdns "github.com/miekg/dns"
 
+	"dev/internal/agent"
 	"dev/internal/config"
 	"dev/internal/worktree"
 )
@@ -37,7 +38,7 @@ type Server struct {
 	localDNSUDP  *mdns.Server
 	localDNSTCP  *mdns.Server
 	tunnelMu     sync.Mutex
-	tunnels      map[string]*managedTunnel
+	agents       map[string]*agent.Connection // keyed by gateway_url
 }
 
 // NewServer creates the daemon control-plane server.

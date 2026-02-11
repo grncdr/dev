@@ -47,7 +47,7 @@ func TestParseProxyHost_UsesDaemonApexZone(t *testing.T) {
 func TestLocalProxyHostForTunnelRequest(t *testing.T) {
 	s := &Server{
 		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
-		tunnels: map[string]*managedTunnel{
+		agents: seededAgentsForTunnels(map[string]*managedTunnel{
 			"xyzz": {
 				req: TunnelRequest{
 					Slug:  "feature-branch",
@@ -62,7 +62,7 @@ func TestLocalProxyHostForTunnelRequest(t *testing.T) {
 				},
 				status: "connected",
 			},
-		},
+		}),
 	}
 
 	got, ok := s.localProxyHostForTunnelRequest("xyzz.foocorp.dev")
@@ -84,7 +84,7 @@ func TestLocalProxyHostForTunnelRequest(t *testing.T) {
 func TestLocalProxyRouteForTunnelRequest_IncludesAuthCredentials(t *testing.T) {
 	s := &Server{
 		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
-		tunnels: map[string]*managedTunnel{
+		agents: seededAgentsForTunnels(map[string]*managedTunnel{
 			"xyzz": {
 				req: TunnelRequest{
 					Slug:         "feature-branch",
@@ -94,7 +94,7 @@ func TestLocalProxyRouteForTunnelRequest_IncludesAuthCredentials(t *testing.T) {
 				},
 				status: "connected",
 			},
-		},
+		}),
 	}
 
 	route, ok := s.localProxyRouteForTunnelRequest("xyzz.foocorp.dev")
@@ -112,7 +112,7 @@ func TestLocalProxyRouteForTunnelRequest_IncludesAuthCredentials(t *testing.T) {
 func TestLocalProxyRouteForTunnelRequest_DoesNotRewriteLocalApexHost(t *testing.T) {
 	s := &Server{
 		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
-		tunnels: map[string]*managedTunnel{
+		agents: seededAgentsForTunnels(map[string]*managedTunnel{
 			"some-other-worktree": {
 				req: TunnelRequest{
 					Slug:  "foocorp",
@@ -120,7 +120,7 @@ func TestLocalProxyRouteForTunnelRequest_DoesNotRewriteLocalApexHost(t *testing.
 				},
 				status: "connected",
 			},
-		},
+		}),
 	}
 
 	if _, ok := s.localProxyRouteForTunnelRequest("app.some-other-worktree.localhost"); ok {
@@ -166,7 +166,7 @@ overrides = { main = "foocorp" }
 		mainPath:     repo,
 		config:       cfg,
 		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
-		tunnels: map[string]*managedTunnel{
+		agents: seededAgentsForTunnels(map[string]*managedTunnel{
 			"foocorp": {
 				req: TunnelRequest{
 					Slug:  "main",
@@ -174,7 +174,7 @@ overrides = { main = "foocorp" }
 				},
 				status: "connected",
 			},
-		},
+		}),
 	}
 	got, ok := s.localProxyHostForTunnelRequest("app.foocorp.foocorp.dev")
 	if !ok || got != "app.foocorp.localhost" {
@@ -916,7 +916,7 @@ port = "unix"
 		mainPath:     foocorpRepo,
 		config:       loadedFoocorpCfg,
 		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
-		tunnels: map[string]*managedTunnel{
+		agents: seededAgentsForTunnels(map[string]*managedTunnel{
 			"some-other-worktree": {
 				req: TunnelRequest{
 					Slug:  "foocorp",
@@ -924,7 +924,7 @@ port = "unix"
 				},
 				status: "connected",
 			},
-		},
+		}),
 	}
 
 	_, _, process, _, _, targetSlug, targetPath, err := s.resolveProxyTargetForRequest("app.some-other-worktree.localhost", "/", false)

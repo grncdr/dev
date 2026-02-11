@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"dev/internal/agent"
 	"dev/internal/config"
 	"dev/internal/router"
 	"dev/internal/worktree"
@@ -94,8 +95,8 @@ func (s *Server) localProxyRouteForTunnelRequest(host string) (tunnelProxyRoute,
 			apex = "localhost"
 		}
 		route := tunnelProxyRoute{
-			AuthUsername: mt.req.AuthUsername,
-			AuthPassword: mt.req.AuthPassword,
+			AuthUsername: mt.AuthUsername,
+			AuthPassword: mt.AuthPassword,
 		}
 		if idx == 0 {
 			route.LocalHost = routeSlug + "." + apex
@@ -107,25 +108,27 @@ func (s *Server) localProxyRouteForTunnelRequest(host string) (tunnelProxyRoute,
 	return tunnelProxyRoute{}, false
 }
 
-func (s *Server) activeTunnelForLabel(label string) (*managedTunnel, bool) {
+func (s *Server) activeTunnelForLabel(label string) (*agent.TunnelStatus, bool) {
 	s.tunnelMu.Lock()
 	defer s.tunnelMu.Unlock()
-	if s.tunnels == nil {
-		return nil, false
+	for _, conn := range s.agents {
+		if conn == nil {
+			continue
+		}
+		status, ok := conn.TunnelForLabel(label)
+		if !ok {
+			continue
+		}
+		return &status, true
 	}
-	mt, ok := s.tunnels[label]
-	if !ok || mt == nil {
-		return nil, false
-	}
-	copied := *mt
-	return &copied, true
+	return nil, false
 }
 
-func (s *Server) tunnelRouteSlug(mt *managedTunnel) (string, bool) {
+func (s *Server) tunnelRouteSlug(mt *agent.TunnelStatus) (string, bool) {
 	if mt == nil {
 		return "", false
 	}
-	slug := strings.TrimSpace(mt.req.Slug)
+	slug := strings.TrimSpace(mt.Slug)
 	if slug == "" {
 		return "", false
 	}

@@ -68,7 +68,7 @@ proxy = { path = "/" }
 				Allow:    "all",
 			},
 		},
-		tunnels: map[string]*managedTunnel{
+		agents: seededAgentsForTunnels(map[string]*managedTunnel{
 			"xyzz": {
 				req: TunnelRequest{
 					Slug:  "main",
@@ -76,7 +76,7 @@ proxy = { path = "/" }
 				},
 				status: "connected",
 			},
-		},
+		}),
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "https://xyzz.public.example.com/ping", strings.NewReader("hello from gateway"))
@@ -179,7 +179,7 @@ proxy = { path = "/" }
 				Allow:    "all",
 			},
 		},
-		tunnels: map[string]*managedTunnel{
+		agents: seededAgentsForTunnels(map[string]*managedTunnel{
 			"xyzz": {
 				req: TunnelRequest{
 					Slug:  "main",
@@ -187,7 +187,7 @@ proxy = { path = "/" }
 				},
 				status: "connected",
 			},
-		},
+		}),
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "https://xyzz.public.example.com/raw", strings.NewReader("\x00\x01\x02"))
@@ -270,7 +270,7 @@ proxy = { path = "/" }
 				Allow:    "all",
 			},
 		},
-		tunnels: map[string]*managedTunnel{
+		agents: seededAgentsForTunnels(map[string]*managedTunnel{
 			"xyzz": {
 				req: TunnelRequest{
 					Slug:         "main",
@@ -280,7 +280,7 @@ proxy = { path = "/" }
 				},
 				status: "connected",
 			},
-		},
+		}),
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "https://xyzz.public.example.com/ping", nil)
@@ -366,7 +366,7 @@ proxy = { subdomain = "app", path = "/" }
 				Allow:    "all",
 			},
 		},
-		tunnels: map[string]*managedTunnel{
+		agents: seededAgentsForTunnels(map[string]*managedTunnel{
 			"bobs-main-branch": {
 				req: TunnelRequest{
 					Slug:  "main",
@@ -374,7 +374,7 @@ proxy = { subdomain = "app", path = "/" }
 				},
 				status: "connected",
 			},
-		},
+		}),
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "https://app.bobs-main-branch.public.example.com/ping", nil)
