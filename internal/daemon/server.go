@@ -19,6 +19,11 @@ import (
 	"dev/internal/worktree"
 )
 
+// Server is the daemon front door.
+//
+// It owns transport-facing concerns (HTTP handlers, proxy endpoints, tunnel
+// request handling, and daemon lifecycle), while delegating local runtime state
+// and process orchestration to Manager.
 type Server struct {
 	socketPath   string
 	listener     net.Listener
@@ -35,6 +40,14 @@ type Server struct {
 	tunnels      map[string]*managedTunnel
 }
 
+// NewServer creates the daemon control-plane server.
+//
+// Server is responsible for external I/O boundaries:
+// - accepting CLI/API requests over the unix socket
+// - handling local HTTP(S) proxy requests
+// - running tunnel/session glue (gateway auth, host rewrite, resume state)
+//
+// Server delegates process/worktree runtime management to Manager.
 func NewServer(socketPath string) (*Server, error) {
 	if socketPath == "" {
 		return nil, errors.New("socket path required")

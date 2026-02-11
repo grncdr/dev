@@ -23,6 +23,10 @@ import (
 	"dev/internal/worktree"
 )
 
+// Manager owns in-process daemon runtime state and lifecycle operations.
+//
+// It is the control-plane backend used by Server and is intentionally focused
+// on orchestration, not network transport handling.
 type Manager struct {
 	mu                   sync.Mutex
 	processes            map[string]map[string]*processInfo
@@ -38,6 +42,14 @@ const defaultProxyProcessIdleTimeout = 5 * time.Minute
 
 var errWorktreeNotRunning = errors.New("worktree not running")
 
+// NewManager creates the daemon runtime manager.
+//
+// Manager is responsible for local orchestration/state:
+// - worktree registration/runtime indexes
+// - process start/stop/readiness and proxy session tracking
+// - path/slug resolution for running worktrees
+//
+// Manager does not own external transports; Server calls into Manager.
 func NewManager() *Manager {
 	return &Manager{
 		processes:            make(map[string]map[string]*processInfo),
