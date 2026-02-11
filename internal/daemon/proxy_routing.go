@@ -380,7 +380,7 @@ func (s *Server) projectConfigForSlugFromDir(slug, dirHint string) (*config.Proj
 		var err error
 		repoPath, err = worktree.ResolvePathFromSlugInDir(slug, s.mainPath)
 		if err != nil {
-			if s.config != nil && s.mainPath != "" {
+			if s.shouldFallbackToMainProjectConfig(slug) {
 				return s.config, s.mainPath, nil
 			}
 			return nil, "", err
@@ -392,6 +392,30 @@ func (s *Server) projectConfigForSlugFromDir(slug, dirHint string) (*config.Proj
 		return nil, "", err
 	}
 	return cfg, repoPath, nil
+}
+
+func (s *Server) shouldFallbackToMainProjectConfig(slug string) bool {
+	if s == nil || s.config == nil || strings.TrimSpace(s.mainPath) == "" {
+		return false
+	}
+	candidate := strings.TrimSpace(strings.ToLower(slug))
+	if candidate == "" {
+		return false
+	}
+
+	mainSlug := "main"
+	if configured, err := worktree.NormalizeIdentifierSegment(s.config.Project.MainSlug); err == nil && configured != "" {
+		mainSlug = configured
+	}
+
+	allowed := map[string]struct{}{
+		"main":   {},
+		mainSlug: {},
+		strings.ToLower(worktree.ProxyDNSLabelForSlug(s.config, "main")):   {},
+		strings.ToLower(worktree.ProxyDNSLabelForSlug(s.config, mainSlug)): {},
+	}
+	_, ok := allowed[candidate]
+	return ok
 }
 
 func parseProxyMatchers(process string, raw any, singleton bool, gatewayMode string, gatewayDebugLog string) []proxyMatcher {

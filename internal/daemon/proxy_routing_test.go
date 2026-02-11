@@ -647,6 +647,246 @@ port = "unix"
 	}
 }
 
+func TestResolveProxyTargetForRequest_PrefersSubdomainRouteOverDottedCandidateFallback(t *testing.T) {
+	base := t.TempDir()
+	websiteRepo := filepath.Join(base, "website")
+	appRepo := filepath.Join(base, "app")
+	if err := os.MkdirAll(websiteRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(appRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(websiteRepo, "init"); err != nil {
+		t.Fatalf("git init website: %v", err)
+	}
+	if err := runGit(appRepo, "init"); err != nil {
+		t.Fatalf("git init app: %v", err)
+	}
+
+	websiteCfg := `
+[project]
+name = "org/website"
+
+[local-dns]
+overrides = { main = "www.foocorp" }
+
+[process.web]
+command = "echo website"
+proxy = { path = "/" }
+port = "unix"
+`
+	if err := os.WriteFile(filepath.Join(websiteRepo, ".dev.toml"), []byte(websiteCfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	appCfg := `
+[project]
+name = "org/app"
+
+[process.web]
+command = "echo app"
+proxy = { subdomain = "app", path = "/" }
+port = "unix"
+`
+	if err := os.WriteFile(filepath.Join(appRepo, ".dev.toml"), []byte(appCfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loadedWebsiteCfg, _, err := config.LoadProjectConfig(filepath.Join(websiteRepo, ".dev.toml"))
+	if err != nil {
+		t.Fatalf("load website config: %v", err)
+	}
+
+	mgr := NewManager()
+	websiteKey := runtimeKeyForPath(websiteRepo)
+	appKey := runtimeKeyForPath(appRepo)
+	mgr.mu.Lock()
+	mgr.registerWorktreeLocked(websiteKey, runtimeWorktree{
+		Slug:     "main",
+		Project:  "org-website",
+		Path:     websiteRepo,
+		DNSLabel: "www.foocorp",
+	})
+	mgr.registerWorktreeLocked(appKey, runtimeWorktree{
+		Slug:     "foocorp",
+		Project:  "org-app",
+		Path:     appRepo,
+		DNSLabel: "foocorp",
+	})
+	mgr.processes[websiteKey] = map[string]*processInfo{
+		"web": {
+			network: "tcp",
+			address: "127.0.0.1:1",
+			cmd:     &exec.Cmd{Process: &os.Process{Pid: 1}},
+			ready:   true,
+			exited:  make(chan struct{}),
+		},
+	}
+	mgr.processes[appKey] = map[string]*processInfo{
+		"web": {
+			network: "tcp",
+			address: "127.0.0.1:1",
+			cmd:     &exec.Cmd{Process: &os.Process{Pid: 1}},
+			ready:   true,
+			exited:  make(chan struct{}),
+		},
+	}
+	mgr.mu.Unlock()
+
+	s := &Server{
+		manager:      mgr,
+		mainPath:     websiteRepo,
+		config:       loadedWebsiteCfg,
+		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
+	}
+
+	_, _, process, _, _, targetSlug, targetPath, err := s.resolveProxyTargetForRequest("app.foocorp.localhost", "/", false)
+	if err != nil {
+		t.Fatalf("resolveProxyTargetForRequest: %v", err)
+	}
+	if process != "web" {
+		t.Fatalf("expected process web, got %q", process)
+	}
+	if targetSlug != "foocorp" {
+		t.Fatalf("expected target slug foocorp, got %q", targetSlug)
+	}
+	if targetPath != appRepo {
+		t.Fatalf("expected target path %q, got %q", appRepo, targetPath)
+	}
+}
+
+func TestResolveProxyTargetForRequest_MultiProjectFoocorpSubdomainsRouteToAppProject(t *testing.T) {
+	base := t.TempDir()
+	websiteRepo := filepath.Join(base, "website")
+	appRepo := filepath.Join(base, "app")
+	if err := os.MkdirAll(websiteRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(appRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(websiteRepo, "init"); err != nil {
+		t.Fatalf("git init website: %v", err)
+	}
+	if err := runGit(appRepo, "init"); err != nil {
+		t.Fatalf("git init app: %v", err)
+	}
+
+	websiteCfg := `
+[project]
+name = "org/website"
+
+[local-dns]
+overrides = { main = "www.foocorp" }
+
+[process.web]
+command = "echo website"
+proxy = { path = "/" }
+port = "unix"
+`
+	if err := os.WriteFile(filepath.Join(websiteRepo, ".dev.toml"), []byte(websiteCfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	appCfg := `
+[project]
+name = "org/app"
+main_slug = "foocorp"
+
+[local-dns]
+overrides = { main = "foocorp" }
+
+[process.root]
+command = "echo app-root"
+proxy = { path = "/" }
+port = "unix"
+
+[process.frontend]
+command = "echo app-frontend"
+proxy = { subdomains = ["app", "login"], path = "/" }
+port = "unix"
+`
+	if err := os.WriteFile(filepath.Join(appRepo, ".dev.toml"), []byte(appCfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loadedWebsiteCfg, _, err := config.LoadProjectConfig(filepath.Join(websiteRepo, ".dev.toml"))
+	if err != nil {
+		t.Fatalf("load website config: %v", err)
+	}
+
+	mgr := NewManager()
+	websiteKey := runtimeKeyForPath(websiteRepo)
+	appKey := runtimeKeyForPath(appRepo)
+	mgr.mu.Lock()
+	mgr.registerWorktreeLocked(websiteKey, runtimeWorktree{
+		Slug:     "main",
+		Project:  "org-website",
+		Path:     websiteRepo,
+		DNSLabel: "www.foocorp",
+	})
+	mgr.registerWorktreeLocked(appKey, runtimeWorktree{
+		Slug:     "foocorp",
+		Project:  "org-app",
+		Path:     appRepo,
+		DNSLabel: "foocorp",
+	})
+	mgr.processes[websiteKey] = map[string]*processInfo{
+		"web": {
+			network: "tcp",
+			address: "127.0.0.1:1",
+			cmd:     &exec.Cmd{Process: &os.Process{Pid: 1}},
+			ready:   true,
+			exited:  make(chan struct{}),
+		},
+	}
+	mgr.processes[appKey] = map[string]*processInfo{
+		"root": {
+			network: "tcp",
+			address: "127.0.0.1:1",
+			cmd:     &exec.Cmd{Process: &os.Process{Pid: 1}},
+			ready:   true,
+			exited:  make(chan struct{}),
+		},
+		"frontend": {
+			network: "tcp",
+			address: "127.0.0.1:1",
+			cmd:     &exec.Cmd{Process: &os.Process{Pid: 1}},
+			ready:   true,
+			exited:  make(chan struct{}),
+		},
+	}
+	mgr.mu.Unlock()
+
+	s := &Server{
+		manager:      mgr,
+		mainPath:     websiteRepo,
+		config:       loadedWebsiteCfg,
+		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
+	}
+
+	assertRoute := func(host, wantProcess, wantSlug, wantPath string) {
+		t.Helper()
+		_, _, process, _, _, targetSlug, targetPath, err := s.resolveProxyTargetForRequest(host, "/", false)
+		if err != nil {
+			t.Fatalf("resolveProxyTargetForRequest(%q): %v", host, err)
+		}
+		if process != wantProcess {
+			t.Fatalf("%s expected process %q, got %q", host, wantProcess, process)
+		}
+		if targetSlug != wantSlug {
+			t.Fatalf("%s expected target slug %q, got %q", host, wantSlug, targetSlug)
+		}
+		if targetPath != wantPath {
+			t.Fatalf("%s expected target path %q, got %q", host, wantPath, targetPath)
+		}
+	}
+
+	assertRoute("app.foocorp.localhost", "frontend", "foocorp", appRepo)
+	assertRoute("login.foocorp.localhost", "frontend", "foocorp", appRepo)
+	assertRoute("foocorp.localhost", "root", "foocorp", appRepo)
+	assertRoute("www.foocorp.localhost", "web", "main", websiteRepo)
+}
+
 func TestSelectProxyMatcher_PathLength(t *testing.T) {
 	matchers := []proxyMatcher{
 		{Process: "rails", Subdomain: "*", Kind: subdomainWildcard, Path: "/", Match: "prefix"},
