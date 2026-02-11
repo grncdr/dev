@@ -230,15 +230,6 @@ priority = 5
 	if matchers[1].Priority != 5 {
 		t.Fatalf("expected priority 5, got %d", matchers[1].Priority)
 	}
-	if matchers[0].GatewayMode != config.GatewayModeDisable {
-		t.Fatalf("expected default gateway mode disable, got %q", matchers[0].GatewayMode)
-	}
-	if matchers[1].GatewayMode != config.GatewayModeDisable {
-		t.Fatalf("expected default gateway mode disable, got %q", matchers[1].GatewayMode)
-	}
-	if matchers[0].GatewayDebugLog != "" || matchers[1].GatewayDebugLog != "" {
-		t.Fatalf("expected gateway debug log disabled by default")
-	}
 	if !matchers[0].Singleton || !matchers[1].Singleton {
 		t.Fatalf("expected singleton to propagate to matchers")
 	}
@@ -363,15 +354,9 @@ proxy = { subdomain = "mailpit" }
 	if matchers[0].Process != "mailpit" || matchers[0].Subdomain != "mailpit" {
 		t.Fatalf("unexpected matcher: %+v", matchers[0])
 	}
-	if matchers[0].GatewayMode != config.GatewayModeRewrite {
-		t.Fatalf("expected rewrite gateway_mode, got %q", matchers[0].GatewayMode)
-	}
-	if matchers[0].GatewayDebugLog != "tmp/gateway-http.log" {
-		t.Fatalf("expected gateway debug_log path, got %q", matchers[0].GatewayDebugLog)
-	}
 }
 
-func TestProcessProxyMatchers_DefaultsToGatewayDisabledWhenNotExposed(t *testing.T) {
+func TestProcessProxyMatchers_ParsesNonExposedProcess(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, ".dev.toml")
 	body := `
@@ -393,8 +378,8 @@ proxy = { subdomain = "app" }
 	if len(matchers) != 1 {
 		t.Fatalf("expected 1 matcher, got %d", len(matchers))
 	}
-	if matchers[0].GatewayMode != config.GatewayModeDisable {
-		t.Fatalf("expected disable gateway_mode, got %q", matchers[0].GatewayMode)
+	if matchers[0].Process != "web" || matchers[0].Subdomain != "app" {
+		t.Fatalf("unexpected matcher: %+v", matchers[0])
 	}
 }
 
@@ -422,7 +407,7 @@ proxy = { path = "/" }
 	})
 	mgr.mu.Unlock()
 	s := &Server{manager: mgr}
-	_, _, _, _, _, _, _, err := s.resolveProxyTargetForRequest("main.localhost", "/", true)
+	_, _, _, _, _, _, _, err := resolveProxyTargetForTest(s, "main.localhost", "/", true)
 	if !errors.Is(err, errGatewayProcessNotExposed) {
 		t.Fatalf("expected gateway-not-exposed error, got %v", err)
 	}
@@ -507,7 +492,7 @@ port = "unix"
 		mainPath:     repoA,
 		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
 	}
-	_, _, process, _, _, targetSlug, _, err := s.resolveProxyTargetForRequest("www.localhost", "/", false)
+	_, _, process, _, _, targetSlug, _, err := resolveProxyTargetForTest(s, "www.localhost", "/", false)
 	if err != nil {
 		t.Fatalf("resolveProxyTargetForRequest: %v", err)
 	}
@@ -573,7 +558,7 @@ port = "unix"
 		mainPath:     repo,
 		daemonConfig: daemonCfg,
 	}
-	_, _, process, _, _, targetSlug, _, err := s.resolveProxyTargetForRequest("www.foocorp.localhost", "/", false)
+	_, _, process, _, _, targetSlug, _, err := resolveProxyTargetForTest(s, "www.foocorp.localhost", "/", false)
 	if err != nil {
 		t.Fatalf("resolveProxyTargetForRequest: %v", err)
 	}
@@ -678,7 +663,7 @@ port = "unix"
 		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
 	}
 
-	_, _, process, _, _, targetSlug, targetPath, err := s.resolveProxyTargetForRequest("app.foocorp.localhost", "/", false)
+	_, _, process, _, _, targetSlug, targetPath, err := resolveProxyTargetForTest(s, "app.foocorp.localhost", "/", false)
 	if err != nil {
 		t.Fatalf("resolveProxyTargetForRequest: %v", err)
 	}
@@ -804,9 +789,9 @@ port = "unix"
 
 	assertRoute := func(host, wantProcess, wantSlug, wantPath string) {
 		t.Helper()
-		_, _, process, _, _, targetSlug, targetPath, err := s.resolveProxyTargetForRequest(host, "/", false)
+		_, _, process, _, _, targetSlug, targetPath, err := resolveProxyTargetForTest(s, host, "/", false)
 		if err != nil {
-			t.Fatalf("resolveProxyTargetForRequest(%q): %v", host, err)
+			t.Fatalf("resolveProxyTargetForTest(%q): %v", host, err)
 		}
 		if process != wantProcess {
 			t.Fatalf("%s expected process %q, got %q", host, wantProcess, process)
@@ -927,7 +912,7 @@ port = "unix"
 		}),
 	}
 
-	_, _, process, _, _, targetSlug, targetPath, err := s.resolveProxyTargetForRequest("app.some-other-worktree.localhost", "/", false)
+	_, _, process, _, _, targetSlug, targetPath, err := resolveProxyTargetForTest(s, "app.some-other-worktree.localhost", "/", false)
 	if err != nil {
 		t.Fatalf("resolveProxyTargetForRequest: %v", err)
 	}

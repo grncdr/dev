@@ -1,6 +1,7 @@
 package router
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,7 +9,7 @@ import (
 	"dev/internal/config"
 )
 
-func TestParseMatchers_SubdomainsAndGateway(t *testing.T) {
+func TestParseMatchers_Subdomains(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), ".dev.toml")
 	body := `
 [project]
@@ -35,15 +36,6 @@ proxy = { subdomain = "mailpit" }
 	}
 	if matchers[0].Kind != SubdomainExplicit || matchers[0].Subdomain != "mailpit" {
 		t.Fatalf("unexpected matcher: %+v", matchers[0])
-	}
-	if matchers[0].GatewayMode != config.GatewayModeRewrite {
-		t.Fatalf("expected rewrite mode, got %q", matchers[0].GatewayMode)
-	}
-	if matchers[0].GatewayDebugLog != "tmp/gateway-http.log" {
-		t.Fatalf("unexpected debug log: %q", matchers[0].GatewayDebugLog)
-	}
-	if !matchers[0].GatewayExposed {
-		t.Fatalf("expected matcher to be gateway-exposed")
 	}
 }
 
@@ -107,5 +99,40 @@ func TestMatchPath(t *testing.T) {
 	ok, _ = MatchPath("/packs/app.js", "/packs/", "prefix")
 	if !ok {
 		t.Fatalf("expected trailing-slash prefix match")
+	}
+}
+
+func TestResolveWithinWorktree_ConstrainsCandidates(t *testing.T) {
+	r := New(".localhost")
+	r.UpsertWorktree(WorktreeInput{
+		RuntimeKey: "wt-a",
+		Slug:       "main",
+		RepoPath:   "/tmp/a",
+		Labels:     []string{"foocorp"},
+		Matchers: []Matcher{
+			{Process: "frontend", Kind: SubdomainExplicit, Subdomain: "app", Path: "/", Match: "prefix"},
+		},
+	})
+	r.UpsertWorktree(WorktreeInput{
+		RuntimeKey: "wt-b",
+		Slug:       "other",
+		RepoPath:   "/tmp/b",
+		Labels:     []string{"some-other-worktree"},
+		Matchers: []Matcher{
+			{Process: "frontend", Kind: SubdomainExplicit, Subdomain: "app", Path: "/", Match: "prefix"},
+		},
+	})
+
+	_, err := r.ResolveWithinWorktree("wt-a", "app.some-other-worktree.localhost", "/")
+	if !errors.Is(err, ErrHostNotMapped) {
+		t.Fatalf("expected host-not-mapped for constrained worktree, got %v", err)
+	}
+
+	matcher, err := r.ResolveWithinWorktree("wt-b", "app.some-other-worktree.localhost", "/")
+	if err != nil {
+		t.Fatalf("resolve within worktree: %v", err)
+	}
+	if matcher == nil || matcher.Process != "frontend" {
+		t.Fatalf("unexpected resolve matcher: %+v", matcher)
 	}
 }

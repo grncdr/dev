@@ -17,7 +17,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"dev/internal/gatewayproto"
 	"dev/internal/tunnelmux"
+	"dev/internal/utils"
 )
 
 type Server struct {
@@ -51,14 +53,6 @@ type ServerOptions struct {
 	Certs      CertProvisioner
 	TLSConfig  *tls.Config
 	LogWriter  io.Writer
-}
-
-type RegisterRequest struct {
-	Project string `json:"project"`
-	Slug    string `json:"slug"`
-	Label   string `json:"label"`
-	AgentID string `json:"agent_id"`
-	Name    string `json:"name"`
 }
 
 type UnregisterRequest struct {
@@ -175,7 +169,7 @@ func (s *Server) handleAgentRegister(w http.ResponseWriter, r *http.Request) {
 		writeMethodNotAllowed(w)
 		return
 	}
-	var req RegisterRequest
+	var req gatewayproto.RegisterRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"code": "invalid_body", "error": err.Error()})
 		return
@@ -230,9 +224,11 @@ func (s *Server) handleAgentRegister(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	resp := map[string]string{"status": "ok"}
-	resp["public_host"] = s.dnsZone
-	resp["public_hostname"] = req.Label + "." + s.dnsZone
+	resp := gatewayproto.RegisterResponse{
+		Status:         "ok",
+		PublicHost:     s.dnsZone,
+		PublicHostname: req.Label + "." + s.dnsZone,
+	}
 	if progress.Enabled() {
 		progress.Result(resp)
 		return
@@ -612,7 +608,7 @@ func (s *Server) forwardUpgradedResponse(w http.ResponseWriter, stream net.Conn,
 		_ = stream.Close()
 		return err
 	}
-	return proxyBidirectional(clientConn, clientRW, stream, streamReader)
+	return utils.ProxyBidirectional(clientConn, clientRW, stream, streamReader)
 }
 
 type gatewayRequestLog struct {
@@ -785,38 +781,25 @@ func (w *registerProgressWriter) Event(stage, message string) {
 	if !w.Enabled() {
 		return
 	}
-	w.write(map[string]string{
-		"type":    "progress",
-		"stage":   stage,
-		"message": message,
-	})
+	w.write(gatewayproto.RegisterResponse{Type: "progress", Stage: stage, Message: message})
 }
 
 func (w *registerProgressWriter) Error(code, message string) {
 	if !w.Enabled() {
 		return
 	}
-	w.write(map[string]string{
-		"type":   "result",
-		"status": "error",
-		"code":   code,
-		"error":  message,
-	})
+	w.write(gatewayproto.RegisterResponse{Type: "result", Status: "error", Code: code, Error: message})
 }
 
-func (w *registerProgressWriter) Result(payload map[string]string) {
+func (w *registerProgressWriter) Result(payload gatewayproto.RegisterResponse) {
 	if !w.Enabled() {
 		return
 	}
-	out := make(map[string]string, len(payload)+2)
-	out["type"] = "result"
-	for k, v := range payload {
-		out[k] = v
-	}
-	w.write(out)
+	payload.Type = "result"
+	w.write(payload)
 }
 
-func (w *registerProgressWriter) write(payload map[string]string) {
+func (w *registerProgressWriter) write(payload gatewayproto.RegisterResponse) {
 	if !w.Enabled() || w.encoder == nil {
 		return
 	}

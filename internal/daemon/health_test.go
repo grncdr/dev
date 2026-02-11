@@ -149,7 +149,7 @@ path = "/"
 	})
 	s.manager.mu.Unlock()
 	start := time.Now()
-	network, address, _, _, _, _, _, err := s.resolveProxyTarget(slug+".localhost", "/")
+	network, address, _, _, _, _, _, err := resolveProxyTargetForTest(s, slug+".localhost", "/", false)
 	if err != nil {
 		t.Fatalf("resolve proxy target: %v", err)
 	}

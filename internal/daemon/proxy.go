@@ -3,7 +3,6 @@ package daemon
 import (
 	"bytes"
 	"context"
-	"crypto/subtle"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -229,127 +228,42 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 	if strings.Contains(host, ":") {
 		host, _, _ = strings.Cut(host, ":")
 	}
-	routeHost := host
-	rewriteLocalHost := host
-	isGatewayTunnel := false
-	gatewayAuthUsername := ""
-	gatewayAuthPassword := ""
-	if route, ok := s.localProxyRouteForTunnelRequest(host); ok {
-		routeHost = route.LocalHost
-		rewriteLocalHost = route.LocalHost
-		isGatewayTunnel = true
-		gatewayAuthUsername = route.AuthUsername
-		gatewayAuthPassword = route.AuthPassword
+	if s.manager == nil || s.manager.router == nil {
+		writeErrorWithCode(w, http.StatusBadGateway, "proxy_target_error", errors.New("proxy router unavailable"))
+		return
 	}
-	if isGatewayTunnel {
-		if !authenticateGatewayTunnelRequest(w, r, gatewayAuthUsername, gatewayAuthPassword) {
-			return
-		}
-	}
-
-	network, address, process, gatewayMode, gatewayDebugLog, targetSlug, targetPath, err := s.resolveProxyTargetForRequest(routeHost, r.URL.Path, isGatewayTunnel)
+	runtimeKey, matcher, err := s.manager.router.Resolve(host, r.URL.Path)
 	if err != nil {
-		if errors.Is(err, errGatewayProcessNotExposed) {
-			writeErrorWithCode(w, http.StatusForbidden, "proxy_gateway_not_exposed", err)
-			return
-		}
 		writeErrorWithCode(w, http.StatusBadGateway, "proxy_target_error", err)
 		return
 	}
-	defer s.manager.endProxySessionFromDir(targetSlug, targetPath, process)
-	rewriteMode := isGatewayTunnel && gatewayMode == config.GatewayModeRewrite
-	transcriptRelPath := ""
-	if isGatewayTunnel {
-		transcriptRelPath = strings.TrimSpace(gatewayDebugLog)
+	targetInfo, err := s.manager.ensureProxyTargetForRuntime(runtimeKey, matcher)
+	if err != nil {
+		writeErrorWithCode(w, http.StatusBadGateway, "proxy_target_error", err)
+		return
 	}
-	debugGatewayTranscript := transcriptRelPath != ""
-	transcriptWorktreePath := ""
-	if debugGatewayTranscript {
-		if path, ok := s.manager.WorktreePathFromDir(targetSlug, targetPath); ok {
-			transcriptWorktreePath = path
-		}
-	}
-	var requestForTranscript *http.Request
-	var requestBodyForTranscript []byte
-	if debugGatewayTranscript {
-		body, err := snapshotRequestBody(r)
-		if err == nil {
-			requestForTranscript = r.Clone(r.Context())
-			requestForTranscript.Header = r.Header.Clone()
-			requestBodyForTranscript = body
-		}
-	}
+	defer s.manager.endProxySessionFromDir(targetInfo.Slug, targetInfo.Path, targetInfo.Process)
 
 	target, _ := url.Parse("http://unix")
 	reverseProxy := httputil.NewSingleHostReverseProxy(target)
-	localApex := s.projectApexZone()
-	publicApex, hasPublicApex := derivePublicApex(rewriteLocalHost, host, localApex)
 	originalDirector := reverseProxy.Director
 	reverseProxy.Director = func(req *http.Request) {
 		originalDirector(req)
-		req.Host = rewriteLocalHost
-		applyForwardedHeaders(req, rewriteMode)
-		if rewriteMode && hasPublicApex {
-			rewriteRequestCookieDomainForTunnel(req.Header, host, rewriteLocalHost, publicApex, localApex)
-			rewriteRequestOriginForTunnel(req.Header, host, rewriteLocalHost, publicApex, localApex)
-		}
+		req.Host = host
+		applyForwardedHeaders(req, false)
 	}
 	reverseProxy.Transport = &http.Transport{
 		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-			return net.Dial(network, address)
+			return net.Dial(targetInfo.Network, targetInfo.Address)
 		},
 	}
-	rewriteDomain, rewroteDomain := replaceHostLocalToPublic(rewriteLocalHost, rewriteLocalHost, host, localApex, publicApex)
-	if !rewroteDomain || rewriteDomain == "" {
-		rewriteDomain = host
-	}
 	reverseProxy.ModifyResponse = func(resp *http.Response) error {
-		if rewriteMode {
-			if loc := resp.Header.Get("Location"); loc != "" {
-				if rewritten, ok := rewriteLocationForTunnel(loc, rewriteLocalHost, host, localApex, publicApex); ok {
-					resp.Header.Set("Location", rewritten)
-				}
-			}
-			if localApex != "" && hasPublicApex {
-				rewriteSetCookieDomainForTunnel(resp.Header, rewriteLocalHost, host, localApex, publicApex)
-			}
-			if err := rewriteResponseBody(resp, rewriteLocalHost, rewriteDomain); err != nil {
-				return err
-			}
-		}
-		if debugGatewayTranscript {
-			respBody, err := snapshotResponseBody(resp)
-			if err != nil {
-				return nil
-			}
-			if requestForTranscript != nil && transcriptWorktreePath != "" {
-				if err := writeGatewayHTTPTranscript(transcriptWorktreePath, transcriptRelPath, requestForTranscript, requestBodyForTranscript, resp, respBody); err != nil {
-					writeDaemonLogLine(fmt.Sprintf("gateway transcript write failed process=%s host=%s path=%s err=%q", process, host, transcriptRelPath, err.Error()))
-				}
-			}
-		}
 		return nil
 	}
 	reverseProxy.ErrorHandler = func(rw http.ResponseWriter, _ *http.Request, err error) {
 		writeErrorWithCode(rw, http.StatusBadGateway, "proxy_upstream_error", err)
 	}
 	reverseProxy.ServeHTTP(w, r)
-}
-
-func authenticateGatewayTunnelRequest(w http.ResponseWriter, r *http.Request, username, password string) bool {
-	username = strings.TrimSpace(username)
-	if username == "" && password == "" {
-		return true
-	}
-	u, p, ok := r.BasicAuth()
-	if !ok ||
-		subtle.ConstantTimeCompare([]byte(u), []byte(username)) != 1 ||
-		subtle.ConstantTimeCompare([]byte(p), []byte(password)) != 1 {
-		w.Header().Set("WWW-Authenticate", `Basic realm="dev share"`)
-		writeErrorWithCode(w, http.StatusUnauthorized, "proxy_gateway_auth_required", errors.New("invalid share credentials"))
-		return false
-	}
-	return true
 }
 
 func snapshotRequestBody(req *http.Request) ([]byte, error) {

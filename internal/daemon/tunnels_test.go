@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,11 +82,6 @@ url = "http://unused.local"
 		_ = gw.Shutdown(ctx)
 	})
 
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer upstream.Close()
-
 	socketPath := filepath.Join(baseDir, "devd.sock")
 	if len(socketPath) > 80 {
 		socketPath = filepath.Join(os.TempDir(), fmt.Sprintf("devd-tunnel-%d.sock", time.Now().UnixNano()))
@@ -112,7 +106,6 @@ url = "http://unused.local"
 		Label:      slug,
 		GatewayURL: "http://" + gw.Addr(),
 		Project:    "demo",
-		Upstream:   upstream.URL,
 	})
 	if err != nil {
 		t.Fatalf("tunnel open: %v", err)
@@ -168,7 +161,6 @@ func TestOpenTunnel_RejectsIncompleteAuth(t *testing.T) {
 		Slug:         "main",
 		Label:        "alpha",
 		GatewayURL:   "https://gw.example.test",
-		Upstream:     "http://127.0.0.1:9999",
 		AuthUsername: "alice",
 	})
 	if err == nil || !strings.Contains(err.Error(), "auth_username and auth_password") {

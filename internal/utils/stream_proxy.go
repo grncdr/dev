@@ -1,4 +1,4 @@
-package gateway
+package utils
 
 import (
 	"errors"
@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-func proxyBidirectional(a io.ReadWriteCloser, aRead io.Reader, b io.ReadWriteCloser, bRead io.Reader) error {
+func ProxyBidirectional(a io.ReadWriteCloser, aRead io.Reader, b io.ReadWriteCloser, bRead io.Reader) error {
 	if aRead == nil {
 		aRead = a
 	}

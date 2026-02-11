@@ -65,10 +65,11 @@ func NewManager() *Manager {
 }
 
 type runtimeWorktree struct {
-	Slug     string
-	Project  string
-	Path     string
-	DNSLabel string
+	Slug          string
+	Project       string
+	Path          string
+	DNSLabel      string
+	GatewayExpose map[string]config.GatewayExposeRule
 }
 
 func (m *Manager) SetApexZone(zone string) {
@@ -231,10 +232,11 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 		m.processes[runtimeKey] = make(map[string]*processInfo)
 	}
 	m.registerWorktreeLocked(runtimeKey, runtimeWorktree{
-		Slug:     slug,
-		Project:  projectID,
-		Path:     path,
-		DNSLabel: dnsLabel,
+		Slug:          slug,
+		Project:       projectID,
+		Path:          path,
+		DNSLabel:      dnsLabel,
+		GatewayExpose: gatewayExposeRulesForConfig(cfg),
 	})
 	m.mu.Unlock()
 
@@ -481,11 +483,7 @@ func (m *Manager) removeIndexLocked(index map[string]map[string]struct{}, value,
 }
 
 func (m *Manager) rebuildRouterLocked() {
-	if m.router == nil {
-		m.router = router.New(m.apexZone)
-	} else {
-		m.router = router.New(m.apexZone)
-	}
+	m.router = router.New(m.apexZone)
 
 	addWorktree := func(runtimeKey string, wt runtimeWorktree) {
 		in, ok := m.routerWorktreeInputLocked(runtimeKey, wt)
@@ -512,6 +510,9 @@ func (m *Manager) rebuildRouterLocked() {
 			Slug:    entry.Slug,
 			Project: entry.Project,
 			Path:    entry.Path,
+		}
+		if cfg, _, err := config.LoadProjectConfig(filepath.Join(entry.Path, config.DefaultProjectConfig)); err == nil {
+			wt.GatewayExpose = gatewayExposeRulesForConfig(cfg)
 		}
 		addWorktree(runtimeKey, wt)
 	}
@@ -578,6 +579,25 @@ func routerLabelsForWorktree(wt runtimeWorktree, cfg *config.ProjectConfig) []st
 
 func routerMatchersForConfig(cfg *config.ProjectConfig) []router.Matcher {
 	return router.ParseMatchers(cfg)
+}
+
+func gatewayExposeRulesForConfig(cfg *config.ProjectConfig) map[string]config.GatewayExposeRule {
+	raw := config.GatewayExposeRules(cfg)
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]config.GatewayExposeRule, len(raw))
+	for process, rule := range raw {
+		key := strings.TrimSpace(process)
+		if key == "" {
+			continue
+		}
+		out[key] = rule
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 type localDNSHostConflict struct {
@@ -914,10 +934,11 @@ func (m *Manager) stopWorktreeFromRef(slug, project, dirHint string, processes [
 	dnsLabel := worktree.ProxyDNSLabelForSlug(cfg, slug)
 	m.mu.Lock()
 	m.registerWorktreeLocked(runtimeKey, runtimeWorktree{
-		Slug:     slug,
-		Project:  projectID,
-		Path:     path,
-		DNSLabel: dnsLabel,
+		Slug:          slug,
+		Project:       projectID,
+		Path:          path,
+		DNSLabel:      dnsLabel,
+		GatewayExpose: gatewayExposeRulesForConfig(cfg),
 	})
 	m.mu.Unlock()
 
@@ -995,10 +1016,11 @@ func (m *Manager) StatusWorktreeFromRef(slug, project, dirHint string) (*Worktre
 	dnsLabel := worktree.ProxyDNSLabelForSlug(cfg, slug)
 	m.mu.Lock()
 	m.registerWorktreeLocked(runtimeKey, runtimeWorktree{
-		Slug:     slug,
-		Project:  projectID,
-		Path:     path,
-		DNSLabel: dnsLabel,
+		Slug:          slug,
+		Project:       projectID,
+		Path:          path,
+		DNSLabel:      dnsLabel,
+		GatewayExpose: gatewayExposeRulesForConfig(cfg),
 	})
 	m.mu.Unlock()
 
@@ -1222,6 +1244,80 @@ func (m *Manager) WorktreePathFromDir(slug, dirHint string) (string, bool) {
 		return "", false
 	}
 	return wt.Path, strings.TrimSpace(wt.Path) != ""
+}
+
+func (m *Manager) WorktreeByRuntimeKey(runtimeKey string) (runtimeWorktree, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	wt, ok := m.worktrees[strings.TrimSpace(runtimeKey)]
+	if !ok {
+		return runtimeWorktree{}, false
+	}
+	return wt, true
+}
+
+func (m *Manager) gatewayExposeRuleForRuntimeProcess(runtimeKey, process string) config.GatewayExposeRule {
+	if m == nil {
+		return config.GatewayExposeRule{Mode: config.GatewayModeDisable}
+	}
+	runtimeKey = strings.TrimSpace(runtimeKey)
+	process = strings.TrimSpace(process)
+	if runtimeKey == "" || process == "" {
+		return config.GatewayExposeRule{Mode: config.GatewayModeDisable}
+	}
+	wt, ok := m.WorktreeByRuntimeKey(runtimeKey)
+	if !ok || len(wt.GatewayExpose) == 0 {
+		return config.GatewayExposeRule{Mode: config.GatewayModeDisable}
+	}
+	rule, ok := wt.GatewayExpose[process]
+	if !ok {
+		return config.GatewayExposeRule{Mode: config.GatewayModeDisable}
+	}
+	if strings.TrimSpace(rule.Mode) == "" {
+		rule.Mode = config.GatewayModeDisable
+	}
+	return rule
+}
+
+func (m *Manager) ensureProxyTargetForRuntime(runtimeKey string, matcher *router.Matcher) (ProxyTarget, error) {
+	if m == nil {
+		return ProxyTarget{}, errors.New("manager unavailable")
+	}
+	if matcher == nil {
+		return ProxyTarget{}, errors.New("proxy matcher unavailable")
+	}
+	wt, ok := m.WorktreeByRuntimeKey(runtimeKey)
+	if !ok {
+		return ProxyTarget{}, router.ErrWorktreeNotMapped
+	}
+	targetSlug := wt.Slug
+	targetPath := wt.Path
+	if matcher.Singleton {
+		mainSlug, err := resolveMainWorktreeSlug(targetPath)
+		if err != nil {
+			return ProxyTarget{}, err
+		}
+		mainPath, err := worktree.ResolveMainPathInDir(targetPath)
+		if err != nil {
+			return ProxyTarget{}, err
+		}
+		targetSlug = mainSlug
+		targetPath = mainPath
+	}
+	process := matcher.Process
+	m.beginProxySessionFromDir(targetSlug, targetPath, process)
+	network, address, err := m.EnsureProcessForTargetFromDir(targetSlug, targetPath, process)
+	if err != nil {
+		m.endProxySessionFromDir(targetSlug, targetPath, process)
+		return ProxyTarget{}, err
+	}
+	return ProxyTarget{
+		Network: network,
+		Address: address,
+		Slug:    targetSlug,
+		Path:    targetPath,
+		Process: process,
+	}, nil
 }
 
 func (m *Manager) StopAllWorktrees() {

@@ -1,4 +1,4 @@
-package gateway
+package agent
 
 import (
 	"crypto/tls"
@@ -11,11 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"dev/internal/config"
 )
 
-func MTLSClientForGatewayURL(gatewayURL string, daemonCfg *config.DaemonConfig) (*http.Client, *tls.Config, error) {
+func MTLSClientForGatewayURL(gatewayURL, credentialDir string) (*http.Client, *tls.Config, error) {
 	parsed, err := url.Parse(strings.TrimSpace(gatewayURL))
 	if err != nil {
 		return nil, nil, err
@@ -27,9 +25,9 @@ func MTLSClientForGatewayURL(gatewayURL string, daemonCfg *config.DaemonConfig) 
 	if host == "" {
 		return nil, nil, errors.New("gateway URL host is required")
 	}
-	credDir, err := config.ResolveGatewayCredentialDir(daemonCfg, host)
-	if err != nil {
-		return nil, nil, err
+	credDir := strings.TrimSpace(credentialDir)
+	if credDir == "" {
+		return nil, nil, fmt.Errorf("missing gateway credentials for %s (run dev gateway login --gateway-url %s)", host, gatewayURL)
 	}
 	keyPath := filepath.Join(credDir, "client-key.pem")
 	certPath := filepath.Join(credDir, "client.pem")

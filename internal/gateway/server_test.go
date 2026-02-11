@@ -21,6 +21,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	agentpkg "dev/internal/agent"
 )
 
 type fakeDNSProvider struct {
@@ -78,6 +80,15 @@ func (f *fakeDNSProvider) RemoveLabel(_ context.Context, label string) error {
 	defer f.mu.Unlock()
 	f.removed = append(f.removed, label)
 	return nil
+}
+
+func upstreamHandleStream(t *testing.T, upstreamURL string) func(context.Context, *http.Request, net.Conn) error {
+	t.Helper()
+	handler, err := agentpkg.UpstreamStreamHandler(upstreamURL, &http.Client{Timeout: 2 * time.Second})
+	if err != nil {
+		t.Fatalf("create upstream stream handler: %v", err)
+	}
+	return handler
 }
 
 func TestServer_RegisterPersistsAcrossRestart(t *testing.T) {
@@ -261,13 +272,13 @@ func TestServer_ForwardsThroughAgentTunnel(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	agent := &Agent{
-		GatewayURL:  "http://" + srv.Addr(),
-		UpstreamURL: upstream.URL,
-		Label:       "alpha",
-		Project:     "Foo Corp",
-		Slug:        "main",
-		AgentID:     "agent-1",
+	agent := &agentpkg.Agent{
+		GatewayURL:   "http://" + srv.Addr(),
+		HandleStream: upstreamHandleStream(t, upstream.URL),
+		Label:        "alpha",
+		Project:      "Foo Corp",
+		Slug:         "main",
+		AgentID:      "agent-1",
 	}
 	go func() {
 		_ = agent.Run(ctx)
@@ -324,13 +335,13 @@ func TestServer_ForwardsRedirectAndCookieHeadersWithoutFollowing(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	agent := &Agent{
-		GatewayURL:  "http://" + srv.Addr(),
-		UpstreamURL: upstream.URL,
-		Label:       "alpha",
-		Project:     "Foo Corp",
-		Slug:        "main",
-		AgentID:     "agent-1",
+	agent := &agentpkg.Agent{
+		GatewayURL:   "http://" + srv.Addr(),
+		HandleStream: upstreamHandleStream(t, upstream.URL),
+		Label:        "alpha",
+		Project:      "Foo Corp",
+		Slug:         "main",
+		AgentID:      "agent-1",
 	}
 	go func() {
 		_ = agent.Run(ctx)
@@ -403,13 +414,13 @@ func TestServer_ForwardsConcurrentRequestsOverSingleTunnel(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	agent := &Agent{
-		GatewayURL:  "http://" + srv.Addr(),
-		UpstreamURL: upstream.URL,
-		Label:       "alpha",
-		Project:     "Foo Corp",
-		Slug:        "main",
-		AgentID:     "agent-1",
+	agent := &agentpkg.Agent{
+		GatewayURL:   "http://" + srv.Addr(),
+		HandleStream: upstreamHandleStream(t, upstream.URL),
+		Label:        "alpha",
+		Project:      "Foo Corp",
+		Slug:         "main",
+		AgentID:      "agent-1",
 	}
 	go func() {
 		_ = agent.Run(ctx)
@@ -525,13 +536,13 @@ func TestServer_ForwardsWebsocketUpgradeOverTunnel(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	agent := &Agent{
-		GatewayURL:  "http://" + srv.Addr(),
-		UpstreamURL: upstream.URL,
-		Label:       "alpha",
-		Project:     "Foo Corp",
-		Slug:        "main",
-		AgentID:     "agent-1",
+	agent := &agentpkg.Agent{
+		GatewayURL:   "http://" + srv.Addr(),
+		HandleStream: upstreamHandleStream(t, upstream.URL),
+		Label:        "alpha",
+		Project:      "Foo Corp",
+		Slug:         "main",
+		AgentID:      "agent-1",
 	}
 	go func() {
 		_ = agent.Run(ctx)
@@ -644,14 +655,14 @@ func TestServer_LogsPublicRequestMetadata(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	agent := &Agent{
-		GatewayURL:  "http://" + srv.Addr(),
-		UpstreamURL: upstream.URL,
-		Label:       "alpha",
-		Project:     "Foo Corp",
-		Slug:        "main",
-		AgentID:     "agent-1",
-		Name:        "stephen",
+	agent := &agentpkg.Agent{
+		GatewayURL:   "http://" + srv.Addr(),
+		HandleStream: upstreamHandleStream(t, upstream.URL),
+		Label:        "alpha",
+		Project:      "Foo Corp",
+		Slug:         "main",
+		AgentID:      "agent-1",
+		Name:         "stephen",
 	}
 	go func() {
 		_ = agent.Run(ctx)

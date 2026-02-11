@@ -1,4 +1,4 @@
-package daemon
+package agent
 
 import (
 	"fmt"
@@ -12,7 +12,11 @@ import (
 	"unicode/utf8"
 )
 
-const gatewayTranscriptExchangeDelimiterPrefix = "===== END EXCHANGE"
+const GatewayTranscriptExchangeDelimiterPrefix = "===== END EXCHANGE"
+
+func WriteGatewayHTTPTranscript(worktreePath, transcriptPath string, req *http.Request, reqBody []byte, resp *http.Response, respBody []byte) error {
+	return writeGatewayHTTPTranscript(worktreePath, transcriptPath, req, reqBody, resp, respBody)
+}
 
 func writeGatewayHTTPTranscript(worktreePath, transcriptPath string, req *http.Request, reqBody []byte, resp *http.Response, respBody []byte) error {
 	path, err := resolveGatewayTranscriptPath(worktreePath, transcriptPath)
@@ -81,7 +85,7 @@ func formatGatewayHTTPTranscript(req *http.Request, reqBody []byte, resp *http.R
 }
 
 func formatGatewayTranscriptExchangeDelimiter(at time.Time) string {
-	return fmt.Sprintf("%s %s =====", gatewayTranscriptExchangeDelimiterPrefix, at.Format(time.RFC3339))
+	return fmt.Sprintf("%s %s =====", GatewayTranscriptExchangeDelimiterPrefix, at.Format(time.RFC3339))
 }
 
 func writeRequestHeaders(b *strings.Builder, host string, header http.Header) {

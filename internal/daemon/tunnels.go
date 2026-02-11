@@ -1,18 +1,12 @@
 package daemon
 
 import (
-	"crypto/tls"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
-	"time"
 
 	"dev/internal/agent"
-	"dev/internal/gateway"
+	"dev/internal/config"
 	"dev/internal/worktree"
 )
 
@@ -30,12 +24,6 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 	if (req.AuthUsername == "") != (req.AuthPassword == "") {
 		return nil, errors.New("auth_username and auth_password must both be set")
 	}
-	if strings.TrimSpace(req.Upstream) == "" {
-		req.Upstream = s.localProxyUpstreamURL()
-	}
-	if req.Upstream == "" {
-		return nil, errors.New("no proxy upstream available")
-	}
 
 	localBaseHost, err := s.resolveTunnelLocalBaseHost(req.Slug)
 	if err != nil {
@@ -43,6 +31,10 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 	}
 
 	gatewayURL := strings.TrimSpace(req.GatewayURL)
+	credentialDir, err := config.ResolveGatewayCredentialDirForURL(s.daemonConfig, gatewayURL)
+	if err != nil {
+		return nil, err
+	}
 	s.tunnelMu.Lock()
 	defer s.tunnelMu.Unlock()
 	if s.agents == nil {
@@ -64,13 +56,8 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 	}
 	conn, ok := s.agents[gatewayURL]
 	if !ok || conn == nil {
-		conn = agent.NewConnection(gatewayURL)
+		conn = agent.NewConnection(gatewayURL, credentialDir)
 		s.agents[gatewayURL] = conn
-	}
-
-	gatewayClient, gatewayTLS, err := gateway.MTLSClientForGatewayURL(req.GatewayURL, s.daemonConfig)
-	if err != nil {
-		return nil, err
 	}
 	opened, err := conn.Open(agent.TunnelSpec{
 		Slug:          req.Slug,
@@ -78,11 +65,10 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 		GatewayURL:    req.GatewayURL,
 		Project:       req.Project,
 		Name:          req.Name,
-		UpstreamURL:   req.Upstream,
 		LocalBaseHost: localBaseHost,
 		AuthUsername:  req.AuthUsername,
 		AuthPassword:  req.AuthPassword,
-	}, gatewayClient, gatewayTLS, tunnelHTTPClient(req.Upstream))
+	}, s.handleTunnelAgentRequest)
 	if err != nil {
 		if conn.Empty() {
 			delete(s.agents, gatewayURL)
@@ -91,20 +77,6 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 	}
 	resp := toDaemonTunnelStatus(opened)
 	return &resp, nil
-}
-
-func tunnelHTTPClient(upstream string) *http.Client {
-	u, err := url.Parse(upstream)
-	if err != nil {
-		return nil
-	}
-	if u.Scheme != "https" {
-		return nil
-	}
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // local daemon->proxy TLS only
-	}
-	return &http.Client{Transport: transport, Timeout: 30 * time.Second}
 }
 
 func (s *Server) closeTunnel(req TunnelRequest) (*TunnelStatus, error) {
@@ -180,7 +152,6 @@ func (s *Server) runningTunnelsForResume() []TunnelRequest {
 				GatewayURL:   spec.GatewayURL,
 				Project:      spec.Project,
 				Name:         spec.Name,
-				Upstream:     spec.UpstreamURL,
 				AuthUsername: spec.AuthUsername,
 				AuthPassword: spec.AuthPassword,
 			}
@@ -224,34 +195,4 @@ func toDaemonTunnelStatus(status agent.TunnelStatus) TunnelStatus {
 		RegisterStage:   status.RegisterStage,
 		RegisterMessage: status.RegisterMessage,
 	}
-}
-
-func (s *Server) localProxyUpstreamURL() string {
-	httpAddr, httpsAddr := proxyListenAddrs(s.daemonConfig)
-	if httpsAddr != "" {
-		if addr, ok := loopbackAddr(httpsAddr); ok {
-			return "https://" + addr
-		}
-	}
-	if httpAddr != "" {
-		if addr, ok := loopbackAddr(httpAddr); ok {
-			return "http://" + addr
-		}
-	}
-	return ""
-}
-
-func loopbackAddr(addr string) (string, bool) {
-	if strings.HasPrefix(addr, ":") {
-		return "127.0.0.1" + addr, true
-	}
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return "", false
-	}
-	if _, err := strconv.Atoi(port); err != nil {
-		return "", false
-	}
-	_ = host
-	return net.JoinHostPort("127.0.0.1", port), true
 }

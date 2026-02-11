@@ -1,4 +1,4 @@
-package daemon
+package agent
 
 import (
 	"bytes"
@@ -13,6 +13,34 @@ import (
 )
 
 const maxRewriteBodyBytes = 5 << 20 // 5 MiB
+
+func RewriteLocationForTunnel(value, localHost, publicHost, localApex, publicApex string) (string, bool) {
+	return rewriteLocationForTunnel(value, localHost, publicHost, localApex, publicApex)
+}
+
+func RewriteSetCookieDomainForTunnel(header http.Header, localHost, publicHost, localApex, publicApex string) {
+	rewriteSetCookieDomainForTunnel(header, localHost, publicHost, localApex, publicApex)
+}
+
+func RewriteRequestCookieDomainForTunnel(header http.Header, publicHost, localHost, publicApex, localApex string) {
+	rewriteRequestCookieDomainForTunnel(header, publicHost, localHost, publicApex, localApex)
+}
+
+func RewriteRequestOriginForTunnel(header http.Header, publicHost, localHost, publicApex, localApex string) {
+	rewriteRequestOriginForTunnel(header, publicHost, localHost, publicApex, localApex)
+}
+
+func ReplaceHostLocalToPublic(hostPort, localHost, publicHost, localApex, publicApex string) (string, bool) {
+	return replaceHostLocalToPublic(hostPort, localHost, publicHost, localApex, publicApex)
+}
+
+func DerivePublicApex(localHost, publicHost, localApex string) (string, bool) {
+	return derivePublicApex(localHost, publicHost, localApex)
+}
+
+func RewriteResponseBody(resp *http.Response, localHost, publicHost string) error {
+	return rewriteResponseBody(resp, localHost, publicHost)
+}
 
 func rewriteLocation(value, localApex, publicApex string) (string, bool) {
 	parsed, err := url.Parse(value)
@@ -594,4 +622,12 @@ func stripStrongETag(header http.Header) {
 		return
 	}
 	header.Del("ETag")
+}
+
+func normalizeProxyHost(host string) string {
+	host = strings.TrimSpace(strings.ToLower(host))
+	if strings.Contains(host, ":") {
+		host, _, _ = strings.Cut(host, ":")
+	}
+	return strings.TrimSuffix(host, ".")
 }

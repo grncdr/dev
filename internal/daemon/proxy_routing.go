@@ -8,7 +8,6 @@ import (
 
 	"dev/internal/agent"
 	"dev/internal/config"
-	"dev/internal/router"
 	"dev/internal/worktree"
 )
 
@@ -17,8 +16,6 @@ type tunnelProxyRoute struct {
 	AuthUsername string
 	AuthPassword string
 }
-
-var errGatewayProcessNotExposed = router.ErrGatewayProcessNotExposed
 
 func (s *Server) parseProxyHost(host string) (slug, subdomain string, err error) {
 	apex := strings.TrimPrefix(strings.ToLower(s.projectApexZone()), ".")
@@ -154,43 +151,6 @@ func sameResolvedPath(a, b string) bool {
 		return true
 	}
 	return filepath.Clean(resolvedA) == filepath.Clean(resolvedB)
-}
-
-func (s *Server) resolveProxyTarget(host, path string) (network string, address string, process string, gatewayMode string, gatewayDebugLog string, targetSlug string, targetPath string, err error) {
-	return s.resolveProxyTargetForRequest(host, path, false)
-}
-
-func (s *Server) resolveProxyTargetForRequest(host, path string, fromGateway bool) (network string, address string, process string, gatewayMode string, gatewayDebugLog string, targetSlug string, targetPath string, err error) {
-	if s.manager == nil || s.manager.router == nil {
-		return "", "", "", "", "", "", "", errors.New("proxy router unavailable")
-	}
-	resolved, err := s.manager.router.Resolve(host, path, fromGateway)
-	if err != nil {
-		return "", "", "", "", "", "", "", err
-	}
-
-	targetSlug = resolved.Slug
-	targetPath = resolved.RepoPath
-	if resolved.Singleton {
-		mainSlug, err := resolveMainWorktreeSlug(resolved.RepoPath)
-		if err != nil {
-			return "", "", "", "", "", "", "", err
-		}
-		targetSlug = mainSlug
-		mainPath, err := worktree.ResolveMainPathInDir(resolved.RepoPath)
-		if err != nil {
-			return "", "", "", "", "", "", "", err
-		}
-		targetPath = mainPath
-	}
-
-	s.manager.beginProxySessionFromDir(targetSlug, targetPath, resolved.Process)
-	network, address, err = s.manager.EnsureProcessForTargetFromDir(targetSlug, targetPath, resolved.Process)
-	if err != nil {
-		s.manager.endProxySessionFromDir(targetSlug, targetPath, resolved.Process)
-		return "", "", "", "", "", "", "", err
-	}
-	return network, address, resolved.Process, resolved.GatewayMode, resolved.GatewayDebugLog, targetSlug, targetPath, nil
 }
 
 func (s *Server) isLocalProxyHost(host string) bool {

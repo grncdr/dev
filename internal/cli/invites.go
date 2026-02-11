@@ -13,7 +13,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"dev/internal/gateway"
+	"dev/internal/agent"
+	"dev/internal/config"
 )
 
 func newGatewayInviteCmd(opts *Options) *cobra.Command {
@@ -44,7 +45,18 @@ func runInviteCreate(opts *Options, gatewayURL string, ttl time.Duration, uses i
 		return err
 	}
 
-	client, _, err := gateway.MTLSClientForGatewayURL(gatewayURL, daemonCfg)
+	credentialDir := ""
+	parsedGatewayURL, err := url.Parse(gatewayURL)
+	if err != nil {
+		return err
+	}
+	if strings.EqualFold(parsedGatewayURL.Scheme, "https") {
+		credentialDir, err = config.ResolveGatewayCredentialDirForURL(daemonCfg, gatewayURL)
+		if err != nil {
+			return err
+		}
+	}
+	client, _, err := agent.MTLSClientForGatewayURL(gatewayURL, credentialDir)
 	if err != nil {
 		return err
 	}

@@ -12,7 +12,6 @@ func ParseMatchers(cfg *config.ProjectConfig) []Matcher {
 		return nil
 	}
 	matchers := []Matcher{}
-	gatewayRules := config.GatewayExposeRules(cfg)
 	for name, proc := range cfg.Processes {
 		rawProxy, ok := proc["proxy"]
 		if !ok || rawProxy == nil {
@@ -22,28 +21,22 @@ func ParseMatchers(cfg *config.ProjectConfig) []Matcher {
 		if rawSingleton, ok := proc["singleton"].(bool); ok {
 			singleton = rawSingleton
 		}
-		gatewayMode := config.GatewayModeDisable
-		gatewayDebugLog := ""
-		if exposedRule, ok := gatewayRules[name]; ok {
-			gatewayMode = exposedRule.Mode
-			gatewayDebugLog = exposedRule.DebugLog
-		}
-		matchers = append(matchers, parseMatchers(name, rawProxy, singleton, gatewayMode, gatewayDebugLog)...)
+		matchers = append(matchers, parseMatchers(name, rawProxy, singleton)...)
 	}
 	return matchers
 }
 
-func parseMatchers(process string, raw any, singleton bool, gatewayMode string, gatewayDebugLog string) []Matcher {
+func parseMatchers(process string, raw any, singleton bool) []Matcher {
 	raw = normalizeProxyConfigValue(raw)
 	switch typed := raw.(type) {
 	case []any:
 		out := []Matcher{}
 		for _, item := range typed {
-			out = append(out, parseMatchers(process, item, singleton, gatewayMode, gatewayDebugLog)...)
+			out = append(out, parseMatchers(process, item, singleton)...)
 		}
 		return out
 	case map[string]any:
-		return parseMatchersFromMap(process, typed, singleton, gatewayMode, gatewayDebugLog)
+		return parseMatchersFromMap(process, typed, singleton)
 	default:
 		return nil
 	}
@@ -75,7 +68,7 @@ func normalizeProxyConfigValue(raw any) any {
 	}
 }
 
-func parseMatchersFromMap(process string, raw map[string]any, singleton bool, gatewayMode string, gatewayDebugLog string) []Matcher {
+func parseMatchersFromMap(process string, raw map[string]any, singleton bool) []Matcher {
 	subdomains := parseSubdomainValues(raw["subdomain"], raw["subdomains"])
 	if len(subdomains) == 0 {
 		return nil
@@ -96,17 +89,14 @@ func parseMatchersFromMap(process string, raw map[string]any, singleton bool, ga
 	out := make([]Matcher, 0, len(subdomains))
 	for _, sd := range subdomains {
 		out = append(out, Matcher{
-			Process:         process,
-			Subdomain:       sd.subdomain,
-			Kind:            sd.kind,
-			Path:            path,
-			Match:           match,
-			GatewayMode:     gatewayMode,
-			GatewayDebugLog: gatewayDebugLog,
-			GatewayExposed:  gatewayMode != config.GatewayModeDisable,
-			Priority:        priority,
-			TCPListen:       tcpListen,
-			Singleton:       singleton,
+			Process:   process,
+			Subdomain: sd.subdomain,
+			Kind:      sd.kind,
+			Path:      path,
+			Match:     match,
+			Priority:  priority,
+			TCPListen: tcpListen,
+			Singleton: singleton,
 		})
 	}
 	return out

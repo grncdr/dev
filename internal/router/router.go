@@ -9,10 +9,10 @@ import (
 )
 
 var (
-	ErrGatewayProcessNotExposed = errors.New("gateway traffic not exposed for matched process")
-	ErrNoProxyMatcherMatched    = errors.New("no proxy matcher matched")
-	ErrNoWorktreesAvailable     = errors.New("no worktrees available for proxy routing")
-	ErrHostNotMapped            = errors.New("host does not map to a known worktree")
+	ErrNoProxyMatcherMatched = errors.New("no proxy matcher matched")
+	ErrNoWorktreesAvailable  = errors.New("no worktrees available for proxy routing")
+	ErrHostNotMapped         = errors.New("host does not map to a known worktree")
+	ErrWorktreeNotMapped     = errors.New("worktree does not map to a known route")
 )
 
 type SubdomainKind int
@@ -24,17 +24,14 @@ const (
 )
 
 type Matcher struct {
-	Process         string
-	Subdomain       string
-	Kind            SubdomainKind
-	Path            string
-	Match           string
-	GatewayMode     string
-	GatewayDebugLog string
-	GatewayExposed  bool
-	Priority        int
-	TCPListen       int
-	Singleton       bool
+	Process   string
+	Subdomain string
+	Kind      SubdomainKind
+	Path      string
+	Match     string
+	Priority  int
+	TCPListen int
+	Singleton bool
 }
 
 type WorktreeInput struct {
@@ -43,16 +40,6 @@ type WorktreeInput struct {
 	RepoPath   string
 	Labels     []string
 	Matchers   []Matcher
-}
-
-type Result struct {
-	RuntimeKey      string
-	Slug            string
-	RepoPath        string
-	Process         string
-	GatewayMode     string
-	GatewayDebugLog string
-	Singleton       bool
 }
 
 type worktreeRoute struct {
@@ -124,16 +111,16 @@ func (r *Router) RemoveWorktree(runtimeKey string) {
 	r.removeFromLabelIndexLocked(route.labels, key)
 }
 
-func (r *Router) Resolve(host, path string, fromGateway bool) (Result, error) {
+func (r *Router) Resolve(host, path string) (string, *Matcher, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	if len(r.worktrees) == 0 {
-		return Result{}, ErrNoWorktreesAvailable
+		return "", nil, ErrNoWorktreesAvailable
 	}
 	labels, err := parseHostLabels(host, r.apexZone)
 	if err != nil {
-		return Result{}, err
+		return "", nil, err
 	}
 
 	var selected worktreeRoute
@@ -146,7 +133,7 @@ func (r *Router) Resolve(host, path string, fromGateway bool) (Result, error) {
 			continue
 		}
 		if len(keys) > 1 {
-			return Result{}, r.ambiguousLabelErr(label, keys)
+			return "", nil, r.ambiguousLabelErr(label, keys)
 		}
 		var key string
 		for candidate := range keys {
@@ -162,26 +149,37 @@ func (r *Router) Resolve(host, path string, fromGateway bool) (Result, error) {
 		break
 	}
 	if !found {
-		return Result{}, ErrHostNotMapped
+		return "", nil, ErrHostNotMapped
 	}
 
-	best, ok := SelectMatcher(selected.matchers, subdomain, path)
+	matcher, err := resolveFromRoute(selected, subdomain, path)
+	if err != nil {
+		return "", nil, err
+	}
+	return selected.runtimeKey, matcher, nil
+}
+
+func (r *Router) ResolveWithinWorktree(runtimeKey, host, path string) (*Matcher, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if len(r.worktrees) == 0 {
+		return nil, ErrNoWorktreesAvailable
+	}
+	key := strings.TrimSpace(runtimeKey)
+	route, ok := r.worktrees[key]
 	if !ok {
-		return Result{}, ErrNoProxyMatcherMatched
+		return nil, ErrWorktreeNotMapped
 	}
-	if fromGateway && !best.GatewayExposed {
-		return Result{}, ErrGatewayProcessNotExposed
+	labels, err := parseHostLabels(host, r.apexZone)
+	if err != nil {
+		return nil, err
 	}
-
-	return Result{
-		RuntimeKey:      selected.runtimeKey,
-		Slug:            selected.slug,
-		RepoPath:        selected.repoPath,
-		Process:         best.Process,
-		GatewayMode:     best.GatewayMode,
-		GatewayDebugLog: best.GatewayDebugLog,
-		Singleton:       best.Singleton,
-	}, nil
+	subdomain, ok := subdomainForRouteLabels(labels, route.labels)
+	if !ok {
+		return nil, ErrHostNotMapped
+	}
+	return resolveFromRoute(route, subdomain, path)
 }
 
 func (r *Router) ambiguousLabelErr(label string, keys map[string]struct{}) error {
@@ -273,6 +271,33 @@ func normalizeLabels(labels []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func subdomainForRouteLabels(hostLabels, routeLabels []string) (string, bool) {
+	if len(hostLabels) == 0 || len(routeLabels) == 0 {
+		return "", false
+	}
+	routeSet := make(map[string]struct{}, len(routeLabels))
+	for _, label := range routeLabels {
+		routeSet[label] = struct{}{}
+	}
+	for i := 0; i < len(hostLabels); i++ {
+		label := strings.Join(hostLabels[i:], ".")
+		if _, ok := routeSet[label]; !ok {
+			continue
+		}
+		return strings.Join(hostLabels[:i], "."), true
+	}
+	return "", false
+}
+
+func resolveFromRoute(route worktreeRoute, subdomain, path string) (*Matcher, error) {
+	best, ok := SelectMatcher(route.matchers, subdomain, path)
+	if !ok {
+		return nil, ErrNoProxyMatcherMatched
+	}
+	matched := *best
+	return &matched, nil
 }
 
 func SelectMatcher(matchers []Matcher, subdomain, path string) (*Matcher, bool) {

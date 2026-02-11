@@ -1,5 +1,7 @@
 package daemon
 
+import "dev/internal/agent"
+
 type HealthResponse struct {
 	Status string `json:"status"`
 	PID    int    `json:"pid"`
@@ -19,7 +21,6 @@ type TunnelRequest struct {
 	GatewayURL   string `json:"gateway_url,omitempty"`
 	Project      string `json:"project,omitempty"`
 	Name         string `json:"name,omitempty"`
-	Upstream     string `json:"upstream,omitempty"`
 	AuthUsername string `json:"auth_username,omitempty"`
 	AuthPassword string `json:"auth_password,omitempty"`
 }
@@ -39,3 +40,5 @@ type TunnelStatus struct {
 type TunnelsResponse struct {
 	Tunnels []TunnelStatus `json:"tunnels"`
 }
+
+type ProxyTarget = agent.ProxyTarget

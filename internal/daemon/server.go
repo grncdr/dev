@@ -403,10 +403,11 @@ func (s *Server) loadConfig() error {
 				dnsLabel := worktree.ProxyDNSLabelForSlug(s.config, mainSlug)
 				s.manager.mu.Lock()
 				s.manager.registerWorktreeLocked(runtimeKey, runtimeWorktree{
-					Slug:     mainSlug,
-					Project:  projectID,
-					Path:     s.mainPath,
-					DNSLabel: dnsLabel,
+					Slug:          mainSlug,
+					Project:       projectID,
+					Path:          s.mainPath,
+					DNSLabel:      dnsLabel,
+					GatewayExpose: gatewayExposeRulesForConfig(s.config),
 				})
 				s.manager.mu.Unlock()
 			}

@@ -1,10 +1,12 @@
 package daemon
 
 import (
+	"errors"
 	"testing"
 
 	"dev/internal/agent"
 	"dev/internal/config"
+	"dev/internal/router"
 	"dev/internal/worktree"
 )
 
@@ -50,7 +52,7 @@ func seededAgentsForTunnels(tunnels map[string]*managedTunnel) map[string]*agent
 		}
 		conn, ok := agents[gatewayURL]
 		if !ok || conn == nil {
-			conn = agent.NewConnection(gatewayURL)
+			conn = agent.NewConnection(gatewayURL, "")
 			agents[gatewayURL] = conn
 		}
 		conn.SeedTunnel(agent.TunnelStatus{
@@ -68,4 +70,43 @@ func seededAgentsForTunnels(tunnels map[string]*managedTunnel) map[string]*agent
 		})
 	}
 	return agents
+}
+
+func resolveProxyTargetForTest(s *Server, host, path string, fromGateway bool) (network string, address string, process string, gatewayMode string, gatewayDebugLog string, targetSlug string, targetPath string, err error) {
+	if s.manager == nil || s.manager.router == nil {
+		return "", "", "", "", "", "", "", errors.New("proxy router unavailable")
+	}
+	runtimeKey, matcher, err := s.manager.router.Resolve(host, path)
+	if err != nil {
+		return "", "", "", "", "", "", "", err
+	}
+	rule := s.manager.gatewayExposeRuleForRuntimeProcess(runtimeKey, matcher.Process)
+	if fromGateway && rule.Mode == config.GatewayModeDisable {
+		return "", "", "", "", "", "", "", errGatewayProcessNotExposed
+	}
+	wt, ok := s.manager.WorktreeByRuntimeKey(runtimeKey)
+	if !ok {
+		return "", "", "", "", "", "", "", router.ErrWorktreeNotMapped
+	}
+	targetSlug = wt.Slug
+	targetPath = wt.Path
+	if matcher.Singleton {
+		mainSlug, err := resolveMainWorktreeSlug(targetPath)
+		if err != nil {
+			return "", "", "", "", "", "", "", err
+		}
+		mainPath, err := worktree.ResolveMainPathInDir(targetPath)
+		if err != nil {
+			return "", "", "", "", "", "", "", err
+		}
+		targetSlug = mainSlug
+		targetPath = mainPath
+	}
+	s.manager.beginProxySessionFromDir(targetSlug, targetPath, matcher.Process)
+	network, address, err = s.manager.EnsureProcessForTargetFromDir(targetSlug, targetPath, matcher.Process)
+	if err != nil {
+		s.manager.endProxySessionFromDir(targetSlug, targetPath, matcher.Process)
+		return "", "", "", "", "", "", "", err
+	}
+	return network, address, matcher.Process, rule.Mode, rule.DebugLog, targetSlug, targetPath, nil
 }

@@ -2,15 +2,13 @@ package agent
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
-
-	"dev/internal/gateway"
 )
 
 type TunnelSpec struct {
@@ -19,7 +17,6 @@ type TunnelSpec struct {
 	GatewayURL    string
 	Project       string
 	Name          string
-	UpstreamURL   string
 	LocalBaseHost string
 	AuthUsername  string
 	AuthPassword  string
@@ -51,15 +48,19 @@ type tunnelRuntime struct {
 }
 
 type Connection struct {
-	gatewayURL string
-	mu         sync.Mutex
-	tunnels    map[string]*tunnelRuntime // label -> runtime
+	gatewayURL    string
+	credentialDir string
+	mu            sync.Mutex
+	tunnels       map[string]*tunnelRuntime // label -> runtime
 }
 
-func NewConnection(gatewayURL string) *Connection {
+type TunnelRequestHandler func(context.Context, TunnelStatus, *http.Request, net.Conn) error
+
+func NewConnection(gatewayURL, credentialDir string) *Connection {
 	return &Connection{
-		gatewayURL: strings.TrimSpace(gatewayURL),
-		tunnels:    map[string]*tunnelRuntime{},
+		gatewayURL:    strings.TrimSpace(gatewayURL),
+		credentialDir: strings.TrimSpace(credentialDir),
+		tunnels:       map[string]*tunnelRuntime{},
 	}
 }
 
@@ -67,16 +68,23 @@ func (c *Connection) GatewayURL() string {
 	return c.gatewayURL
 }
 
-func (c *Connection) Open(spec TunnelSpec, gatewayClient *http.Client, gatewayTLS *tls.Config, upstreamClient *http.Client) (TunnelStatus, error) {
+func (c *Connection) Open(spec TunnelSpec, requestHandler TunnelRequestHandler) (TunnelStatus, error) {
 	spec.Label = strings.TrimSpace(spec.Label)
 	spec.Slug = strings.TrimSpace(spec.Slug)
 	spec.GatewayURL = strings.TrimSpace(spec.GatewayURL)
 	spec.LocalBaseHost = strings.TrimSpace(strings.ToLower(spec.LocalBaseHost))
-	if spec.Label == "" || spec.Slug == "" || spec.GatewayURL == "" || spec.UpstreamURL == "" {
+	if spec.Label == "" || spec.Slug == "" || spec.GatewayURL == "" {
 		return TunnelStatus{}, errors.New("invalid tunnel spec")
+	}
+	if requestHandler == nil {
+		return TunnelStatus{}, errors.New("tunnel request handler is required")
 	}
 	if spec.GatewayURL != c.gatewayURL {
 		return TunnelStatus{}, fmt.Errorf("gateway url mismatch: %s != %s", spec.GatewayURL, c.gatewayURL)
+	}
+	gatewayClient, gatewayTLS, err := MTLSClientForGatewayURL(spec.GatewayURL, c.credentialDir)
+	if err != nil {
+		return TunnelStatus{}, err
 	}
 
 	c.mu.Lock()
@@ -100,18 +108,26 @@ func (c *Connection) Open(spec TunnelSpec, gatewayClient *http.Client, gatewayTL
 	c.tunnels[spec.Label] = rt
 	c.mu.Unlock()
 
-	agent := &gateway.Agent{
-		GatewayURL:     spec.GatewayURL,
-		UpstreamURL:    spec.UpstreamURL,
-		Project:        spec.Project,
-		Slug:           spec.Slug,
-		Label:          spec.Label,
-		AgentID:        fmt.Sprintf("dev-%d", time.Now().UnixNano()),
-		Name:           spec.Name,
-		RetryDelay:     500 * time.Millisecond,
-		GatewayClient:  gatewayClient,
-		TLSConfig:      gatewayTLS,
-		UpstreamClient: upstreamClient,
+	runner := &Agent{
+		GatewayURL:    spec.GatewayURL,
+		Project:       spec.Project,
+		Slug:          spec.Slug,
+		Label:         spec.Label,
+		AgentID:       fmt.Sprintf("dev-%d", time.Now().UnixNano()),
+		Name:          spec.Name,
+		RetryDelay:    500 * time.Millisecond,
+		GatewayClient: gatewayClient,
+		TLSConfig:     gatewayTLS,
+		HandleStream: func(ctx context.Context, req *http.Request, stream net.Conn) error {
+			c.mu.Lock()
+			rt := c.tunnels[spec.Label]
+			var status TunnelStatus
+			if rt != nil {
+				status = c.toStatusLocked(rt)
+			}
+			c.mu.Unlock()
+			return requestHandler(ctx, status, req, stream)
+		},
 		OnConnected: func() {
 			c.mu.Lock()
 			defer c.mu.Unlock()
@@ -150,7 +166,7 @@ func (c *Connection) Open(spec TunnelSpec, gatewayClient *http.Client, gatewayTL
 	}
 
 	go func() {
-		err := agent.Run(ctx)
+		err := runner.Run(ctx)
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		cur, ok := c.tunnels[spec.Label]

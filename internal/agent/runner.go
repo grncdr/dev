@@ -1,4 +1,4 @@
-package gateway
+package agent
 
 import (
 	"bufio"
@@ -16,12 +16,13 @@ import (
 	"strings"
 	"time"
 
+	"dev/internal/gatewayproto"
 	"dev/internal/tunnelmux"
+	"dev/internal/utils"
 )
 
 type Agent struct {
 	GatewayURL         string
-	UpstreamURL        string
 	Project            string
 	Slug               string
 	Label              string
@@ -30,8 +31,8 @@ type Agent struct {
 	RetryDelay         time.Duration
 	HTTPClient         *http.Client
 	GatewayClient      *http.Client
-	UpstreamClient     *http.Client
 	TLSConfig          *tls.Config
+	HandleStream       func(context.Context, *http.Request, net.Conn) error
 	OnConnected        func()
 	OnDisconnected     func(error)
 	OnRegistered       func(publicHost string)
@@ -44,8 +45,11 @@ const (
 )
 
 func (a *Agent) Run(ctx context.Context) error {
-	if a.GatewayURL == "" || a.UpstreamURL == "" || a.Label == "" {
-		return errors.New("gateway_url, upstream_url, and label are required")
+	if a.GatewayURL == "" || a.Label == "" {
+		return errors.New("gateway_url and label are required")
+	}
+	if a.HandleStream == nil {
+		return errors.New("handle_stream is required")
 	}
 	if a.RetryDelay <= 0 {
 		a.RetryDelay = 500 * time.Millisecond
@@ -85,18 +89,6 @@ func (a *Agent) runOnce(ctx context.Context) (runErr error) {
 		a.OnConnected()
 	}
 
-	upstreamURL, err := url.Parse(a.UpstreamURL)
-	if err != nil {
-		return err
-	}
-	client := a.HTTPClient
-	if a.UpstreamClient != nil {
-		client = a.UpstreamClient
-	}
-	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
-	}
-
 	for {
 		stream, err := session.AcceptStream()
 		if err != nil {
@@ -105,128 +97,25 @@ func (a *Agent) runOnce(ctx context.Context) (runErr error) {
 			}
 			return err
 		}
-		go a.handleStream(ctx, client, upstreamURL, stream)
+		go a.handleStream(ctx, stream)
 	}
 }
 
-func (a *Agent) handleStream(ctx context.Context, client *http.Client, upstreamURL *url.URL, stream net.Conn) {
+func (a *Agent) handleStream(ctx context.Context, stream net.Conn) {
 	defer stream.Close()
 	req, err := http.ReadRequest(bufio.NewReader(stream))
 	if err != nil {
 		_ = writeGatewayErrorResponse(stream, http.StatusBadGateway, err)
 		return
 	}
-	outReq, err := rewriteForUpstream(req, upstreamURL)
-	if err != nil {
+	if err := a.HandleStream(ctx, req.WithContext(ctx), stream); err != nil {
+		log.Printf("agent: stream handling failed: %v", err)
 		_ = writeGatewayErrorResponse(stream, http.StatusBadGateway, err)
-		return
 	}
-	if isUpgradeRequest(outReq) {
-		if err := forwardUpgradeToUpstream(outReq.WithContext(ctx), upstreamURL, stream, client); err != nil {
-			log.Printf("gateway agent: upgrade forward failed: %v", err)
-			_ = writeGatewayErrorResponse(stream, http.StatusBadGateway, err)
-		}
-		return
-	}
-	resp, err := doUpstreamRequest(client, outReq.WithContext(ctx))
-	if err != nil {
-		_ = writeGatewayErrorResponse(stream, http.StatusBadGateway, err)
-		return
-	}
-	defer resp.Body.Close()
-	_ = resp.Write(stream)
-}
-
-func forwardUpgradeToUpstream(req *http.Request, upstreamURL *url.URL, stream net.Conn, client *http.Client) error {
-	upstreamConn, err := dialUpgradeUpstream(upstreamURL, client)
-	if err != nil {
-		return err
-	}
-	defer upstreamConn.Close()
-
-	if err := req.Write(upstreamConn); err != nil {
-		return err
-	}
-	upstreamReader := bufio.NewReader(upstreamConn)
-	resp, err := http.ReadResponse(upstreamReader, req)
-	if err != nil {
-		return err
-	}
-	if err := resp.Write(stream); err != nil {
-		_ = resp.Body.Close()
-		return err
-	}
-	if resp.StatusCode != http.StatusSwitchingProtocols {
-		defer resp.Body.Close()
-		_, err := io.Copy(stream, resp.Body)
-		return err
-	}
-	return proxyBidirectional(stream, nil, upstreamConn, upstreamReader)
-}
-
-func dialUpgradeUpstream(upstreamURL *url.URL, client *http.Client) (net.Conn, error) {
-	if upstreamURL == nil {
-		return nil, errors.New("upstream URL is required")
-	}
-	address := upstreamURL.Host
-	if !strings.Contains(address, ":") {
-		switch strings.ToLower(upstreamURL.Scheme) {
-		case "https":
-			address += ":443"
-		default:
-			address += ":80"
-		}
-	}
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	switch strings.ToLower(upstreamURL.Scheme) {
-	case "https":
-		tlsCfg := tlsConfigForUpstreamDial(client, upstreamURL.Hostname())
-		return tls.DialWithDialer(dialer, "tcp", address, tlsCfg)
-	case "http", "":
-		return dialer.Dial("tcp", address)
-	default:
-		return nil, fmt.Errorf("unsupported upstream scheme for upgrade: %s", upstreamURL.Scheme)
-	}
-}
-
-func tlsConfigForUpstreamDial(client *http.Client, host string) *tls.Config {
-	base := &tls.Config{
-		MinVersion: tls.VersionTLS12,
-		ServerName: host,
-	}
-	if client == nil {
-		return base
-	}
-	transport := client.Transport
-	if transport == nil {
-		return base
-	}
-	httpTransport, ok := transport.(*http.Transport)
-	if !ok || httpTransport.TLSClientConfig == nil {
-		return base
-	}
-	cloned := httpTransport.TLSClientConfig.Clone()
-	if cloned.ServerName == "" {
-		cloned.ServerName = host
-	}
-	if cloned.MinVersion == 0 {
-		cloned.MinVersion = tls.VersionTLS12
-	}
-	return cloned
-}
-
-func doUpstreamRequest(client *http.Client, req *http.Request) (*http.Response, error) {
-	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
-	}
-	// Tunnel forwarding must pass redirect responses through unchanged.
-	singleHop := *client
-	singleHop.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return singleHop.Do(req)
 }
 
 func (a *Agent) register(ctx context.Context) error {
-	payload := RegisterRequest{
+	payload := gatewayproto.RegisterRequest{
 		Project: a.Project,
 		Slug:    a.Slug,
 		Label:   a.Label,
@@ -266,10 +155,10 @@ func (a *Agent) register(ctx context.Context) error {
 		return fmt.Errorf("register failed: %s %s", resp.Status, strings.TrimSpace(string(b)))
 	}
 
-	var out registerResponse
+	var out gatewayproto.RegisterResponse
 	decoder := json.NewDecoder(resp.Body)
 	for {
-		var event registerResponse
+		var event gatewayproto.RegisterResponse
 		if err := decoder.Decode(&event); err != nil {
 			if errors.Is(err, io.EOF) {
 				break
@@ -286,7 +175,6 @@ func (a *Agent) register(ctx context.Context) error {
 		if event.Type == "result" {
 			break
 		}
-		// Backward-compatible handling for older non-streaming JSON responses.
 		if event.Status != "" || event.PublicHost != "" || event.Error != "" || event.Code != "" {
 			break
 		}
@@ -299,44 +187,6 @@ func (a *Agent) register(ctx context.Context) error {
 		a.OnRegistered(strings.TrimSpace(out.PublicHost))
 	}
 	return nil
-}
-
-type registerResponse struct {
-	Type           string `json:"type"`
-	Stage          string `json:"stage"`
-	Message        string `json:"message"`
-	Status         string `json:"status"`
-	Code           string `json:"code"`
-	Error          string `json:"error"`
-	PublicHost     string `json:"public_host"`
-	PublicHostname string `json:"public_hostname"`
-}
-
-func formatRegisterFailure(out registerResponse) string {
-	code := strings.TrimSpace(out.Code)
-	msg := strings.TrimSpace(out.Error)
-	switch {
-	case code != "" && msg != "":
-		return code + ": " + msg
-	case code != "":
-		return code
-	case msg != "":
-		return msg
-	default:
-		return "unknown register error"
-	}
-}
-
-func clientWithMinimumTimeout(client *http.Client, minTimeout time.Duration) *http.Client {
-	if client == nil {
-		return &http.Client{Timeout: minTimeout}
-	}
-	if client.Timeout >= minTimeout {
-		return client
-	}
-	clone := *client
-	clone.Timeout = minTimeout
-	return &clone
 }
 
 func (a *Agent) connectTunnel(ctx context.Context) (net.Conn, error) {
@@ -414,6 +264,121 @@ func (a *Agent) connectTunnel(ctx context.Context) (net.Conn, error) {
 	return conn, nil
 }
 
+func UpstreamStreamHandler(upstreamURL string, client *http.Client) (func(context.Context, *http.Request, net.Conn) error, error) {
+	parsed, err := url.Parse(strings.TrimSpace(upstreamURL))
+	if err != nil {
+		return nil, err
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return nil, errors.New("upstream URL must include scheme and host")
+	}
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	return func(ctx context.Context, req *http.Request, stream net.Conn) error {
+		outReq, err := rewriteForUpstream(req, parsed)
+		if err != nil {
+			return err
+		}
+		if isUpgradeRequest(outReq) {
+			return forwardUpgradeToUpstream(outReq.WithContext(ctx), parsed, stream, client)
+		}
+		resp, err := doUpstreamRequest(client, outReq.WithContext(ctx))
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		return resp.Write(stream)
+	}, nil
+}
+
+func forwardUpgradeToUpstream(req *http.Request, upstreamURL *url.URL, stream net.Conn, client *http.Client) error {
+	upstreamConn, err := dialUpgradeUpstream(upstreamURL, client)
+	if err != nil {
+		return err
+	}
+	defer upstreamConn.Close()
+
+	if err := req.Write(upstreamConn); err != nil {
+		return err
+	}
+	upstreamReader := bufio.NewReader(upstreamConn)
+	resp, err := http.ReadResponse(upstreamReader, req)
+	if err != nil {
+		return err
+	}
+	if err := resp.Write(stream); err != nil {
+		_ = resp.Body.Close()
+		return err
+	}
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		defer resp.Body.Close()
+		_, err := io.Copy(stream, resp.Body)
+		return err
+	}
+	return utils.ProxyBidirectional(stream, nil, upstreamConn, upstreamReader)
+}
+
+func dialUpgradeUpstream(upstreamURL *url.URL, client *http.Client) (net.Conn, error) {
+	if upstreamURL == nil {
+		return nil, errors.New("upstream URL is required")
+	}
+	address := upstreamURL.Host
+	if !strings.Contains(address, ":") {
+		switch strings.ToLower(upstreamURL.Scheme) {
+		case "https":
+			address += ":443"
+		default:
+			address += ":80"
+		}
+	}
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	switch strings.ToLower(upstreamURL.Scheme) {
+	case "https":
+		tlsCfg := tlsConfigForUpstreamDial(client, upstreamURL.Hostname())
+		return tls.DialWithDialer(dialer, "tcp", address, tlsCfg)
+	case "http", "":
+		return dialer.Dial("tcp", address)
+	default:
+		return nil, fmt.Errorf("unsupported upstream scheme for upgrade: %s", upstreamURL.Scheme)
+	}
+}
+
+func tlsConfigForUpstreamDial(client *http.Client, host string) *tls.Config {
+	base := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		ServerName: host,
+	}
+	if client == nil {
+		return base
+	}
+	transport := client.Transport
+	if transport == nil {
+		return base
+	}
+	httpTransport, ok := transport.(*http.Transport)
+	if !ok || httpTransport.TLSClientConfig == nil {
+		return base
+	}
+	cloned := httpTransport.TLSClientConfig.Clone()
+	if cloned.ServerName == "" {
+		cloned.ServerName = host
+	}
+	if cloned.MinVersion == 0 {
+		cloned.MinVersion = tls.VersionTLS12
+	}
+	return cloned
+}
+
+func doUpstreamRequest(client *http.Client, req *http.Request) (*http.Response, error) {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	singleHop := *client
+	singleHop.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return singleHop.Do(req)
+}
+
 func rewriteForUpstream(req *http.Request, upstream *url.URL) (*http.Request, error) {
 	out := req.Clone(req.Context())
 	out.URL.Scheme = upstream.Scheme
@@ -423,6 +388,11 @@ func rewriteForUpstream(req *http.Request, upstream *url.URL) (*http.Request, er
 		out.Host = upstream.Host
 	}
 	return out, nil
+}
+
+func isUpgradeRequest(r *http.Request) bool {
+	return strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade") &&
+		r.Header.Get("Upgrade") != ""
 }
 
 func writeGatewayErrorResponse(w io.Writer, status int, err error) error {
@@ -438,4 +408,31 @@ func writeGatewayErrorResponse(w io.Writer, status int, err error) error {
 	resp.Header.Set("Content-Type", "text/plain")
 	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(err.Error())))
 	return resp.Write(w)
+}
+
+func formatRegisterFailure(out gatewayproto.RegisterResponse) string {
+	code := strings.TrimSpace(out.Code)
+	msg := strings.TrimSpace(out.Error)
+	switch {
+	case code != "" && msg != "":
+		return code + ": " + msg
+	case code != "":
+		return code
+	case msg != "":
+		return msg
+	default:
+		return "unknown register error"
+	}
+}
+
+func clientWithMinimumTimeout(client *http.Client, minTimeout time.Duration) *http.Client {
+	if client == nil {
+		return &http.Client{Timeout: minTimeout}
+	}
+	if client.Timeout >= minTimeout {
+		return client
+	}
+	clone := *client
+	clone.Timeout = minTimeout
+	return &clone
 }
