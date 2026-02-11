@@ -234,10 +234,7 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 	gatewayAuthUsername := ""
 	gatewayAuthPassword := ""
 	if route, ok := s.localProxyRouteForTunnelRequest(host); ok {
-		routeHost = route.RouteHost
-		if strings.TrimSpace(routeHost) == "" {
-			routeHost = route.LocalHost
-		}
+		routeHost = route.LocalHost
 		rewriteLocalHost = route.LocalHost
 		isGatewayTunnel = true
 		gatewayAuthUsername = route.AuthUsername

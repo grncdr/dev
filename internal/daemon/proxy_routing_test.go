@@ -103,11 +103,27 @@ func TestLocalProxyRouteForTunnelRequest_IncludesAuthCredentials(t *testing.T) {
 	if route.LocalHost != "feature-branch.localhost" {
 		t.Fatalf("expected rewritten host, got %q", route.LocalHost)
 	}
-	if route.RouteHost != "feature-branch.localhost" {
-		t.Fatalf("expected canonical route host, got %q", route.RouteHost)
-	}
 	if route.AuthUsername != "alice" || route.AuthPassword != "secret" {
 		t.Fatalf("expected auth credentials from tunnel request, got %+v", route)
+	}
+}
+
+func TestLocalProxyRouteForTunnelRequest_DoesNotRewriteLocalApexHost(t *testing.T) {
+	s := &Server{
+		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
+		tunnels: map[string]*managedTunnel{
+			"some-other-worktree": {
+				req: TunnelRequest{
+					Slug:  "foocorp",
+					Label: "some-other-worktree",
+				},
+				status: "connected",
+			},
+		},
+	}
+
+	if _, ok := s.localProxyRouteForTunnelRequest("app.some-other-worktree.localhost"); ok {
+		t.Fatalf("expected no tunnel rewrite for local apex host")
 	}
 }
 
@@ -170,9 +186,6 @@ overrides = { main = "foocorp" }
 	}
 	if route.LocalHost != "app.foocorp.localhost" {
 		t.Fatalf("expected remapped local host, got %q", route.LocalHost)
-	}
-	if route.RouteHost != "app.main.localhost" {
-		t.Fatalf("expected canonical route host to use tunnel slug, got %q", route.RouteHost)
 	}
 }
 
@@ -885,6 +898,123 @@ port = "unix"
 	assertRoute("login.foocorp.localhost", "frontend", "foocorp", appRepo)
 	assertRoute("foocorp.localhost", "root", "foocorp", appRepo)
 	assertRoute("www.foocorp.localhost", "web", "main", websiteRepo)
+}
+
+func TestResolveProxyTargetForRequest_DoesNotCrossRouteSubdomainBetweenWorktrees(t *testing.T) {
+	base := t.TempDir()
+	foocorpRepo := filepath.Join(base, "foocorp")
+	otherRepo := filepath.Join(base, "other")
+	if err := os.MkdirAll(foocorpRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(otherRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(foocorpRepo, "init"); err != nil {
+		t.Fatalf("git init foocorp: %v", err)
+	}
+	if err := runGit(otherRepo, "init"); err != nil {
+		t.Fatalf("git init other: %v", err)
+	}
+
+	foocorpCfg := `
+[project]
+name = "org/foocorp"
+
+[local-dns]
+overrides = { main = "foocorp" }
+
+[process.frontend]
+command = "echo foocorp"
+proxy = { subdomain = "app", path = "/" }
+port = "unix"
+`
+	if err := os.WriteFile(filepath.Join(foocorpRepo, ".dev.toml"), []byte(foocorpCfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	otherCfg := `
+[project]
+name = "org/other"
+
+[process.frontend]
+command = "echo other"
+proxy = { subdomain = "app", path = "/" }
+port = "unix"
+`
+	if err := os.WriteFile(filepath.Join(otherRepo, ".dev.toml"), []byte(otherCfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loadedFoocorpCfg, _, err := config.LoadProjectConfig(filepath.Join(foocorpRepo, ".dev.toml"))
+	if err != nil {
+		t.Fatalf("load foocorp config: %v", err)
+	}
+
+	mgr := NewManager()
+	foocorpKey := runtimeKeyForPath(foocorpRepo)
+	otherKey := runtimeKeyForPath(otherRepo)
+	mgr.mu.Lock()
+	mgr.registerWorktreeLocked(foocorpKey, runtimeWorktree{
+		Slug:     "main",
+		Project:  "org-foocorp",
+		Path:     foocorpRepo,
+		DNSLabel: "foocorp",
+	})
+	mgr.registerWorktreeLocked(otherKey, runtimeWorktree{
+		Slug:     "some-other-worktree",
+		Project:  "org-other",
+		Path:     otherRepo,
+		DNSLabel: "some-other-worktree",
+	})
+	mgr.processes[foocorpKey] = map[string]*processInfo{
+		"frontend": {
+			network: "tcp",
+			address: "127.0.0.1:1",
+			cmd:     &exec.Cmd{Process: &os.Process{Pid: 1}},
+			ready:   true,
+			exited:  make(chan struct{}),
+		},
+	}
+	mgr.processes[otherKey] = map[string]*processInfo{
+		"frontend": {
+			network: "tcp",
+			address: "127.0.0.1:1",
+			cmd:     &exec.Cmd{Process: &os.Process{Pid: 1}},
+			ready:   true,
+			exited:  make(chan struct{}),
+		},
+	}
+	mgr.mu.Unlock()
+
+	s := &Server{
+		manager:      mgr,
+		mainPath:     foocorpRepo,
+		config:       loadedFoocorpCfg,
+		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
+		tunnels: map[string]*managedTunnel{
+			"some-other-worktree": {
+				req: TunnelRequest{
+					Slug:  "foocorp",
+					Label: "some-other-worktree",
+				},
+				status: "connected",
+			},
+		},
+	}
+
+	_, _, process, _, _, targetSlug, targetPath, err := s.resolveProxyTargetForRequest("app.some-other-worktree.localhost", "/", false)
+	if err != nil {
+		t.Fatalf("resolveProxyTargetForRequest: %v", err)
+	}
+	if process != "frontend" {
+		t.Fatalf("expected process frontend, got %q", process)
+	}
+	if targetSlug != "some-other-worktree" {
+		t.Fatalf("expected target slug some-other-worktree, got %q", targetSlug)
+	}
+	if targetPath != otherRepo {
+		t.Fatalf("expected target path %q, got %q", otherRepo, targetPath)
+	}
 }
 
 func TestSelectProxyMatcher_PathLength(t *testing.T) {

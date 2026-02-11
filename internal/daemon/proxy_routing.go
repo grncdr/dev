@@ -35,7 +35,6 @@ type proxyMatcher struct {
 
 type tunnelProxyRoute struct {
 	LocalHost    string
-	RouteHost    string
 	AuthUsername string
 	AuthPassword string
 }
@@ -45,6 +44,12 @@ var errGatewayProcessNotExposed = errors.New("gateway traffic not exposed for ma
 type proxyHostCandidate struct {
 	requestedSlug string
 	subdomain     string
+}
+
+type proxyHostTarget struct {
+	slug      string
+	repoPath  string
+	subdomain string
 }
 
 func (s *Server) parseProxyHost(host string) (slug, subdomain string, err error) {
@@ -96,6 +101,9 @@ func (s *Server) localProxyHostForTunnelRequest(host string) (string, bool) {
 }
 
 func (s *Server) localProxyRouteForTunnelRequest(host string) (tunnelProxyRoute, bool) {
+	if s.isLocalProxyHost(host) {
+		return tunnelProxyRoute{}, false
+	}
 	labels := strings.Split(normalizeProxyHost(host), ".")
 	if len(labels) == 0 {
 		return tunnelProxyRoute{}, false
@@ -114,10 +122,6 @@ func (s *Server) localProxyRouteForTunnelRequest(host string) (tunnelProxyRoute,
 		if !ok {
 			continue
 		}
-		canonicalSlug := strings.TrimSpace(mt.req.Slug)
-		if canonicalSlug == "" {
-			continue
-		}
 		apex := strings.TrimPrefix(strings.ToLower(s.projectApexZone()), ".")
 		if apex == "" {
 			apex = "localhost"
@@ -128,11 +132,9 @@ func (s *Server) localProxyRouteForTunnelRequest(host string) (tunnelProxyRoute,
 		}
 		if idx == 0 {
 			route.LocalHost = routeSlug + "." + apex
-			route.RouteHost = canonicalSlug + "." + apex
 			return route, true
 		}
 		route.LocalHost = labels[0] + "." + routeSlug + "." + apex
-		route.RouteHost = labels[0] + "." + canonicalSlug + "." + apex
 		return route, true
 	}
 	return tunnelProxyRoute{}, false
@@ -189,63 +191,190 @@ func (s *Server) resolveProxyTarget(host, path string) (network string, address 
 }
 
 func (s *Server) resolveProxyTargetForRequest(host, path string, fromGateway bool) (network string, address string, process string, gatewayMode string, gatewayDebugLog string, targetSlug string, targetPath string, err error) {
-	candidates, err := s.parseProxyHostCandidates(host)
+	target, err := s.resolveProxyHostTarget(host)
 	if err != nil {
 		return "", "", "", "", "", "", "", err
 	}
-	lastErr := error(nil)
-	for _, candidate := range candidates {
-		slug, slugHint, err := s.resolveRequestedSlug(candidate.requestedSlug)
-		if err != nil {
-			lastErr = err
-			continue
-		}
 
-		cfg, repoPath, err := s.projectConfigForSlugFromDir(slug, slugHint)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		matchers := processProxyMatchers(cfg)
-		best, ok := selectProxyMatcher(matchers, candidate.subdomain, path)
-		if !ok {
-			continue
-		}
-		if fromGateway && best.GatewayMode == config.GatewayModeDisable {
-			return "", "", "", "", "", "", "", errGatewayProcessNotExposed
-		}
-
-		targetSlug = slug
-		targetPath = repoPath
-		if best.Singleton {
-			mainSlug, err := resolveMainWorktreeSlug(repoPath)
-			if err != nil {
-				lastErr = err
-				continue
-			}
-			targetSlug = mainSlug
-			mainPath, err := worktree.ResolveMainPathInDir(repoPath)
-			if err != nil {
-				lastErr = err
-				continue
-			}
-			targetPath = mainPath
-		}
-
-		s.manager.beginProxySessionFromDir(targetSlug, targetPath, best.Process)
-		network, address, err = s.manager.EnsureProcessForTargetFromDir(targetSlug, targetPath, best.Process)
-		if err != nil {
-			s.manager.endProxySessionFromDir(targetSlug, targetPath, best.Process)
-			lastErr = err
-			continue
-		}
-		return network, address, best.Process, best.GatewayMode, best.GatewayDebugLog, targetSlug, targetPath, nil
+	cfgPath := filepath.Join(target.repoPath, config.DefaultProjectConfig)
+	cfg, _, err := config.LoadProjectConfig(cfgPath)
+	if err != nil {
+		return "", "", "", "", "", "", "", err
 	}
-	if lastErr != nil {
-		return "", "", "", "", "", "", "", lastErr
+
+	matchers := processProxyMatchers(cfg)
+	best, ok := selectProxyMatcher(matchers, target.subdomain, path)
+	if !ok {
+		return "", "", "", "", "", "", "", errors.New("no proxy matcher matched")
 	}
-	return "", "", "", "", "", "", "", errors.New("no proxy matcher matched")
+	if fromGateway && best.GatewayMode == config.GatewayModeDisable {
+		return "", "", "", "", "", "", "", errGatewayProcessNotExposed
+	}
+
+	targetSlug = target.slug
+	targetPath = target.repoPath
+	if best.Singleton {
+		mainSlug, err := resolveMainWorktreeSlug(target.repoPath)
+		if err != nil {
+			return "", "", "", "", "", "", "", err
+		}
+		targetSlug = mainSlug
+		mainPath, err := worktree.ResolveMainPathInDir(target.repoPath)
+		if err != nil {
+			return "", "", "", "", "", "", "", err
+		}
+		targetPath = mainPath
+	}
+
+	s.manager.beginProxySessionFromDir(targetSlug, targetPath, best.Process)
+	network, address, err = s.manager.EnsureProcessForTargetFromDir(targetSlug, targetPath, best.Process)
+	if err != nil {
+		s.manager.endProxySessionFromDir(targetSlug, targetPath, best.Process)
+		return "", "", "", "", "", "", "", err
+	}
+	return network, address, best.Process, best.GatewayMode, best.GatewayDebugLog, targetSlug, targetPath, nil
+}
+
+func (s *Server) isLocalProxyHost(host string) bool {
+	apex := strings.TrimPrefix(strings.ToLower(s.projectApexZone()), ".")
+	if apex == "" {
+		apex = "localhost"
+	}
+	normalized := normalizeProxyHost(host)
+	return normalized == apex || strings.HasSuffix(normalized, "."+apex)
+}
+
+func (s *Server) resolveProxyHostTarget(host string) (proxyHostTarget, error) {
+	labels, err := s.parseProxyHostLabels(host)
+	if err != nil {
+		return proxyHostTarget{}, err
+	}
+	records, err := s.proxyHostRecords()
+	if err != nil {
+		return proxyHostTarget{}, err
+	}
+	byLabel := map[string][]proxyHostTarget{}
+	for _, record := range records {
+		for _, label := range s.proxyHostLabelsForTarget(record) {
+			byLabel[label] = append(byLabel[label], record)
+		}
+	}
+	for i := 0; i < len(labels); i++ {
+		label := strings.Join(labels[i:], ".")
+		candidates := byLabel[label]
+		if len(candidates) == 0 {
+			continue
+		}
+		if len(candidates) > 1 {
+			mapped := make([]string, 0, len(candidates))
+			for _, candidate := range candidates {
+				mapped = append(mapped, fmt.Sprintf("%s:%s (%s)", candidate.slug, label, candidate.repoPath))
+			}
+			return proxyHostTarget{}, fmt.Errorf("host label %q matches multiple worktrees (%s)", label, strings.Join(mapped, ", "))
+		}
+		matched := candidates[0]
+		matched.subdomain = strings.Join(labels[:i], ".")
+		return matched, nil
+	}
+	return proxyHostTarget{}, errors.New("host does not map to a known worktree")
+}
+
+func (s *Server) parseProxyHostLabels(host string) ([]string, error) {
+	apex := strings.TrimPrefix(strings.ToLower(s.projectApexZone()), ".")
+	if apex == "" {
+		apex = "localhost"
+	}
+	normalized := normalizeProxyHost(host)
+	suffix := "." + apex
+	if !strings.HasSuffix(normalized, suffix) {
+		return nil, errors.New("host does not match apex zone")
+	}
+	rest := strings.TrimSuffix(normalized, suffix)
+	rest = strings.TrimSuffix(rest, ".")
+	if rest == "" {
+		return nil, errors.New("missing worktree slug")
+	}
+	return strings.Split(rest, "."), nil
+}
+
+func (s *Server) proxyHostRecords() ([]proxyHostTarget, error) {
+	records := make([]proxyHostTarget, 0, 8)
+	seen := map[string]struct{}{}
+	addRecord := func(slug, repoPath string) {
+		slug = strings.TrimSpace(slug)
+		repoPath = strings.TrimSpace(repoPath)
+		if slug == "" || repoPath == "" {
+			return
+		}
+		key := slug + "\x00" + repoPath
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		records = append(records, proxyHostTarget{
+			slug:     slug,
+			repoPath: repoPath,
+		})
+	}
+
+	if s.manager != nil {
+		for _, wt := range s.manager.WorktreeRecords() {
+			addRecord(wt.Slug, wt.Path)
+		}
+	}
+
+	registered, err := worktree.ListRegisteredWorktrees(s.daemonConfig, "")
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range registered {
+		addRecord(entry.Slug, entry.Path)
+	}
+
+	if len(records) == 0 && strings.TrimSpace(s.mainPath) != "" {
+		mainSlug, err := resolveMainWorktreeSlug(s.mainPath)
+		if err != nil {
+			mainSlug = "main"
+		}
+		addRecord(mainSlug, s.mainPath)
+	}
+
+	if len(records) == 0 {
+		return nil, errors.New("no worktrees available for proxy routing")
+	}
+	return records, nil
+}
+
+func (s *Server) proxyHostLabelsForTarget(target proxyHostTarget) []string {
+	labels := map[string]struct{}{}
+	add := func(label string) {
+		label = strings.TrimSpace(strings.ToLower(label))
+		if label == "" {
+			return
+		}
+		labels[label] = struct{}{}
+	}
+
+	add(worktree.SlugDNSLabel(target.slug))
+
+	cfgPath := filepath.Join(target.repoPath, config.DefaultProjectConfig)
+	cfg, _, err := config.LoadProjectConfig(cfgPath)
+	if err == nil {
+		add(worktree.ProxyDNSLabelForSlug(cfg, target.slug))
+		mainSlug, mainErr := resolveMainWorktreeSlug(target.repoPath)
+		if mainErr == nil && (strings.EqualFold(target.slug, mainSlug) || strings.EqualFold(target.slug, "main")) {
+			add("main")
+			add(worktree.SlugDNSLabel(mainSlug))
+			add(worktree.ProxyDNSLabelForSlug(cfg, "main"))
+			add(worktree.ProxyDNSLabelForSlug(cfg, mainSlug))
+		}
+	}
+
+	out := make([]string, 0, len(labels))
+	for label := range labels {
+		out = append(out, label)
+	}
+	return out
 }
 
 func (s *Server) parseProxyHostCandidates(host string) ([]proxyHostCandidate, error) {

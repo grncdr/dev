@@ -1078,6 +1078,29 @@ func (m *Manager) WorktreePath(slug string) (string, bool) {
 	return m.WorktreePathFromDir(slug, "")
 }
 
+func (m *Manager) WorktreeRecords() []runtimeWorktree {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	records := make([]runtimeWorktree, 0, len(m.worktrees))
+	for _, wt := range m.worktrees {
+		if strings.TrimSpace(wt.Slug) == "" || strings.TrimSpace(wt.Path) == "" {
+			continue
+		}
+		records = append(records, wt)
+	}
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].DNSLabel != records[j].DNSLabel {
+			return records[i].DNSLabel < records[j].DNSLabel
+		}
+		if records[i].Slug != records[j].Slug {
+			return records[i].Slug < records[j].Slug
+		}
+		return records[i].Path < records[j].Path
+	})
+	return records
+}
+
 func (m *Manager) WorktreePathFromDir(slug, dirHint string) (string, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
