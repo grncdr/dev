@@ -2,36 +2,14 @@ package daemon
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 
 	"dev/internal/config"
+	"dev/internal/router"
 	"dev/internal/worktree"
 )
-
-type subdomainMatchKind int
-
-const (
-	subdomainBase subdomainMatchKind = iota
-	subdomainWildcard
-	subdomainExplicit
-)
-
-type proxyMatcher struct {
-	Process         string
-	Subdomain       string
-	Kind            subdomainMatchKind
-	Path            string
-	Match           string
-	GatewayMode     string
-	GatewayDebugLog string
-	Priority        int
-	TCPListen       int
-	Singleton       bool
-}
 
 type tunnelProxyRoute struct {
 	LocalHost    string
@@ -39,18 +17,7 @@ type tunnelProxyRoute struct {
 	AuthPassword string
 }
 
-var errGatewayProcessNotExposed = errors.New("gateway traffic not exposed for matched process")
-
-type proxyHostCandidate struct {
-	requestedSlug string
-	subdomain     string
-}
-
-type proxyHostTarget struct {
-	slug      string
-	repoPath  string
-	subdomain string
-}
+var errGatewayProcessNotExposed = router.ErrGatewayProcessNotExposed
 
 func (s *Server) parseProxyHost(host string) (slug, subdomain string, err error) {
 	apex := strings.TrimPrefix(strings.ToLower(s.projectApexZone()), ".")
@@ -191,48 +158,36 @@ func (s *Server) resolveProxyTarget(host, path string) (network string, address 
 }
 
 func (s *Server) resolveProxyTargetForRequest(host, path string, fromGateway bool) (network string, address string, process string, gatewayMode string, gatewayDebugLog string, targetSlug string, targetPath string, err error) {
-	target, err := s.resolveProxyHostTarget(host)
+	if s.manager == nil || s.manager.router == nil {
+		return "", "", "", "", "", "", "", errors.New("proxy router unavailable")
+	}
+	resolved, err := s.manager.router.Resolve(host, path, fromGateway)
 	if err != nil {
 		return "", "", "", "", "", "", "", err
 	}
 
-	cfgPath := filepath.Join(target.repoPath, config.DefaultProjectConfig)
-	cfg, _, err := config.LoadProjectConfig(cfgPath)
-	if err != nil {
-		return "", "", "", "", "", "", "", err
-	}
-
-	matchers := processProxyMatchers(cfg)
-	best, ok := selectProxyMatcher(matchers, target.subdomain, path)
-	if !ok {
-		return "", "", "", "", "", "", "", errors.New("no proxy matcher matched")
-	}
-	if fromGateway && best.GatewayMode == config.GatewayModeDisable {
-		return "", "", "", "", "", "", "", errGatewayProcessNotExposed
-	}
-
-	targetSlug = target.slug
-	targetPath = target.repoPath
-	if best.Singleton {
-		mainSlug, err := resolveMainWorktreeSlug(target.repoPath)
+	targetSlug = resolved.Slug
+	targetPath = resolved.RepoPath
+	if resolved.Singleton {
+		mainSlug, err := resolveMainWorktreeSlug(resolved.RepoPath)
 		if err != nil {
 			return "", "", "", "", "", "", "", err
 		}
 		targetSlug = mainSlug
-		mainPath, err := worktree.ResolveMainPathInDir(target.repoPath)
+		mainPath, err := worktree.ResolveMainPathInDir(resolved.RepoPath)
 		if err != nil {
 			return "", "", "", "", "", "", "", err
 		}
 		targetPath = mainPath
 	}
 
-	s.manager.beginProxySessionFromDir(targetSlug, targetPath, best.Process)
-	network, address, err = s.manager.EnsureProcessForTargetFromDir(targetSlug, targetPath, best.Process)
+	s.manager.beginProxySessionFromDir(targetSlug, targetPath, resolved.Process)
+	network, address, err = s.manager.EnsureProcessForTargetFromDir(targetSlug, targetPath, resolved.Process)
 	if err != nil {
-		s.manager.endProxySessionFromDir(targetSlug, targetPath, best.Process)
+		s.manager.endProxySessionFromDir(targetSlug, targetPath, resolved.Process)
 		return "", "", "", "", "", "", "", err
 	}
-	return network, address, best.Process, best.GatewayMode, best.GatewayDebugLog, targetSlug, targetPath, nil
+	return network, address, resolved.Process, resolved.GatewayMode, resolved.GatewayDebugLog, targetSlug, targetPath, nil
 }
 
 func (s *Server) isLocalProxyHost(host string) bool {
@@ -244,201 +199,6 @@ func (s *Server) isLocalProxyHost(host string) bool {
 	return normalized == apex || strings.HasSuffix(normalized, "."+apex)
 }
 
-func (s *Server) resolveProxyHostTarget(host string) (proxyHostTarget, error) {
-	labels, err := s.parseProxyHostLabels(host)
-	if err != nil {
-		return proxyHostTarget{}, err
-	}
-	records, err := s.proxyHostRecords()
-	if err != nil {
-		return proxyHostTarget{}, err
-	}
-	byLabel := map[string][]proxyHostTarget{}
-	for _, record := range records {
-		for _, label := range s.proxyHostLabelsForTarget(record) {
-			byLabel[label] = append(byLabel[label], record)
-		}
-	}
-	for i := 0; i < len(labels); i++ {
-		label := strings.Join(labels[i:], ".")
-		candidates := byLabel[label]
-		if len(candidates) == 0 {
-			continue
-		}
-		if len(candidates) > 1 {
-			mapped := make([]string, 0, len(candidates))
-			for _, candidate := range candidates {
-				mapped = append(mapped, fmt.Sprintf("%s:%s (%s)", candidate.slug, label, candidate.repoPath))
-			}
-			return proxyHostTarget{}, fmt.Errorf("host label %q matches multiple worktrees (%s)", label, strings.Join(mapped, ", "))
-		}
-		matched := candidates[0]
-		matched.subdomain = strings.Join(labels[:i], ".")
-		return matched, nil
-	}
-	return proxyHostTarget{}, errors.New("host does not map to a known worktree")
-}
-
-func (s *Server) parseProxyHostLabels(host string) ([]string, error) {
-	apex := strings.TrimPrefix(strings.ToLower(s.projectApexZone()), ".")
-	if apex == "" {
-		apex = "localhost"
-	}
-	normalized := normalizeProxyHost(host)
-	suffix := "." + apex
-	if !strings.HasSuffix(normalized, suffix) {
-		return nil, errors.New("host does not match apex zone")
-	}
-	rest := strings.TrimSuffix(normalized, suffix)
-	rest = strings.TrimSuffix(rest, ".")
-	if rest == "" {
-		return nil, errors.New("missing worktree slug")
-	}
-	return strings.Split(rest, "."), nil
-}
-
-func (s *Server) proxyHostRecords() ([]proxyHostTarget, error) {
-	records := make([]proxyHostTarget, 0, 8)
-	seen := map[string]struct{}{}
-	addRecord := func(slug, repoPath string) {
-		slug = strings.TrimSpace(slug)
-		repoPath = strings.TrimSpace(repoPath)
-		if slug == "" || repoPath == "" {
-			return
-		}
-		key := slug + "\x00" + repoPath
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		records = append(records, proxyHostTarget{
-			slug:     slug,
-			repoPath: repoPath,
-		})
-	}
-
-	if s.manager != nil {
-		for _, wt := range s.manager.WorktreeRecords() {
-			addRecord(wt.Slug, wt.Path)
-		}
-	}
-
-	registered, err := worktree.ListRegisteredWorktrees(s.daemonConfig, "")
-	if err != nil {
-		return nil, err
-	}
-	for _, entry := range registered {
-		addRecord(entry.Slug, entry.Path)
-	}
-
-	if len(records) == 0 && strings.TrimSpace(s.mainPath) != "" {
-		mainSlug, err := resolveMainWorktreeSlug(s.mainPath)
-		if err != nil {
-			mainSlug = "main"
-		}
-		addRecord(mainSlug, s.mainPath)
-	}
-
-	if len(records) == 0 {
-		return nil, errors.New("no worktrees available for proxy routing")
-	}
-	return records, nil
-}
-
-func (s *Server) proxyHostLabelsForTarget(target proxyHostTarget) []string {
-	labels := map[string]struct{}{}
-	add := func(label string) {
-		label = strings.TrimSpace(strings.ToLower(label))
-		if label == "" {
-			return
-		}
-		labels[label] = struct{}{}
-	}
-
-	add(worktree.SlugDNSLabel(target.slug))
-
-	cfgPath := filepath.Join(target.repoPath, config.DefaultProjectConfig)
-	cfg, _, err := config.LoadProjectConfig(cfgPath)
-	if err == nil {
-		add(worktree.ProxyDNSLabelForSlug(cfg, target.slug))
-		mainSlug, mainErr := resolveMainWorktreeSlug(target.repoPath)
-		if mainErr == nil && (strings.EqualFold(target.slug, mainSlug) || strings.EqualFold(target.slug, "main")) {
-			add("main")
-			add(worktree.SlugDNSLabel(mainSlug))
-			add(worktree.ProxyDNSLabelForSlug(cfg, "main"))
-			add(worktree.ProxyDNSLabelForSlug(cfg, mainSlug))
-		}
-	}
-
-	out := make([]string, 0, len(labels))
-	for label := range labels {
-		out = append(out, label)
-	}
-	return out
-}
-
-func (s *Server) parseProxyHostCandidates(host string) ([]proxyHostCandidate, error) {
-	apex := strings.TrimPrefix(strings.ToLower(s.projectApexZone()), ".")
-	if apex == "" {
-		apex = "localhost"
-	}
-	lower := strings.ToLower(host)
-	if strings.Contains(lower, ":") {
-		lower, _, _ = strings.Cut(lower, ":")
-	}
-	suffix := "." + apex
-	if !strings.HasSuffix(lower, suffix) {
-		return nil, errors.New("host does not match apex zone")
-	}
-	rest := strings.TrimSuffix(lower, suffix)
-	rest = strings.TrimSuffix(rest, ".")
-	if rest == "" {
-		return nil, errors.New("missing worktree slug")
-	}
-	labels := strings.Split(rest, ".")
-	out := make([]proxyHostCandidate, 0, len(labels))
-	for i := 0; i < len(labels); i++ {
-		requested := strings.Join(labels[i:], ".")
-		subdomain := strings.Join(labels[:i], ".")
-		out = append(out, proxyHostCandidate{
-			requestedSlug: requested,
-			subdomain:     subdomain,
-		})
-	}
-	return out, nil
-}
-
-func (s *Server) resolveRequestedSlug(requestedSlug string) (string, string, error) {
-	if requestedSlug == "" {
-		return "", "", errors.New("missing requested slug")
-	}
-	mainPath, err := worktree.ResolveMainPathInDir(s.mainPath)
-	if err != nil {
-		return requestedSlug, "", nil
-	}
-	cfgPath := filepath.Join(mainPath, config.DefaultProjectConfig)
-	cfg, _, err := config.LoadProjectConfig(cfgPath)
-	if err != nil {
-		return requestedSlug, "", nil
-	}
-	if mappedSlug, ok, err := worktree.ResolveSlugForDNSLabel(cfg, s.daemonConfig, requestedSlug); err == nil && ok {
-		return mappedSlug, mainPath, nil
-	} else if err != nil {
-		return "", "", err
-	}
-	mainSlug, err := resolveMainWorktreeSlug(mainPath)
-	if err != nil {
-		return requestedSlug, "", nil
-	}
-	if strings.EqualFold(requestedSlug, "main") {
-		return mainSlug, mainPath, nil
-	}
-	if strings.EqualFold(requestedSlug, mainSlug) {
-		return mainSlug, mainPath, nil
-	}
-	return requestedSlug, "", nil
-}
-
 func resolveMainWorktreeSlug(mainPath string) (string, error) {
 	if configured, ok, err := worktree.ResolveConfiguredMainSlug(mainPath); err != nil {
 		return "", err
@@ -446,49 +206,6 @@ func resolveMainWorktreeSlug(mainPath string) (string, error) {
 		return configured, nil
 	}
 	return "main", nil
-}
-
-func prefixMatch(requestPath, prefix string) bool {
-	if strings.HasSuffix(prefix, "*") {
-		raw := strings.TrimSuffix(prefix, "*")
-		if raw == "" {
-			return true
-		}
-		return strings.HasPrefix(requestPath, raw)
-	}
-	if prefix == "/" {
-		return true
-	}
-	if requestPath == prefix {
-		return true
-	}
-	return strings.HasPrefix(requestPath, prefix+"/")
-}
-
-func processProxyMatchers(cfg *config.ProjectConfig) []proxyMatcher {
-	if cfg == nil {
-		return nil
-	}
-	matchers := []proxyMatcher{}
-	gatewayRules := config.GatewayExposeRules(cfg)
-	for name, proc := range cfg.Processes {
-		rawProxy, ok := proc["proxy"]
-		if !ok || rawProxy == nil {
-			continue
-		}
-		singleton := false
-		if rawSingleton, ok := proc["singleton"].(bool); ok {
-			singleton = rawSingleton
-		}
-		gatewayMode := config.GatewayModeDisable
-		gatewayDebugLog := ""
-		if exposedRule, ok := gatewayRules[name]; ok {
-			gatewayMode = exposedRule.Mode
-			gatewayDebugLog = exposedRule.DebugLog
-		}
-		matchers = append(matchers, parseProxyMatchers(name, rawProxy, singleton, gatewayMode, gatewayDebugLog)...)
-	}
-	return matchers
 }
 
 func (s *Server) projectConfigForSlug(slug string) (*config.ProjectConfig, string, error) {
@@ -509,7 +226,15 @@ func (s *Server) projectConfigForSlugFromDir(slug, dirHint string) (*config.Proj
 		var err error
 		repoPath, err = worktree.ResolvePathFromSlugInDir(slug, s.mainPath)
 		if err != nil {
-			if s.shouldFallbackToMainProjectConfig(slug) {
+			if s == nil || s.config == nil || strings.TrimSpace(s.mainPath) == "" {
+				return nil, "", err
+			}
+			mainSlug := "main"
+			if configured, normalizeErr := worktree.NormalizeIdentifierSegment(s.config.Project.MainSlug); normalizeErr == nil && configured != "" {
+				mainSlug = configured
+			}
+			candidate := strings.TrimSpace(strings.ToLower(slug))
+			if candidate == "main" || candidate == mainSlug {
 				return s.config, s.mainPath, nil
 			}
 			return nil, "", err
@@ -521,279 +246,4 @@ func (s *Server) projectConfigForSlugFromDir(slug, dirHint string) (*config.Proj
 		return nil, "", err
 	}
 	return cfg, repoPath, nil
-}
-
-func (s *Server) shouldFallbackToMainProjectConfig(slug string) bool {
-	if s == nil || s.config == nil || strings.TrimSpace(s.mainPath) == "" {
-		return false
-	}
-	candidate := strings.TrimSpace(strings.ToLower(slug))
-	if candidate == "" {
-		return false
-	}
-
-	mainSlug := "main"
-	if configured, err := worktree.NormalizeIdentifierSegment(s.config.Project.MainSlug); err == nil && configured != "" {
-		mainSlug = configured
-	}
-
-	allowed := map[string]struct{}{
-		"main":   {},
-		mainSlug: {},
-		strings.ToLower(worktree.ProxyDNSLabelForSlug(s.config, "main")):   {},
-		strings.ToLower(worktree.ProxyDNSLabelForSlug(s.config, mainSlug)): {},
-	}
-	_, ok := allowed[candidate]
-	return ok
-}
-
-func parseProxyMatchers(process string, raw any, singleton bool, gatewayMode string, gatewayDebugLog string) []proxyMatcher {
-	raw = normalizeProxyConfigValue(raw)
-	switch typed := raw.(type) {
-	case []any:
-		out := []proxyMatcher{}
-		for _, item := range typed {
-			out = append(out, parseProxyMatchers(process, item, singleton, gatewayMode, gatewayDebugLog)...)
-		}
-		return out
-	case map[string]any:
-		return parseProxyMatchersFromMap(process, typed, singleton, gatewayMode, gatewayDebugLog)
-	default:
-		return nil
-	}
-}
-
-func normalizeProxyConfigValue(raw any) any {
-	if raw == nil {
-		return nil
-	}
-	val := reflect.ValueOf(raw)
-	switch val.Kind() {
-	case reflect.Map:
-		out := map[string]any{}
-		for _, key := range val.MapKeys() {
-			if key.Kind() != reflect.String {
-				continue
-			}
-			out[key.String()] = normalizeProxyConfigValue(val.MapIndex(key).Interface())
-		}
-		return out
-	case reflect.Slice, reflect.Array:
-		out := make([]any, val.Len())
-		for i := 0; i < val.Len(); i++ {
-			out[i] = normalizeProxyConfigValue(val.Index(i).Interface())
-		}
-		return out
-	default:
-		return raw
-	}
-}
-
-func parseProxyMatchersFromMap(process string, raw map[string]any, singleton bool, gatewayMode string, gatewayDebugLog string) []proxyMatcher {
-	subdomains := parseSubdomainValues(raw["subdomain"], raw["subdomains"])
-	if len(subdomains) == 0 {
-		return nil
-	}
-	path := "/"
-	if rawPath, ok := raw["path"].(string); ok && rawPath != "" {
-		path = rawPath
-	}
-	match := "prefix"
-	if rawMatch, ok := raw["match"].(string); ok && rawMatch != "" {
-		match = strings.ToLower(strings.TrimSpace(rawMatch))
-	}
-	priority, _ := config.ParseInt(raw["priority"])
-	tcpListen := 0
-	if val, ok := config.ParseInt(raw["tcp_listen"]); ok && val > 0 {
-		tcpListen = val
-	}
-	out := make([]proxyMatcher, 0, len(subdomains))
-	for _, sd := range subdomains {
-		out = append(out, proxyMatcher{
-			Process:         process,
-			Subdomain:       sd.subdomain,
-			Kind:            sd.kind,
-			Path:            path,
-			Match:           match,
-			GatewayMode:     gatewayMode,
-			GatewayDebugLog: gatewayDebugLog,
-			Priority:        priority,
-			TCPListen:       tcpListen,
-			Singleton:       singleton,
-		})
-	}
-	return out
-}
-
-type parsedSubdomain struct {
-	subdomain string
-	kind      subdomainMatchKind
-}
-
-func parseSubdomainValues(rawSingle, rawList any) []parsedSubdomain {
-	if rawList != nil {
-		switch typed := rawList.(type) {
-		case []any:
-			out := make([]parsedSubdomain, 0, len(typed))
-			for _, item := range typed {
-				sd, ok := parseSingleSubdomainValue(item)
-				if !ok {
-					continue
-				}
-				out = append(out, sd)
-			}
-			return dedupeSubdomains(out)
-		}
-	}
-	sd, ok := parseSingleSubdomainValue(rawSingle)
-	if !ok {
-		return nil
-	}
-	return []parsedSubdomain{sd}
-}
-
-func parseSingleSubdomainValue(raw any) (parsedSubdomain, bool) {
-	if raw == nil {
-		return parsedSubdomain{subdomain: "", kind: subdomainBase}, true
-	}
-	val, ok := raw.(string)
-	if !ok {
-		return parsedSubdomain{}, false
-	}
-	val = strings.ToLower(strings.TrimSpace(val))
-	if val == "" {
-		return parsedSubdomain{subdomain: "", kind: subdomainBase}, true
-	}
-	if val == "*" {
-		return parsedSubdomain{subdomain: "*", kind: subdomainWildcard}, true
-	}
-	return parsedSubdomain{subdomain: val, kind: subdomainExplicit}, true
-}
-
-func dedupeSubdomains(values []parsedSubdomain) []parsedSubdomain {
-	seen := map[string]bool{}
-	out := make([]parsedSubdomain, 0, len(values))
-	for _, v := range values {
-		key := fmt.Sprintf("%d:%s", v.kind, v.subdomain)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		out = append(out, v)
-	}
-	return out
-}
-
-func selectProxyMatcher(matchers []proxyMatcher, subdomain, path string) (*proxyMatcher, bool) {
-	var best *proxyMatcher
-	bestKind := subdomainMatchKind(-1)
-	bestPathLen := -1
-	bestPriority := 0
-	for i := range matchers {
-		matcher := &matchers[i]
-		if !matchesSubdomain(matcher, subdomain) {
-			continue
-		}
-		if matcher.TCPListen > 0 {
-			continue
-		}
-		ok, pathLen := matchPath(path, matcher.Path, matcher.Match)
-		if !ok {
-			continue
-		}
-		if matcher.Kind > bestKind {
-			best = matcher
-			bestKind = matcher.Kind
-			bestPathLen = pathLen
-			bestPriority = matcher.Priority
-			continue
-		}
-		if matcher.Kind < bestKind {
-			continue
-		}
-		if pathLen > bestPathLen {
-			best = matcher
-			bestPathLen = pathLen
-			bestPriority = matcher.Priority
-			continue
-		}
-		if pathLen < bestPathLen {
-			continue
-		}
-		if matcher.Priority > bestPriority {
-			best = matcher
-			bestPriority = matcher.Priority
-			continue
-		}
-		if matcher.Priority < bestPriority {
-			continue
-		}
-		if best == nil || matcher.Process < best.Process {
-			best = matcher
-			bestPriority = matcher.Priority
-		}
-	}
-	return best, best != nil
-}
-
-func matchesSubdomain(matcher *proxyMatcher, subdomain string) bool {
-	switch matcher.Kind {
-	case subdomainBase:
-		return subdomain == ""
-	case subdomainWildcard:
-		return subdomain != ""
-	case subdomainExplicit:
-		return subdomain == matcher.Subdomain
-	default:
-		return false
-	}
-}
-
-func matchPath(requestPath, pattern, mode string) (bool, int) {
-	if pattern == "" {
-		pattern = "/"
-	}
-	mode = strings.ToLower(strings.TrimSpace(mode))
-	if mode == "" {
-		mode = "prefix"
-	}
-	if mode == "prefix" && pattern != "/" {
-		pattern = strings.TrimRight(pattern, "/")
-		if pattern == "" {
-			pattern = "/"
-		}
-	}
-	if mode == "exact" {
-		if requestPath != pattern {
-			return false, 0
-		}
-		return true, len(pattern)
-	}
-	if strings.HasSuffix(pattern, "*") {
-		raw := strings.TrimSuffix(pattern, "*")
-		if raw == "" {
-			return true, 0
-		}
-		if strings.HasPrefix(requestPath, raw) {
-			return true, len(raw)
-		}
-		return false, 0
-	}
-	if !prefixMatch(requestPath, pattern) {
-		return false, 0
-	}
-	return true, len(pattern)
-}
-
-func (k subdomainMatchKind) String() string {
-	switch k {
-	case subdomainBase:
-		return "base"
-	case subdomainWildcard:
-		return "wildcard"
-	case subdomainExplicit:
-		return "explicit"
-	default:
-		return fmt.Sprintf("kind(%d)", k)
-	}
 }

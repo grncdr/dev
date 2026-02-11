@@ -140,6 +140,14 @@ path = "/"
 		mainPath: repoDir,
 	}
 	slug := defaultSlugForRepo(t, repoDir)
+	s.manager.mu.Lock()
+	s.manager.registerWorktreeLocked(runtimeKeyForPath(repoDir), runtimeWorktree{
+		Slug:     slug,
+		Project:  "demo",
+		Path:     repoDir,
+		DNSLabel: slug,
+	})
+	s.manager.mu.Unlock()
 	start := time.Now()
 	network, address, _, _, _, _, _, err := s.resolveProxyTarget(slug+".localhost", "/")
 	if err != nil {

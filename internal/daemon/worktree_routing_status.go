@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"dev/internal/config"
+	"dev/internal/router"
 	"dev/internal/worktree"
 )
 
@@ -17,7 +18,7 @@ func (s *Server) routingStatusForWorktree(slug, project, dirHint string) Worktre
 	}
 
 	routeSlug := localProxyRouteSlug(slug, cfg)
-	localByProcess := localProxyRoutesByProcess(processProxyMatchers(cfg), routeSlug, s.projectApexZone())
+	localByProcess := localProxyRoutesByProcess(router.ParseMatchers(cfg), routeSlug, s.projectApexZone())
 	tunnel := s.tunnelStatusForSlug(slug)
 
 	gatewayURL := strings.TrimSpace(gatewayURLFromConfig(cfg))
@@ -53,7 +54,7 @@ func localProxyRouteSlug(slug string, cfg *config.ProjectConfig) string {
 	return worktree.ProxyDNSLabelForSlug(cfg, slug)
 }
 
-func localProxyRoutesByProcess(matchers []proxyMatcher, routeSlug, apexZone string) map[string][]string {
+func localProxyRoutesByProcess(matchers []router.Matcher, routeSlug, apexZone string) map[string][]string {
 	out := map[string][]string{}
 	zone := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(apexZone)), ".")
 	if zone == "" {
@@ -73,9 +74,9 @@ func localProxyRoutesByProcess(matchers []proxyMatcher, routeSlug, apexZone stri
 		}
 		host := fmt.Sprintf("%s.%s", routeSlug, zone)
 		switch matcher.Kind {
-		case subdomainWildcard:
+		case router.SubdomainWildcard:
 			host = fmt.Sprintf("*.%s.%s", routeSlug, zone)
-		case subdomainExplicit:
+		case router.SubdomainExplicit:
 			if matcher.Subdomain != "" {
 				host = fmt.Sprintf("%s.%s.%s", matcher.Subdomain, routeSlug, zone)
 			}

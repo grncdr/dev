@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"dev/internal/config"
+	"dev/internal/router"
 )
 
 // defaultProxyListenHost returns the default listen host for the proxy.
@@ -98,7 +99,7 @@ func (s *Server) startTCPProxyListeners() error {
 	if s.config == nil {
 		return nil
 	}
-	routes := processProxyMatchers(s.config)
+	routes := router.ParseMatchers(s.config)
 	for _, route := range routes {
 		if route.TCPListen <= 0 {
 			continue

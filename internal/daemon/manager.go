@@ -20,6 +20,7 @@ import (
 
 	"dev/internal/config"
 	"dev/internal/procenv"
+	"dev/internal/router"
 	"dev/internal/worktree"
 )
 
@@ -29,6 +30,7 @@ import (
 // on orchestration, not network transport handling.
 type Manager struct {
 	mu                   sync.Mutex
+	router               *router.Router
 	processes            map[string]map[string]*processInfo
 	worktrees            map[string]runtimeWorktree
 	slugIndex            map[string]map[string]struct{}
@@ -52,6 +54,7 @@ var errWorktreeNotRunning = errors.New("worktree not running")
 // Manager does not own external transports; Server calls into Manager.
 func NewManager() *Manager {
 	return &Manager{
+		router:               router.New(".localhost"),
 		processes:            make(map[string]map[string]*processInfo),
 		worktrees:            make(map[string]runtimeWorktree),
 		slugIndex:            make(map[string]map[string]struct{}),
@@ -72,12 +75,16 @@ func (m *Manager) SetApexZone(zone string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.apexZone = zone
+	if m.router != nil {
+		m.router.SetApexZone(zone)
+	}
 }
 
 func (m *Manager) SetDaemonConfig(cfg *config.DaemonConfig) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.daemonCfg = cfg
+	m.rebuildRouterLocked()
 }
 
 type WorktreeStatus struct {
@@ -440,6 +447,7 @@ func (m *Manager) registerWorktreeLocked(key string, wt runtimeWorktree) {
 	m.worktrees[key] = wt
 	m.addIndexLocked(m.slugIndex, wt.Slug, key)
 	m.addIndexLocked(m.dnsLabelIndex, wt.DNSLabel, key)
+	m.rebuildRouterLocked()
 }
 
 func (m *Manager) addIndexLocked(index map[string]map[string]struct{}, value, key string) {
@@ -470,6 +478,106 @@ func (m *Manager) removeIndexLocked(index map[string]map[string]struct{}, value,
 		return
 	}
 	index[value] = entries
+}
+
+func (m *Manager) rebuildRouterLocked() {
+	if m.router == nil {
+		m.router = router.New(m.apexZone)
+	} else {
+		m.router = router.New(m.apexZone)
+	}
+
+	addWorktree := func(runtimeKey string, wt runtimeWorktree) {
+		in, ok := m.routerWorktreeInputLocked(runtimeKey, wt)
+		if !ok {
+			return
+		}
+		m.router.UpsertWorktree(in)
+	}
+
+	for runtimeKey, wt := range m.worktrees {
+		addWorktree(runtimeKey, wt)
+	}
+
+	registered, err := worktree.ListRegisteredWorktrees(m.daemonCfg, "")
+	if err != nil {
+		return
+	}
+	for _, entry := range registered {
+		runtimeKey := runtimeKeyForPath(entry.Path)
+		if runtimeKey == "" {
+			continue
+		}
+		wt := runtimeWorktree{
+			Slug:    entry.Slug,
+			Project: entry.Project,
+			Path:    entry.Path,
+		}
+		addWorktree(runtimeKey, wt)
+	}
+}
+
+func (m *Manager) routerWorktreeInputLocked(runtimeKey string, wt runtimeWorktree) (router.WorktreeInput, bool) {
+	runtimeKey = strings.TrimSpace(runtimeKey)
+	if runtimeKey == "" || strings.TrimSpace(wt.Slug) == "" || strings.TrimSpace(wt.Path) == "" {
+		return router.WorktreeInput{}, false
+	}
+	cfgPath := filepath.Join(wt.Path, config.DefaultProjectConfig)
+	cfg, _, err := config.LoadProjectConfig(cfgPath)
+	if err != nil {
+		return router.WorktreeInput{}, false
+	}
+	labels := routerLabelsForWorktree(wt, cfg)
+	matchers := routerMatchersForConfig(cfg)
+	if len(labels) == 0 || len(matchers) == 0 {
+		return router.WorktreeInput{}, false
+	}
+	return router.WorktreeInput{
+		RuntimeKey: runtimeKey,
+		Slug:       wt.Slug,
+		RepoPath:   wt.Path,
+		Labels:     labels,
+		Matchers:   matchers,
+	}, true
+}
+
+func routerLabelsForWorktree(wt runtimeWorktree, cfg *config.ProjectConfig) []string {
+	labels := map[string]struct{}{}
+	add := func(label string) {
+		label = strings.TrimSpace(strings.ToLower(label))
+		if label == "" {
+			return
+		}
+		labels[label] = struct{}{}
+	}
+
+	add(wt.DNSLabel)
+	add(worktree.SlugDNSLabel(wt.Slug))
+	add(worktree.ProxyDNSLabelForSlug(cfg, wt.Slug))
+
+	mainSlug := "main"
+	if cfg != nil {
+		if configured, err := worktree.NormalizeIdentifierSegment(cfg.Project.MainSlug); err == nil && configured != "" {
+			mainSlug = configured
+		}
+	}
+	if strings.EqualFold(wt.Slug, "main") || strings.EqualFold(wt.Slug, mainSlug) {
+		add("main")
+		add(worktree.SlugDNSLabel(mainSlug))
+		add(worktree.ProxyDNSLabelForSlug(cfg, "main"))
+		add(worktree.ProxyDNSLabelForSlug(cfg, mainSlug))
+	}
+
+	out := make([]string, 0, len(labels))
+	for label := range labels {
+		out = append(out, label)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func routerMatchersForConfig(cfg *config.ProjectConfig) []router.Matcher {
+	return router.ParseMatchers(cfg)
 }
 
 type localDNSHostConflict struct {
@@ -537,7 +645,7 @@ func proxyHostsForConfig(cfg *config.ProjectConfig, slug string, selected map[st
 		return hosts
 	}
 	routeSlug := localProxyRouteSlug(slug, cfg)
-	for process, routes := range localProxyRoutesByProcess(processProxyMatchers(cfg), routeSlug, apexZone) {
+	for process, routes := range localProxyRoutesByProcess(router.ParseMatchers(cfg), routeSlug, apexZone) {
 		if !selected[process] {
 			continue
 		}
@@ -990,6 +1098,7 @@ func (m *Manager) unregisterWorktreeLocked(key string) {
 	delete(m.worktrees, key)
 	m.removeIndexLocked(m.slugIndex, wt.Slug, key)
 	m.removeIndexLocked(m.dnsLabelIndex, wt.DNSLabel, key)
+	m.rebuildRouterLocked()
 }
 
 func (m *Manager) TargetFor(slug, process string) (network string, address string, err error) {

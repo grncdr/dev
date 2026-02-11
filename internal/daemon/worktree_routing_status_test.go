@@ -3,12 +3,14 @@ package daemon
 import (
 	"reflect"
 	"testing"
+
+	"dev/internal/router"
 )
 
 func TestLocalProxyRoutesByProcess(t *testing.T) {
-	matchers := []proxyMatcher{
-		{Process: "rails", Kind: subdomainBase, Path: "/"},
-		{Process: "rails", Kind: subdomainExplicit, Subdomain: "app", Path: "/admin"},
+	matchers := []router.Matcher{
+		{Process: "rails", Kind: router.SubdomainBase, Path: "/"},
+		{Process: "rails", Kind: router.SubdomainExplicit, Subdomain: "app", Path: "/admin"},
 		{Process: "db", TCPListen: 15432},
 	}
 	got := localProxyRoutesByProcess(matchers, "main", ".localhost")

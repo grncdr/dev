@@ -395,6 +395,22 @@ func (s *Server) loadConfig() error {
 			}
 		}
 	}
+	if s.manager != nil && s.config != nil && s.mainPath != "" {
+		if projectID, err := resolveProjectIdentifier(s.config); err == nil {
+			if mainSlug, err := resolveMainWorktreeSlug(s.mainPath); err == nil {
+				runtimeKey := runtimeKeyForPath(s.mainPath)
+				dnsLabel := worktree.ProxyDNSLabelForSlug(s.config, mainSlug)
+				s.manager.mu.Lock()
+				s.manager.registerWorktreeLocked(runtimeKey, runtimeWorktree{
+					Slug:     mainSlug,
+					Project:  projectID,
+					Path:     s.mainPath,
+					DNSLabel: dnsLabel,
+				})
+				s.manager.mu.Unlock()
+			}
+		}
+	}
 	s.manager.SetApexZone(s.projectApexZone())
 	s.manager.SetDaemonConfig(s.daemonConfig)
 	return nil
