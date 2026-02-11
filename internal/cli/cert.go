@@ -311,7 +311,7 @@ func randSerial() (*big.Int, error) {
 }
 
 func trustCAOnDarwin(certPath string) error {
-	cmd := exec.Command("security", "add-trusted-cert", "-d", "-r", "trustRoot", "-k", filepath.Join(os.Getenv("HOME"), "Library/Keychains/login.keychain-db"), certPath)
+	cmd := exec.Command("security", "add-trusted-cert", "-d", "-r", "trustRoot", "-k", "/Library/Keychains/System.keychain", certPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
