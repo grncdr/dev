@@ -300,7 +300,16 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 		return err
 	}
 	if !resolved.exists {
-		return fmt.Errorf("worktree not found at %s", resolved.path)
+		fmt.Fprintf(errOut, "warning: worktree not found at %s; cleaning up daemon state only\n", resolved.path)
+		if cleanup.DryRun {
+			fmt.Fprintf(out, "would remove stale worktree registration: %s:%s\n", resolved.project, resolved.slug)
+			return nil
+		}
+		if err := worktree.Unregister(daemonCfg, resolved.project, resolved.slug); err != nil {
+			return fmt.Errorf("cleanup stale worktree registration: %w", err)
+		}
+		fmt.Fprintf(out, "cleaned up daemon state for missing worktree %s:%s\n", resolved.project, resolved.slug)
+		return nil
 	}
 	if samePath(resolved.path, resolved.mainPath) {
 		return errors.New("cannot cleanup the main worktree")

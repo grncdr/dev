@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"dev/internal/worktree"
 )
 
 func TestWorktreeLifecycleAddListCleanupDryRun(t *testing.T) {
@@ -127,6 +129,56 @@ func TestWorktreeCleanupMainFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "main worktree") {
 		t.Fatalf("expected main worktree error, got %v", err)
+	}
+}
+
+func TestWorktreeCleanupMissingPathWarnsAndUnregisters(t *testing.T) {
+	repoDir, daemonConfigPath, opts := setupWorktreeLifecycleRepo(t)
+	target := "feature"
+	origWD := rememberCWD()
+	t.Cleanup(func() {
+		_ = os.Chdir(origWD)
+	})
+	t.Cleanup(func() {
+		_ = os.Remove(daemonConfigPath)
+	})
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatalf("chdir repo: %v", err)
+	}
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	if err := runWorktreeAdd(opts, target, "", &out, &errOut); err != nil {
+		t.Fatalf("runWorktreeAdd: %v", err)
+	}
+
+	worktreePath := filepath.Join(filepath.Dir(daemonConfigPath), "managed", "demo", "feature")
+	if err := os.RemoveAll(worktreePath); err != nil {
+		t.Fatalf("remove worktree path: %v", err)
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if err := runWorktreeCleanup(opts, target, &worktreeCleanupOptions{}, &out, &errOut); err != nil {
+		t.Fatalf("runWorktreeCleanup: %v", err)
+	}
+	if !strings.Contains(errOut.String(), "warning: worktree not found at") {
+		t.Fatalf("expected missing worktree warning, got %q", errOut.String())
+	}
+	if !strings.Contains(out.String(), "cleaned up daemon state for missing worktree demo:feature") {
+		t.Fatalf("expected daemon state cleanup output, got %q", out.String())
+	}
+
+	daemonCfg, err := loadDaemonConfig(opts)
+	if err != nil {
+		t.Fatalf("load daemon config: %v", err)
+	}
+	_, ok, err := worktree.FindRegisteredWorktree(daemonCfg, "demo", "feature")
+	if err != nil {
+		t.Fatalf("find registered worktree: %v", err)
+	}
+	if ok {
+		t.Fatalf("expected worktree registration to be removed")
 	}
 }
 
