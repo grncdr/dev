@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+// ProjectGatewayAuth holds HTTP basic auth credentials parsed from the
+// project-level [gateway.auth] table.
 type ProjectGatewayAuth struct {
 	Username string
 	Password string

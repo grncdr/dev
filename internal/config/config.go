@@ -17,56 +17,93 @@ const (
 	DefaultDaemonConfig  = "~/.config/dev/daemon.toml"
 )
 
+// ProjectConfig is the parsed representation of a .dev.toml project file.
 type ProjectConfig struct {
-	Project   ProjectBlock              `toml:"project" json:"project"`
-	Gateway   map[string]any            `toml:"gateway" json:"gateway,omitempty"`
+	// Project holds the [project] table (name, main_slug).
+	Project ProjectBlock `toml:"project" json:"project"`
+	// Gateway holds the raw [gateway] table (url, expose, auth).
+	// Parsed on demand via helpers like GatewayExposeRules.
+	Gateway map[string]any `toml:"gateway" json:"gateway,omitempty"`
+	// Processes maps process names to their raw [process.<name>] tables.
 	Processes map[string]map[string]any `toml:"process" json:"processes,omitempty"`
-	Proxy     ProjectProxyBlock         `toml:"proxy" json:"proxy,omitempty"`
-	LocalDNS  ProjectLocalDNSBlock      `toml:"local-dns" json:"local_dns,omitempty"`
-	Hooks     HooksBlock                `toml:"hooks" json:"hooks,omitempty"`
-	Commands  CommandsBlock             `toml:"commands" json:"commands,omitempty"`
+	// Proxy holds the [proxy] table (reserved for future use).
+	Proxy ProjectProxyBlock `toml:"proxy" json:"proxy,omitempty"`
+	// LocalDNS holds the [local-dns] table (hostname overrides).
+	LocalDNS ProjectLocalDNSBlock `toml:"local-dns" json:"local_dns,omitempty"`
+	// Hooks holds the [hooks] table (lifecycle shell commands).
+	Hooks HooksBlock `toml:"hooks" json:"hooks,omitempty"`
+	// Commands holds the [commands] table (wrapper configuration).
+	Commands CommandsBlock `toml:"commands" json:"commands,omitempty"`
 }
 
+// ProjectBlock holds the [project] table in a .dev.toml file.
 type ProjectBlock struct {
-	Name     string `toml:"name" json:"name"`
+	// Name is the project identifier (required).
+	Name string `toml:"name" json:"name"`
+	// MainSlug overrides the default "main" slug for the primary worktree.
+	// Affects DNS label resolution via worktree.ProxyDNSLabelForSlug.
 	MainSlug string `toml:"main_slug" json:"main_slug,omitempty"`
 }
 
+// DaemonConfig is the parsed representation of the user's daemon.toml file.
 type DaemonConfig struct {
-	StateDir     string                `toml:"state_dir" json:"state_dir,omitempty"`
-	Gateway      DaemonGatewayBlock    `toml:"gateway" json:"gateway,omitempty"`
-	LocalProxy   DaemonLocalProxyBlock `toml:"local-proxy" json:"local_proxy,omitempty"`
-	WorktreeDir  string                `toml:"worktree_dir" json:"worktree_dir,omitempty"`
-	GlobalHooks  HooksBlock            `toml:"global-hooks" json:"global_hooks,omitempty"`
+	// StateDir overrides the default state directory (~/.local/state/dev).
+	StateDir string `toml:"state_dir" json:"state_dir,omitempty"`
+	// Gateway holds the [gateway] table for running a gateway server.
+	Gateway DaemonGatewayBlock `toml:"gateway" json:"gateway,omitempty"`
+	// LocalProxy holds the [local-proxy] table for the local HTTPS proxy.
+	LocalProxy DaemonLocalProxyBlock `toml:"local-proxy" json:"local_proxy,omitempty"`
+	// WorktreeDir overrides the default worktree checkout directory.
+	WorktreeDir string `toml:"worktree_dir" json:"worktree_dir,omitempty"`
+	// GlobalHooks holds lifecycle hooks that apply to all projects.
+	GlobalHooks HooksBlock `toml:"global-hooks" json:"global_hooks,omitempty"`
+	// ProjectHooks maps project names to per-project lifecycle hooks.
 	ProjectHooks map[string]HooksBlock `toml:"project-hooks" json:"project_hooks,omitempty"`
 }
 
+// DaemonGatewayBlock holds the [gateway] table in daemon.toml for running
+// a gateway server that exposes tunnels to the public internet.
+// Its fields drive gateway.ServerOptions and gateway.ACMEOptions.
 type DaemonGatewayBlock struct {
-	Enabled       bool                 `toml:"enabled" json:"enabled,omitempty"`
-	Listen        string               `toml:"listen" json:"listen,omitempty"`
-	HTTPListen    string               `toml:"http_listen" json:"http_listen,omitempty"`
-	DNSZone       string               `toml:"dns_zone" json:"dns_zone,omitempty"`
-	Hostname      string               `toml:"hostname" json:"hostname,omitempty"`
-	ACMEEmail     string               `toml:"acme_email" json:"acme_email,omitempty"`
-	ACMEDir       string               `toml:"acme_directory" json:"acme_directory,omitempty"`
-	ACMEStore     string               `toml:"acme_storage" json:"acme_storage,omitempty"`
-	ACMEResolvers []string             `toml:"acme_resolvers" json:"acme_resolvers,omitempty"`
-	Auth          DaemonGatewayAuth    `toml:"auth" json:"auth,omitempty"`
-	Route53       DaemonGatewayRoute53 `toml:"route53" json:"route53,omitempty"`
+	// Enabled controls whether the gateway server starts.
+	Enabled bool `toml:"enabled" json:"enabled,omitempty"`
+	// Listen is the HTTPS listen address (e.g. ":443").
+	Listen string `toml:"listen" json:"listen,omitempty"`
+	// HTTPListen is the optional plaintext HTTP listen address.
+	HTTPListen string `toml:"http_listen" json:"http_listen,omitempty"`
+	// DNSZone is the public DNS zone for tunnel subdomains.
+	DNSZone string `toml:"dns_zone" json:"dns_zone,omitempty"`
+	// Hostname is the gateway's public hostname.
+	Hostname string `toml:"hostname" json:"hostname,omitempty"`
+	// ACMEEmail is the contact email for ACME certificate issuance.
+	ACMEEmail string `toml:"acme_email" json:"acme_email,omitempty"`
+	// ACMEDir overrides the ACME directory URL (defaults to Let's Encrypt).
+	ACMEDir string `toml:"acme_directory" json:"acme_directory,omitempty"`
+	// ACMEStore is the filesystem path for ACME certificate storage.
+	ACMEStore string `toml:"acme_storage" json:"acme_storage,omitempty"`
+	// ACMEResolvers lists DNS resolvers for ACME DNS-01 validation.
+	ACMEResolvers []string `toml:"acme_resolvers" json:"acme_resolvers,omitempty"`
+	// Auth holds HTTP basic auth credentials for agent authentication.
+	Auth DaemonGatewayAuth `toml:"auth" json:"auth,omitempty"`
+	// Route53 holds AWS Route53 DNS provisioning settings.
+	Route53 DaemonGatewayRoute53 `toml:"route53" json:"route53,omitempty"`
 }
 
+// DaemonGatewayAuth holds HTTP basic auth credentials for the gateway's agent API.
 type DaemonGatewayAuth struct {
 	Enabled  bool   `toml:"enabled" json:"enabled,omitempty"`
 	Username string `toml:"username" json:"username,omitempty"`
 	Password string `toml:"password" json:"password,omitempty"`
 }
 
+// DaemonGatewayRoute53 holds AWS Route53 DNS settings for automatic tunnel DNS provisioning.
 type DaemonGatewayRoute53 struct {
 	Enabled      bool   `toml:"enabled" json:"enabled,omitempty"`
 	HostedZoneID string `toml:"hosted_zone_id" json:"hosted_zone_id,omitempty"`
 	TTL          int64  `toml:"ttl" json:"ttl,omitempty"`
 }
 
+// HooksBlock holds shell commands executed at worktree and process lifecycle events.
 type HooksBlock struct {
 	PreWorktreeAdd      string `toml:"pre_worktree_add" json:"pre_worktree_add,omitempty"`
 	PostWorktreeAdd     string `toml:"post_worktree_add" json:"post_worktree_add,omitempty"`
@@ -78,24 +115,36 @@ type HooksBlock struct {
 	PostStop            string `toml:"post_stop" json:"post_stop,omitempty"`
 }
 
+// CommandsBlock holds the [commands] table, currently only the optional shell
+// wrapper prefix (e.g. "mise exec --" or "direnv exec .").
 type CommandsBlock struct {
+	// Wrapper is prepended to all process and hook commands.
 	Wrapper string `toml:"wrapper" json:"wrapper,omitempty"`
 }
 
+// ProjectProxyBlock holds the [proxy] table (reserved for future use).
 type ProjectProxyBlock struct {
-	// Reserved for future project-level proxy options.
 }
 
+// ProjectLocalDNSBlock holds the [local-dns] table for per-project hostname overrides.
 type ProjectLocalDNSBlock struct {
+	// Overrides maps worktree slugs to custom DNS labels for the local proxy.
 	Overrides map[string]string `toml:"overrides" json:"overrides,omitempty"`
 }
 
+// DaemonLocalProxyBlock holds the [local-proxy] table in daemon.toml for the
+// local HTTPS proxy that routes <slug>.<apex> hostnames to running processes.
 type DaemonLocalProxyBlock struct {
-	Enabled     *bool  `toml:"enabled" json:"enabled,omitempty"`
-	ListenHTTP  string `toml:"listen_http" json:"listen_http,omitempty"`
+	// Enabled controls whether the local proxy starts (defaults to true).
+	Enabled *bool `toml:"enabled" json:"enabled,omitempty"`
+	// ListenHTTP is the HTTP listen address (e.g. "127.0.0.1:80").
+	ListenHTTP string `toml:"listen_http" json:"listen_http,omitempty"`
+	// ListenHTTPS is the HTTPS listen address (e.g. "127.0.0.1:443").
 	ListenHTTPS string `toml:"listen_https" json:"listen_https,omitempty"`
-	ApexZone    string `toml:"apex_zone" json:"apex_zone,omitempty"`
-	Allow       string `toml:"allow" json:"allow,omitempty"`
+	// ApexZone is the DNS suffix for local routing (defaults to ".localhost").
+	ApexZone string `toml:"apex_zone" json:"apex_zone,omitempty"`
+	// Allow is a CIDR range of allowed client IPs.
+	Allow string `toml:"allow" json:"allow,omitempty"`
 }
 
 func (b *DaemonLocalProxyBlock) IsEnabled() bool {
@@ -105,11 +154,17 @@ func (b *DaemonLocalProxyBlock) IsEnabled() bool {
 	return *b.Enabled
 }
 
+// LoadInfo records which config files were found and used during loading.
 type LoadInfo struct {
-	ConfigPath        string
+	// ConfigPath is the primary .dev.toml path that was loaded.
+	ConfigPath string
+	// LocalOverridePath is the path checked for .dev.local.toml.
 	LocalOverridePath string
+	// LocalOverrideUsed is true when .dev.local.toml was found and merged.
 	LocalOverrideUsed bool
-	DaemonConfigPath  string
+	// DaemonConfigPath is the daemon.toml path that was checked.
+	DaemonConfigPath string
+	// DaemonConfigFound is true when daemon.toml existed on disk.
 	DaemonConfigFound bool
 }
 
@@ -262,6 +317,8 @@ func ResolveWorktreeDir(cfg *DaemonConfig) (string, error) {
 	return filepath.Clean(expanded), nil
 }
 
+// WorktreeLifecycleHookCommands is the resolved set of lifecycle hook commands
+// collected from global and per-project daemon hooks.
 type WorktreeLifecycleHookCommands struct {
 	PreWorktreeAdd      []string
 	PostWorktreeAdd     []string

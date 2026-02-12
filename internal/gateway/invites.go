@@ -13,11 +13,18 @@ import (
 	"time"
 )
 
+// Invite is a time-limited, use-limited token that authorizes a new agent to
+// enroll via the cert/issue endpoint.
 type Invite struct {
-	Code       string    `json:"code"`
-	CreatedAt  time.Time `json:"created_at"`
-	ExpiresAt  time.Time `json:"expires_at"`
-	UsesLeft   int       `json:"uses_left"`
+	// Code is the random hex invite token.
+	Code string `json:"code"`
+	// CreatedAt is when the invite was generated.
+	CreatedAt time.Time `json:"created_at"`
+	// ExpiresAt is when the invite becomes invalid.
+	ExpiresAt time.Time `json:"expires_at"`
+	// UsesLeft is the remaining number of times this invite can be consumed.
+	UsesLeft int `json:"uses_left"`
+	// ConsumedAt is set when the last use is consumed.
 	ConsumedAt time.Time `json:"consumed_at,omitempty"`
 }
 
@@ -25,6 +32,8 @@ type inviteSnapshot struct {
 	Invites []Invite `json:"invites"`
 }
 
+// InviteStore persists mTLS enrollment invites to disk as JSON and provides
+// thread-safe creation and consumption.
 type InviteStore struct {
 	path    string
 	mu      sync.Mutex

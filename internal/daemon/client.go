@@ -13,6 +13,7 @@ import (
 	"time"
 )
 
+// Client talks to a running daemon over its unix socket.
 type Client struct {
 	socketPath string
 	httpClient *http.Client

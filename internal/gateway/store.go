@@ -20,22 +20,36 @@ const (
 	LeaseExpired LeaseStatus = "expired"
 )
 
+// Lease represents a gateway label registration. Each label maps to a single
+// agent that can receive tunneled traffic.
 type Lease struct {
-	Label      string      `json:"label"`
-	Project    string      `json:"project,omitempty"`
-	Slug       string      `json:"slug,omitempty"`
-	AgentID    string      `json:"agent_id,omitempty"`
-	Name       string      `json:"name,omitempty"`
-	Status     LeaseStatus `json:"status"`
-	CreatedAt  time.Time   `json:"created_at"`
-	LastSeenAt time.Time   `json:"last_seen_at"`
-	ExpiresAt  *time.Time  `json:"expires_at,omitempty"`
+	// Label is the unique tunnel label (used as a DNS subdomain).
+	// Corresponds to agent.TunnelSpec.Label and gatewayproto.RegisterRequest.Label.
+	Label string `json:"label"`
+	// Project is the project name provided during agent registration.
+	Project string `json:"project,omitempty"`
+	// Slug is the worktree slug provided during agent registration.
+	Slug string `json:"slug,omitempty"`
+	// AgentID is the unique agent instance identifier.
+	AgentID string `json:"agent_id,omitempty"`
+	// Name is the human-readable agent name.
+	Name string `json:"name,omitempty"`
+	// Status is the lease lifecycle state (pending, active, revoked, expired).
+	Status LeaseStatus `json:"status"`
+	// CreatedAt is when the lease was first created.
+	CreatedAt time.Time `json:"created_at"`
+	// LastSeenAt is updated on each agent heartbeat.
+	LastSeenAt time.Time `json:"last_seen_at"`
+	// ExpiresAt is the optional lease expiration time.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 type leaseSnapshot struct {
 	Leases []Lease `json:"leases"`
 }
 
+// LeaseStore persists gateway label leases to disk as JSON and provides
+// thread-safe in-memory access.
 type LeaseStore struct {
 	path   string
 	mu     sync.RWMutex

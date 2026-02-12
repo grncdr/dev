@@ -14,12 +14,19 @@ import (
 
 const worktreeRegistryFileName = "worktree-registry.json"
 
+// Registration is a worktree entry persisted in the worktree registry file.
+// The registry tracks worktrees that have been explicitly added via "dev worktree add".
 type Registration struct {
-	Project  string `json:"project"`
-	Slug     string `json:"slug"`
-	Path     string `json:"path"`
+	// Project is the project name from the worktree's .dev.toml.
+	Project string `json:"project"`
+	// Slug is the worktree slug.
+	Slug string `json:"slug"`
+	// Path is the filesystem path of the worktree checkout.
+	Path string `json:"path"`
+	// MainPath is the path to the main worktree (set for non-main worktrees).
 	MainPath string `json:"main_path,omitempty"`
-	Branch   string `json:"branch,omitempty"`
+	// Branch is the git branch name at registration time.
+	Branch string `json:"branch,omitempty"`
 }
 
 type registryState struct {

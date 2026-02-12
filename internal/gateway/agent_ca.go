@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+// CertIssuer is the gateway's internal certificate authority that issues mTLS
+// client certificates to agents. It auto-generates a self-signed CA on first use.
 type CertIssuer struct {
 	caCert    *x509.Certificate
 	caKey     *ecdsa.PrivateKey

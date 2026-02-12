@@ -20,6 +20,9 @@ const (
 
 var errSessionClosed = errors.New("tunnel session is closed")
 
+// Session multiplexes multiple bidirectional streams over a single net.Conn.
+// It uses a simple framing protocol (open/data/close) to interleave streams,
+// allowing the gateway to forward concurrent HTTP requests over one tunnel.
 type Session struct {
 	conn net.Conn
 

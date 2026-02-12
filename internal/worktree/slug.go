@@ -6,8 +6,11 @@ import (
 	"strings"
 )
 
+// Entry is a git worktree as reported by "git worktree list".
 type Entry struct {
-	Path   string
+	// Path is the filesystem path of the worktree checkout.
+	Path string
+	// Branch is the checked-out branch name.
 	Branch string
 }
 

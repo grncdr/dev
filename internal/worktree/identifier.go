@@ -16,6 +16,7 @@ var (
 	validSlugPattern2   = regexp.MustCompile(`^[a-z0-9/_-]+$`)
 )
 
+// ProjectSlug is a parsed "project:slug" identifier.
 type ProjectSlug struct {
 	Project string
 	Slug    string

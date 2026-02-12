@@ -22,6 +22,8 @@ import (
 	"dev/internal/utils"
 )
 
+// Server is the public-facing gateway that accepts agent registrations,
+// manages tunnel sessions, and forwards public HTTP requests to connected agents.
 type Server struct {
 	httpServer       *http.Server
 	listener         net.Listener
@@ -45,29 +47,47 @@ const (
 	startupProvisionRetryDelay  = 5 * time.Second
 )
 
+// ServerOptions configures a new gateway Server.
 type ServerOptions struct {
+	// ListenAddr is the TCP address to listen on (defaults to ":8080").
 	ListenAddr string
-	DataDir    string
-	DNSZone    string
-	DNS        DNSProvider
-	Certs      CertProvisioner
-	TLSConfig  *tls.Config
-	LogWriter  io.Writer
+	// DataDir is the directory for persistent gateway state (leases, invites, PKI).
+	DataDir string
+	// DNSZone is the public DNS zone for tunnel subdomains.
+	DNSZone string
+	// DNS is the provider for automatic DNS record management (optional).
+	DNS DNSProvider
+	// Certs is the provider for automatic TLS certificate provisioning (optional).
+	Certs CertProvisioner
+	// TLSConfig enables TLS on the listener. When non-nil, the gateway also
+	// enforces mTLS client certificate authentication on /_agent/ endpoints
+	// using CertIssuer's CA pool.
+	TLSConfig *tls.Config
+	// LogWriter receives structured JSON request logs (defaults to os.Stdout).
+	LogWriter io.Writer
 }
 
+// UnregisterRequest is the JSON body for the agent unregister and heartbeat endpoints.
 type UnregisterRequest struct {
 	Label string `json:"label"`
 }
 
+// InviteCreateRequest is the JSON body for creating a new mTLS enrollment invite.
 type InviteCreateRequest struct {
+	// TTLSeconds is how long the invite is valid (defaults to 300).
 	TTLSeconds int64 `json:"ttl_seconds"`
-	Uses       int   `json:"uses"`
+	// Uses is how many times the invite can be consumed (defaults to 1).
+	Uses int `json:"uses"`
 }
 
+// CertIssueRequest is the JSON body for issuing a client certificate via an invite code.
 type CertIssueRequest struct {
+	// InviteCode is the one-time enrollment code.
 	InviteCode string `json:"invite_code"`
-	Name       string `json:"name"`
-	CSR        string `json:"csr"`
+	// Name is the common name for the issued certificate.
+	Name string `json:"name"`
+	// CSR is the PEM-encoded certificate signing request.
+	CSR string `json:"csr"`
 }
 
 func NewServer(opts ServerOptions) (*Server, error) {

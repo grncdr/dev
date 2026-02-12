@@ -16,17 +16,24 @@ type DNSProvider interface {
 	RemoveLabel(ctx context.Context, label string) error
 }
 
+// Route53Options configures the Route53 DNS provider.
 type Route53Options struct {
+	// HostedZoneID is the AWS Route53 hosted zone ID.
 	HostedZoneID string
-	Domain       string
-	Target       string
-	TTL          int64
+	// Domain is the DNS zone (e.g. "tunnels.example.com").
+	Domain string
+	// Target is the CNAME target for label records (typically the gateway hostname).
+	Target string
+	// TTL is the DNS record TTL in seconds (defaults to 60).
+	TTL int64
 }
 
 type route53Client interface {
 	ChangeResourceRecordSets(ctx context.Context, params *route53.ChangeResourceRecordSetsInput, optFns ...func(*route53.Options)) (*route53.ChangeResourceRecordSetsOutput, error)
 }
 
+// Route53Provider manages DNS records in AWS Route53 for gateway tunnel labels.
+// For each label it creates both a direct and wildcard CNAME record.
 type Route53Provider struct {
 	client route53Client
 	opts   Route53Options

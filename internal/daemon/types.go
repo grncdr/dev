@@ -2,29 +2,48 @@ package daemon
 
 import "dev/internal/agent"
 
+// HealthResponse is the JSON response from the /health daemon endpoint.
 type HealthResponse struct {
 	Status string `json:"status"`
 	PID    int    `json:"pid"`
 }
 
+// WorktreeRequest is the JSON body for worktree and process start/stop/status endpoints.
 type WorktreeRequest struct {
-	Slug      string   `json:"slug"`
-	Project   string   `json:"project,omitempty"`
-	Path      string   `json:"path,omitempty"`
+	// Slug identifies the worktree.
+	Slug string `json:"slug"`
+	// Project narrows resolution when multiple projects share a slug.
+	Project string `json:"project,omitempty"`
+	// Path is a directory hint for resolving the worktree on disk.
+	Path string `json:"path,omitempty"`
+	// Processes limits the operation to specific process names.
 	Processes []string `json:"processes,omitempty"`
-	All       bool     `json:"all,omitempty"`
+	// All selects all processes when Processes is empty.
+	All bool `json:"all,omitempty"`
 }
 
+// TunnelRequest is the JSON body for tunnel open/close endpoints.
+// Fields map 1:1 to agent.TunnelSpec when the daemon opens a tunnel.
 type TunnelRequest struct {
-	Slug         string `json:"slug,omitempty"`
-	Label        string `json:"label,omitempty"`
-	GatewayURL   string `json:"gateway_url,omitempty"`
-	Project      string `json:"project,omitempty"`
-	Name         string `json:"name,omitempty"`
+	// Slug identifies the worktree to tunnel.
+	Slug string `json:"slug,omitempty"`
+	// Label is the unique tunnel label registered with the gateway.
+	Label string `json:"label,omitempty"`
+	// GatewayURL is the gateway server URL to connect to.
+	GatewayURL string `json:"gateway_url,omitempty"`
+	// Project is the project name for gateway registration metadata.
+	Project string `json:"project,omitempty"`
+	// Name is a human-readable identifier sent to the gateway.
+	Name string `json:"name,omitempty"`
+	// AuthUsername is the HTTP basic auth username for access control.
 	AuthUsername string `json:"auth_username,omitempty"`
+	// AuthPassword is the HTTP basic auth password for access control.
 	AuthPassword string `json:"auth_password,omitempty"`
 }
 
+// TunnelStatus is the JSON representation of a tunnel's current state,
+// returned by the tunnels/status and tunnels/open endpoints.
+// It is the API projection of agent.TunnelStatus.
 type TunnelStatus struct {
 	Slug            string `json:"slug"`
 	Label           string `json:"label"`
@@ -37,6 +56,7 @@ type TunnelStatus struct {
 	RegisterMessage string `json:"register_message,omitempty"`
 }
 
+// TunnelsResponse wraps the list of tunnels returned by GET /tunnels/status.
 type TunnelsResponse struct {
 	Tunnels []TunnelStatus `json:"tunnels"`
 }

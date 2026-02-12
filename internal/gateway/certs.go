@@ -19,15 +19,24 @@ type CertProvisioner interface {
 	EnsureLabel(ctx context.Context, label string) error
 }
 
+// ACMEOptions configures the ACME certificate manager.
 type ACMEOptions struct {
-	PublicHost   string
-	Email        string
+	// PublicHost is the gateway's public hostname (used for wildcard certs).
+	PublicHost string
+	// Email is the ACME account contact email.
+	Email string
+	// DirectoryURL overrides the ACME CA directory (defaults to Let's Encrypt).
 	DirectoryURL string
-	StorageDir   string
+	// StorageDir is the filesystem path for certmagic certificate storage.
+	StorageDir string
+	// HostedZoneID is the Route53 hosted zone for DNS-01 validation.
 	HostedZoneID string
-	Resolvers    []string
+	// Resolvers lists DNS resolvers used to verify TXT record propagation.
+	Resolvers []string
 }
 
+// ACMEManager provisions wildcard TLS certificates for gateway tunnel labels
+// using ACME DNS-01 challenges via certmagic.
 type ACMEManager struct {
 	cfg        *certmagic.Config
 	publicHost string

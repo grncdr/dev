@@ -88,6 +88,7 @@ func (m *Manager) SetDaemonConfig(cfg *config.DaemonConfig) {
 	m.rebuildRouterLocked()
 }
 
+// WorktreeStatus is the JSON response for worktree start/stop/status operations.
 type WorktreeStatus struct {
 	Project   string          `json:"project,omitempty"`
 	Slug      string          `json:"slug"`
@@ -96,17 +97,24 @@ type WorktreeStatus struct {
 	Routing   WorktreeRouting `json:"routing,omitempty"`
 }
 
+// ProcessStatus describes the runtime state of a single managed process.
 type ProcessStatus struct {
 	Name   string `json:"name"`
 	PID    int    `json:"pid"`
 	Status string `json:"status"`
 }
 
+// WorktreeRouting describes the local and gateway routes active for a worktree,
+// included in WorktreeStatus responses.
 type WorktreeRouting struct {
-	Local         map[string][]string `json:"local,omitempty"`
-	Gateway       map[string][]string `json:"gateway,omitempty"`
-	GatewayURL    string              `json:"gateway_url,omitempty"`
-	GatewayStatus string              `json:"gateway_status,omitempty"`
+	// Local maps process names to their local proxy URLs.
+	Local map[string][]string `json:"local,omitempty"`
+	// Gateway maps process names to their public gateway URLs.
+	Gateway map[string][]string `json:"gateway,omitempty"`
+	// GatewayURL is the gateway server this worktree is tunneled through.
+	GatewayURL string `json:"gateway_url,omitempty"`
+	// GatewayStatus is the tunnel connection state (e.g. "connected").
+	GatewayStatus string `json:"gateway_status,omitempty"`
 }
 
 type processInfo struct {

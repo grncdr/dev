@@ -23,23 +23,42 @@ const (
 	SubdomainExplicit
 )
 
+// Matcher is a single proxy routing rule parsed from a process's [process.<name>.proxy]
+// table. It describes which requests (by subdomain and path) map to which process.
 type Matcher struct {
-	Process   string
+	// Process is the target process name from the project config.
+	Process string
+	// Subdomain is the explicit subdomain to match (for SubdomainExplicit kind).
 	Subdomain string
-	Kind      SubdomainKind
-	Path      string
-	Match     string
-	Priority  int
+	// Kind controls subdomain matching: base (no subdomain), wildcard, or explicit.
+	Kind SubdomainKind
+	// Path is the URL path prefix or exact path to match.
+	Path string
+	// Match is the path match mode: "prefix" (default) or "exact".
+	Match string
+	// Priority breaks ties when multiple matchers have the same specificity.
+	Priority int
+	// TCPListen is a raw TCP port for non-HTTP proxying (skipped by HTTP routing).
 	TCPListen int
+	// Singleton is true when the process runs only in the main worktree.
+	// When set, proxy requests for this process in non-main worktrees are
+	// redirected to the main worktree's instance.
 	Singleton bool
 }
 
+// WorktreeInput is the data needed to register a worktree with the Router.
 type WorktreeInput struct {
+	// RuntimeKey is the canonical filesystem path used as the worktree's identity.
+	// Must match the key used in daemon.Manager's worktree and process maps.
 	RuntimeKey string
-	Slug       string
-	RepoPath   string
-	Labels     []string
-	Matchers   []Matcher
+	// Slug is the worktree slug.
+	Slug string
+	// RepoPath is the filesystem path to the worktree checkout.
+	RepoPath string
+	// Labels are the DNS labels this worktree responds to (e.g. ["main", "my-branch"]).
+	Labels []string
+	// Matchers are the proxy rules parsed from the worktree's project config.
+	Matchers []Matcher
 }
 
 type worktreeRoute struct {
@@ -50,6 +69,9 @@ type worktreeRoute struct {
 	matchers   []Matcher
 }
 
+// Router resolves incoming HTTP requests to a worktree and process by matching
+// the request hostname against registered DNS labels and the path against
+// proxy Matchers.
 type Router struct {
 	mu        sync.RWMutex
 	apexZone  string

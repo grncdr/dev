@@ -15,18 +15,32 @@ import (
 	"dev/internal/config"
 )
 
+// TunnelResolveResult extends ProxyTarget with gateway-specific metadata
+// needed to proxy a tunnel request to a local process.
 type TunnelResolveResult struct {
 	ProxyTarget
-	GatewayMode     string
+	// GatewayMode is the expose mode from config.GatewayExposeRule.Mode
+	// ("reverse_proxy" or "rewrite"). Controls whether response headers and
+	// body are rewritten to translate between public and local hostnames.
+	GatewayMode string
+	// GatewayDebugLog is the relative path for HTTP transcript logging, if configured.
 	GatewayDebugLog string
 }
 
+// TunnelProxyOptions holds the callbacks needed by HandleTunnelRequest to
+// resolve targets, manage proxy sessions, and log.
 type TunnelProxyOptions struct {
-	ResolveTarget   func(host, path string) (TunnelResolveResult, error)
+	// ResolveTarget maps a local hostname and request path to an upstream process.
+	ResolveTarget func(host, path string) (TunnelResolveResult, error)
+	// EndProxySession is called when the proxied request completes, allowing
+	// the daemon to decrement active proxy session counts.
 	EndProxySession func(targetSlug, targetPath, process string)
+	// ProjectApexZone returns the local DNS apex zone (e.g. ".localhost").
 	ProjectApexZone func() string
-	WorktreePath    func(targetSlug, targetPath string) (string, bool)
-	Logf            func(format string, args ...any)
+	// WorktreePath resolves a slug+path hint to the worktree's filesystem path.
+	WorktreePath func(targetSlug, targetPath string) (string, bool)
+	// Logf is an optional structured logger for diagnostics.
+	Logf func(format string, args ...any)
 }
 
 func HandleTunnelRequest(ctx context.Context, opts TunnelProxyOptions, tunnel TunnelStatus, req *http.Request, stream net.Conn) error {

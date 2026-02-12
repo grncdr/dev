@@ -11,30 +11,54 @@ import (
 	"time"
 )
 
+// TunnelSpec describes the parameters needed to open a tunnel through a gateway.
 type TunnelSpec struct {
-	Slug          string
-	Label         string
-	GatewayURL    string
-	Project       string
-	Name          string
+	// Slug is the worktree slug being tunneled.
+	Slug string
+	// Label is the unique tunnel label registered with the gateway.
+	Label string
+	// GatewayURL is the gateway server URL to connect to.
+	GatewayURL string
+	// Project is the project name for gateway registration.
+	Project string
+	// Name is a human-readable identifier sent to the gateway.
+	Name string
+	// LocalBaseHost is the local proxy hostname used to translate public
+	// hostnames back to local routing (e.g. "main.localhost").
+	// Derived from the daemon's apex zone and the worktree's DNS label.
 	LocalBaseHost string
-	AuthUsername  string
-	AuthPassword  string
+	// AuthUsername is the HTTP basic auth username for tunnel access control.
+	AuthUsername string
+	// AuthPassword is the HTTP basic auth password for tunnel access control.
+	AuthPassword string
 }
 
+// TunnelStatus is the live state of a tunnel within a Connection.
 type TunnelStatus struct {
-	Slug            string
-	Label           string
-	GatewayURL      string
-	PublicHost      string
-	Project         string
-	Status          string
-	LastError       string
-	RegisterStage   string
+	// Slug is the worktree slug being tunneled.
+	Slug string
+	// Label is the tunnel label registered with the gateway.
+	Label string
+	// GatewayURL is the gateway server this tunnel connects to.
+	GatewayURL string
+	// PublicHost is the gateway-assigned public hostname (set after registration).
+	PublicHost string
+	// Project is the project name.
+	Project string
+	// Status is the tunnel state: "connecting", "connected", "error", or "stopped".
+	Status string
+	// LastError holds the most recent connection or registration error.
+	LastError string
+	// RegisterStage is the current registration progress stage.
+	RegisterStage string
+	// RegisterMessage is the current registration progress message.
 	RegisterMessage string
-	LocalBaseHost   string
-	AuthUsername    string
-	AuthPassword    string
+	// LocalBaseHost is the local proxy hostname for host translation.
+	LocalBaseHost string
+	// AuthUsername is the HTTP basic auth username for tunnel access control.
+	AuthUsername string
+	// AuthPassword is the HTTP basic auth password for tunnel access control.
+	AuthPassword string
 }
 
 type tunnelRuntime struct {
@@ -47,6 +71,9 @@ type tunnelRuntime struct {
 	registerMsg   string
 }
 
+// Connection manages the set of tunnels to a single gateway server.
+// It handles opening, closing, and tracking tunnel lifecycle for all
+// worktrees sharing the same gateway URL.
 type Connection struct {
 	gatewayURL    string
 	credentialDir string

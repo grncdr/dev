@@ -21,21 +21,41 @@ import (
 	"dev/internal/utils"
 )
 
+// Agent maintains a persistent tunnel connection to a gateway server.
+// It registers with the gateway, opens a multiplexed tunnel, and dispatches
+// incoming HTTP requests to HandleStream.
 type Agent struct {
-	GatewayURL         string
-	Project            string
-	Slug               string
-	Label              string
-	AgentID            string
-	Name               string
-	RetryDelay         time.Duration
-	HTTPClient         *http.Client
-	GatewayClient      *http.Client
-	TLSConfig          *tls.Config
-	HandleStream       func(context.Context, *http.Request, net.Conn) error
-	OnConnected        func()
-	OnDisconnected     func(error)
-	OnRegistered       func(publicHost string)
+	// GatewayURL is the base URL of the gateway to connect to (required).
+	GatewayURL string
+	// Project is the project name sent during registration.
+	Project string
+	// Slug is the worktree slug sent during registration.
+	Slug string
+	// Label is the unique tunnel label registered with the gateway (required).
+	Label string
+	// AgentID is a unique identifier for this agent instance.
+	AgentID string
+	// Name is a human-readable agent name sent during registration.
+	Name string
+	// RetryDelay is the pause between reconnection attempts (defaults to 500ms).
+	RetryDelay time.Duration
+	// HTTPClient is used for non-gateway HTTP requests.
+	HTTPClient *http.Client
+	// GatewayClient is used for gateway API calls (registration); if nil,
+	// HTTPClient is used. Typically carries mTLS client credentials issued
+	// by the gateway's CertIssuer via MTLSClientForGatewayURL.
+	GatewayClient *http.Client
+	// TLSConfig is used for the raw TCP tunnel connection to the gateway.
+	TLSConfig *tls.Config
+	// HandleStream is called for each inbound HTTP request on the tunnel (required).
+	HandleStream func(context.Context, *http.Request, net.Conn) error
+	// OnConnected is called when the tunnel session is established.
+	OnConnected func()
+	// OnDisconnected is called when the tunnel session drops.
+	OnDisconnected func(error)
+	// OnRegistered is called after successful gateway registration.
+	OnRegistered func(publicHost string)
+	// OnRegisterProgress is called with incremental registration status updates.
 	OnRegisterProgress func(stage, message string)
 }
 

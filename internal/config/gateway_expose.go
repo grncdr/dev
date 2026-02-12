@@ -12,8 +12,12 @@ const (
 	GatewayModeRewrite      = "rewrite"
 )
 
+// GatewayExposeRule is a parsed entry from the [gateway.expose] table,
+// describing how a process is exposed through the gateway tunnel.
 type GatewayExposeRule struct {
-	Mode     string
+	// Mode is the proxy strategy: "reverse_proxy", "rewrite", or "disable".
+	Mode string
+	// DebugLog is an optional relative path for HTTP transcript logging.
 	DebugLog string
 }
 

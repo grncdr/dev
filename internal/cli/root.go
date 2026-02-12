@@ -12,17 +12,27 @@ import (
 	"dev/internal/config"
 )
 
+// Options holds the global CLI flags and resolved state shared across all commands.
 type Options struct {
-	ConfigPath    string
-	DaemonConfig  string
-	Debug         bool
-	WorkingDir    string
+	// ConfigPath is the --config flag value (defaults to ".dev.toml").
+	ConfigPath string
+	// DaemonConfig is the --daemon-config flag value.
+	DaemonConfig string
+	// Debug enables verbose logging when true.
+	Debug bool
+	// WorkingDir is the process working directory at startup.
+	WorkingDir string
+	// ResolvedPaths holds the absolute paths computed from the flag values.
 	ResolvedPaths ResolvedPaths
 }
 
+// ResolvedPaths holds absolute filesystem paths for the project and daemon configs,
+// resolved from the CLI flag values during PersistentPreRunE.
 type ResolvedPaths struct {
+	// ProjectConfig is the absolute path to .dev.toml.
 	ProjectConfig string
-	DaemonConfig  string
+	// DaemonConfig is the absolute path to daemon.toml.
+	DaemonConfig string
 }
 
 func Execute() error {
