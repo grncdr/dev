@@ -16,6 +16,10 @@ func interruptManagedProcess(cmd *exec.Cmd) error {
 	return cmd.Process.Signal(os.Interrupt)
 }
 
+func interruptProcessGroup(cmd *exec.Cmd) error {
+	return interruptManagedProcess(cmd)
+}
+
 func killManagedProcess(cmd *exec.Cmd) error {
 	if cmd == nil || cmd.Process == nil {
 		return nil

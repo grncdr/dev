@@ -960,6 +960,13 @@ func (m *Manager) stopWorktreeFromRef(slug, project, dirHint string, processes [
 	}
 
 	selected := selectProcesses(cfg.Processes, processes, all)
+
+	type stopResult struct {
+		name string
+		pid  int
+	}
+	var wg sync.WaitGroup
+	results := make(chan stopResult, len(procs))
 	for name, info := range procs {
 		if _, ok := selected[name]; !ok {
 			continue
@@ -968,8 +975,20 @@ func (m *Manager) stopWorktreeFromRef(slug, project, dirHint string, processes [
 			statuses = append(statuses, ProcessStatus{Name: name, Status: "stopped"})
 			continue
 		}
-		stopManagedProcess(info)
-		statuses = append(statuses, ProcessStatus{Name: name, PID: info.cmd.Process.Pid, Status: "stopped"})
+		wg.Add(1)
+		go func(name string, info *processInfo) {
+			defer wg.Done()
+			pid := info.cmd.Process.Pid
+			stopManagedProcess(info)
+			results <- stopResult{name: name, pid: pid}
+		}(name, info)
+	}
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+	for r := range results {
+		statuses = append(statuses, ProcessStatus{Name: r.name, PID: r.pid, Status: "stopped"})
 	}
 
 	m.mu.Lock()
@@ -1736,8 +1755,13 @@ func stopManagedProcess(info *processInfo) {
 
 	select {
 	case <-time.After(2 * time.Second):
-		_ = killManagedProcess(info.cmd)
-		<-info.exited
+		_ = interruptProcessGroup(info.cmd)
+		select {
+		case <-time.After(2 * time.Second):
+			_ = killManagedProcess(info.cmd)
+			<-info.exited
+		case <-info.exited:
+		}
 	case <-info.exited:
 	}
 }
