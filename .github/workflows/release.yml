@@ -45,7 +45,8 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
-          go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o dev-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }} ./cmd/dev
+          VERSION="${GITHUB_REF_NAME#v}"
+          go build -ldflags="-s -w -X dev/internal/version.Version=${VERSION}" -o dev-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }} ./cmd/dev
 
       - name: Generate attestation
         uses: actions/attest-build-provenance@v2

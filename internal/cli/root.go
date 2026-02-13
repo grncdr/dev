@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"dev/internal/config"
+	"dev/internal/version"
 )
 
 // Options holds the global CLI flags and resolved state shared across all commands.
@@ -41,11 +42,16 @@ func Execute() error {
 		return fmt.Errorf("resolve working directory: %w", err)
 	}
 	opts := &Options{WorkingDir: cwd}
+	var showVersion bool
 
 	root := &cobra.Command{
 		Use:   "dev",
 		Short: "dev",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if showVersion {
+				fmt.Println(version.String())
+				os.Exit(0)
+			}
 			return resolvePaths(opts)
 		},
 	}
@@ -53,6 +59,7 @@ func Execute() error {
 	root.PersistentFlags().StringVar(&opts.ConfigPath, "config", config.DefaultProjectConfig, "override project config path")
 	root.PersistentFlags().StringVar(&opts.DaemonConfig, "daemon-config", config.ResolveDaemonConfigPath(), "override daemon config path")
 	root.PersistentFlags().BoolVar(&opts.Debug, "debug", false, "enable debug logging")
+	root.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "show dev version")
 
 	root.AddCommand(newConfigCmd(opts))
 	root.AddCommand(newInitCmd(opts))
@@ -71,6 +78,7 @@ func Execute() error {
 	root.AddCommand(newWorktreeStopCmd(opts))
 	root.AddCommand(newWorktreeRestartCmd(opts))
 	root.AddCommand(newWorktreeStatusCmd(opts))
+	root.AddCommand(newVersionCmd())
 
 	return root.Execute()
 }
