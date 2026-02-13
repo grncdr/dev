@@ -13,6 +13,7 @@ import (
 
 	"dev/internal/config"
 	"dev/internal/daemon"
+	"dev/internal/version"
 	"dev/internal/worktree"
 )
 
@@ -143,6 +144,21 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 	if err != nil {
 		return err
 	}
+	clientVersion := version.String()
+	daemonVersion := "(not running)"
+	if daemonUp {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		health, err := client.Health(ctx)
+		cancel()
+		if err == nil && strings.TrimSpace(health.Version) != "" {
+			daemonVersion = strings.TrimSpace(health.Version)
+		} else {
+			daemonVersion = "(unknown)"
+		}
+	}
+	fmt.Printf("Client version: %s\n", clientVersion)
+	fmt.Printf("Daemon version: %s\n\n", daemonVersion)
+
 	daemonCfg, _ := loadDaemonConfig(opts)
 	mainStatusByWorktree := map[string]*daemon.WorktreeStatus{}
 	cwd := workingDir(opts)

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -260,7 +261,11 @@ func runDaemonStatus() error {
 		return nil
 	}
 
-	fmt.Printf("daemon running (pid %d)\n", health.PID)
+	version := strings.TrimSpace(health.Version)
+	if version == "" {
+		version = "unknown"
+	}
+	fmt.Printf("daemon running (pid %d, version %s)\n", health.PID, version)
 	return nil
 }
 

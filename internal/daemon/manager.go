@@ -21,6 +21,7 @@ import (
 	"dev/internal/config"
 	"dev/internal/procenv"
 	"dev/internal/router"
+	"dev/internal/version"
 	"dev/internal/worktree"
 )
 
@@ -96,11 +97,12 @@ func (m *Manager) SetDaemonConfig(cfg *config.DaemonConfig) {
 
 // WorktreeStatus is the JSON response for worktree start/stop/status operations.
 type WorktreeStatus struct {
-	Project   string          `json:"project,omitempty"`
-	Slug      string          `json:"slug"`
-	Path      string          `json:"path,omitempty"`
-	Processes []ProcessStatus `json:"processes"`
-	Routing   WorktreeRouting `json:"routing,omitempty"`
+	Project       string          `json:"project,omitempty"`
+	Slug          string          `json:"slug"`
+	Path          string          `json:"path,omitempty"`
+	DaemonVersion string          `json:"daemon_version,omitempty"`
+	Processes     []ProcessStatus `json:"processes"`
+	Routing       WorktreeRouting `json:"routing,omitempty"`
 }
 
 // ProcessStatus describes the runtime state of a single managed process.
@@ -443,7 +445,7 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 		return nil, err
 	}
 
-	return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses}, nil
+	return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses, DaemonVersion: version.String()}, nil
 }
 
 func (m *Manager) resolveWorktreePath(slug, project, dirHint string) (string, error) {
@@ -1056,7 +1058,7 @@ func (m *Manager) stopWorktreeFromRef(slug, project, dirHint string, processes [
 
 	statuses := []ProcessStatus{}
 	if !ok {
-		return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses}, nil
+		return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses, DaemonVersion: version.String()}, nil
 	}
 
 	selected := selectProcesses(cfg.Processes, processes, all)
@@ -1112,7 +1114,7 @@ func (m *Manager) stopWorktreeFromRef(slug, project, dirHint string, processes [
 		return nil, err
 	}
 
-	return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses}, nil
+	return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses, DaemonVersion: version.String()}, nil
 }
 
 func (m *Manager) StatusWorktree(slug string) (*WorktreeStatus, error) {
@@ -1170,7 +1172,7 @@ func (m *Manager) StatusWorktreeFromRef(slug, project, dirHint string) (*Worktre
 
 	statuses := []ProcessStatus{}
 	if !ok {
-		return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses}, nil
+		return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses, DaemonVersion: version.String()}, nil
 	}
 
 	for _, e := range entries {
@@ -1188,7 +1190,7 @@ func (m *Manager) StatusWorktreeFromRef(slug, project, dirHint string) (*Worktre
 		statuses = append(statuses, ProcessStatus{Name: name, PID: pid, Status: status})
 	}
 
-	return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses}, nil
+	return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses, DaemonVersion: version.String()}, nil
 }
 
 func resolveWorktreeState(project, slug string) (string, error) {

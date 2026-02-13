@@ -6,6 +6,8 @@ import "dev/internal/agent"
 type HealthResponse struct {
 	Status string `json:"status"`
 	PID    int    `json:"pid"`
+	// Version is the daemon version string.
+	Version string `json:"version,omitempty"`
 }
 
 // WorktreeRequest is the JSON body for worktree and process start/stop/status endpoints.

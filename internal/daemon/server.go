@@ -17,6 +17,7 @@ import (
 
 	"dev/internal/agent"
 	"dev/internal/config"
+	"dev/internal/version"
 	"dev/internal/worktree"
 )
 
@@ -138,8 +139,9 @@ func (s *Server) Serve() error {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	resp := HealthResponse{
-		Status: "ok",
-		PID:    os.Getpid(),
+		Status:  "ok",
+		PID:     os.Getpid(),
+		Version: version.String(),
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

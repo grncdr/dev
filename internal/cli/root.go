@@ -54,7 +54,15 @@ func Execute() error {
 			}
 			return resolvePaths(opts)
 		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if showVersion {
+				fmt.Println(version.String())
+				return nil
+			}
+			return cmd.Help()
+		},
 	}
+	root.SilenceUsage = true
 
 	root.PersistentFlags().StringVar(&opts.ConfigPath, "config", config.DefaultProjectConfig, "override project config path")
 	root.PersistentFlags().StringVar(&opts.DaemonConfig, "daemon-config", config.ResolveDaemonConfigPath(), "override daemon config path")
