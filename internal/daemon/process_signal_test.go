@@ -72,7 +72,7 @@ func TestStopGraceful(t *testing.T) {
 	info, childPID := startHelperProcess(t, "graceful")
 	stopManagedProcess(info)
 
-	if processExists(childPID) {
+	if !waitForProcessExit(childPID, 2*time.Second) {
 		t.Fatal("expected child to be dead after graceful stop")
 	}
 	if sig := exitSignal(info.cmd); sig != 0 {
@@ -88,7 +88,7 @@ func TestStopEscalatesToGroupInterrupt(t *testing.T) {
 	info, childPID := startHelperProcess(t, "ignore")
 	stopManagedProcess(info)
 
-	if processExists(childPID) {
+	if !waitForProcessExit(childPID, 2*time.Second) {
 		t.Fatal("expected child to be dead after group interrupt")
 	}
 	if sig := exitSignal(info.cmd); sig == syscall.SIGKILL {
@@ -102,7 +102,7 @@ func TestStopEscalatesToKill(t *testing.T) {
 	info, childPID := startHelperProcess(t, "ignore-all")
 	stopManagedProcess(info)
 
-	if processExists(childPID) {
+	if !waitForProcessExit(childPID, 2*time.Second) {
 		t.Fatal("expected child to be dead after SIGKILL")
 	}
 	if sig := exitSignal(info.cmd); sig != syscall.SIGKILL {
@@ -132,4 +132,17 @@ func waitForChildPID(t *testing.T, path string) int {
 func processExists(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	return err == nil || !errors.Is(err, syscall.ESRCH)
+}
+
+func waitForProcessExit(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if !processExists(pid) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
