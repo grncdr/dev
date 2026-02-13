@@ -32,6 +32,9 @@ type Manager struct {
 	mu                   sync.Mutex
 	router               *router.Router
 	processes            map[string]map[string]*processInfo
+	idleFollow           map[string]*idleFollowGraph
+	idleStopped          map[string]map[string]bool
+	idleFollowStopped    map[string]map[string]bool
 	worktrees            map[string]runtimeWorktree
 	slugIndex            map[string]map[string]struct{}
 	dnsLabelIndex        map[string]map[string]struct{}
@@ -56,6 +59,9 @@ func NewManager() *Manager {
 	return &Manager{
 		router:               router.New(".localhost"),
 		processes:            make(map[string]map[string]*processInfo),
+		idleFollow:           make(map[string]*idleFollowGraph),
+		idleStopped:          make(map[string]map[string]bool),
+		idleFollowStopped:    make(map[string]map[string]bool),
 		worktrees:            make(map[string]runtimeWorktree),
 		slugIndex:            make(map[string]map[string]struct{}),
 		dnsLabelIndex:        make(map[string]map[string]struct{}),
@@ -224,6 +230,10 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 	if err != nil {
 		return nil, err
 	}
+	idleFollowGraph, err := buildIdleFollowGraph(cfg.Processes)
+	if err != nil {
+		return nil, err
+	}
 	localSet, mainSet, err := needs.buildStartSets(selected, isMain)
 	if err != nil {
 		return nil, err
@@ -238,6 +248,13 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 	m.mu.Lock()
 	if _, ok := m.processes[runtimeKey]; !ok {
 		m.processes[runtimeKey] = make(map[string]*processInfo)
+	}
+	m.idleFollow[runtimeKey] = idleFollowGraph
+	if _, ok := m.idleStopped[runtimeKey]; !ok {
+		m.idleStopped[runtimeKey] = make(map[string]bool)
+	}
+	if _, ok := m.idleFollowStopped[runtimeKey]; !ok {
+		m.idleFollowStopped[runtimeKey] = make(map[string]bool)
 	}
 	m.registerWorktreeLocked(runtimeKey, runtimeWorktree{
 		Slug:          slug,
@@ -385,6 +402,8 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 		info.activeProxies = m.consumePendingProxySessionsLocked(runtimeKey, name)
 		info.startOutputPump()
 		m.processes[runtimeKey][name] = info
+		delete(m.idleStopped[runtimeKey], name)
+		delete(m.idleFollowStopped[runtimeKey], name)
 		m.mu.Unlock()
 		m.rescheduleIdleTimer(runtimeKey, name, info)
 
@@ -753,6 +772,11 @@ type processNeeds struct {
 	parsedCache map[string][]string
 }
 
+type idleFollowGraph struct {
+	sources    map[string][]string // dependent -> sources it follows
+	dependents map[string][]string // source -> dependents that follow it
+}
+
 func buildProcessNeeds(processes map[string]map[string]any) (*processNeeds, error) {
 	out := &processNeeds{
 		needs:     make(map[string][]string, len(processes)),
@@ -770,6 +794,82 @@ func buildProcessNeeds(processes map[string]map[string]any) (*processNeeds, erro
 		out.needs[name] = parsed
 	}
 	return out, nil
+}
+
+func buildIdleFollowGraph(processes map[string]map[string]any) (*idleFollowGraph, error) {
+	g := &idleFollowGraph{
+		sources:    make(map[string][]string, len(processes)),
+		dependents: make(map[string][]string, len(processes)),
+	}
+	for name, proc := range processes {
+		list, err := parseStringList(proc["idle_follow"], "idle_follow")
+		if err != nil {
+			return nil, fmt.Errorf("process %s %w", name, err)
+		}
+		if len(list) == 0 {
+			continue
+		}
+		if contains(list, name) {
+			return nil, fmt.Errorf("process %s idle_follow may not include itself", name)
+		}
+		g.sources[name] = list
+		for _, src := range list {
+			g.dependents[src] = append(g.dependents[src], name)
+		}
+	}
+	if err := detectIdleFollowCycles(g.sources); err != nil {
+		return nil, err
+	}
+	return g, nil
+}
+
+func parseStringList(raw any, field string) ([]string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	values, err := config.ParseProcessNeeds(raw) // same coercion & dedupe semantics
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", field, err)
+	}
+	return values, nil
+}
+
+func detectIdleFollowCycles(edges map[string][]string) error {
+	visiting := map[string]bool{}
+	visited := map[string]bool{}
+	var visit func(string) error
+	visit = func(node string) error {
+		if visited[node] {
+			return nil
+		}
+		if visiting[node] {
+			return fmt.Errorf("idle_follow cycle detected at %s", node)
+		}
+		visiting[node] = true
+		for _, dep := range edges[node] {
+			if err := visit(dep); err != nil {
+				return err
+			}
+		}
+		visiting[node] = false
+		visited[node] = true
+		return nil
+	}
+	for node := range edges {
+		if err := visit(node); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func contains(list []string, target string) bool {
+	for _, item := range list {
+		if item == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *processNeeds) ensureExists(parent, name string) error {
@@ -998,6 +1098,9 @@ func (m *Manager) stopWorktreeFromRef(slug, project, dirHint string, processes [
 		}
 		if len(existing) == 0 {
 			delete(m.processes, runtimeKey)
+			delete(m.idleFollow, runtimeKey)
+			delete(m.idleStopped, runtimeKey)
+			delete(m.idleFollowStopped, runtimeKey)
 			m.unregisterWorktreeLocked(runtimeKey)
 		} else {
 			m.processes[runtimeKey] = existing
@@ -1197,6 +1300,7 @@ func (m *Manager) EnsureProcessForTargetFromDir(slug, dirHint, process string) (
 		if err := waitForProcessReady(info); err != nil {
 			return "", "", err
 		}
+		m.wakeIdleFollowersFromDir(runtimeKey, slug, dirHint, process)
 		return info.network, info.address, nil
 	}
 	if ok && info != nil && info.cmd != nil && info.cmd.Process != nil && (info.address == "" || info.network == "") {
@@ -1226,6 +1330,7 @@ func (m *Manager) EnsureProcessForTargetFromDir(slug, dirHint, process string) (
 			if err := waitForProcessReady(current); err != nil {
 				return "", "", err
 			}
+			m.wakeIdleFollowersFromDir(currentKey, slug, dirHint, process)
 			return network, address, nil
 		}
 	}
@@ -1544,13 +1649,84 @@ func (m *Manager) stopIdleProcess(runtimeKey, process string, info *processInfo)
 	if procs[process] != info {
 		return
 	}
+	if _, ok := m.idleStopped[runtimeKey]; ok {
+		m.idleStopped[runtimeKey][process] = true
+	}
+	m.stopIdleFollowersLocked(runtimeKey, process)
 	delete(procs, process)
 	if len(procs) == 0 {
 		delete(m.processes, runtimeKey)
+		delete(m.idleFollow, runtimeKey)
+		delete(m.idleStopped, runtimeKey)
+		delete(m.idleFollowStopped, runtimeKey)
 		m.unregisterWorktreeLocked(runtimeKey)
 		return
 	}
 	m.processes[runtimeKey] = procs
+}
+
+func (m *Manager) stopIdleFollowersLocked(runtimeKey, source string) {
+	graph := m.idleFollow[runtimeKey]
+	if graph == nil {
+		return
+	}
+	deps := graph.dependents[source]
+	if len(deps) == 0 {
+		return
+	}
+	procs := m.processes[runtimeKey]
+	stopSet := m.idleFollowStopped[runtimeKey]
+
+	toStop := make([]*processInfo, 0, len(deps))
+	for _, dep := range deps {
+		info := procs[dep]
+		if info == nil || info.hasExited() {
+			continue
+		}
+		if stopSet != nil {
+			stopSet[dep] = true
+		}
+		delete(procs, dep)
+		toStop = append(toStop, info)
+	}
+	if len(toStop) == 0 {
+		return
+	}
+	// Avoid holding the manager lock while signalling processes.
+	m.mu.Unlock()
+	for _, info := range toStop {
+		stopManagedProcess(info)
+	}
+	m.mu.Lock()
+}
+
+func (m *Manager) wakeIdleFollowersFromDir(runtimeKey, slug, dirHint, source string) {
+	graph := m.idleFollow[runtimeKey]
+	if graph == nil {
+		return
+	}
+	deps := graph.dependents[source]
+	if len(deps) == 0 {
+		return
+	}
+	m.mu.Lock()
+	stopSet := m.idleFollowStopped[runtimeKey]
+	m.mu.Unlock()
+
+	for _, dep := range deps {
+		if stopSet == nil || !stopSet[dep] {
+			continue
+		}
+		go func(name string) {
+			if _, _, err := m.EnsureProcessForTargetFromDir(slug, dirHint, name); err == nil {
+				m.mu.Lock()
+				if set := m.idleFollowStopped[runtimeKey]; set != nil {
+					delete(set, name)
+				}
+				m.mu.Unlock()
+			}
+		}(dep)
+	}
 }
 
 func (m *Manager) Connect(slug, process string, conn net.Conn) error {
