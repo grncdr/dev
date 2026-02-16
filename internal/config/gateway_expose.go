@@ -19,6 +19,10 @@ type GatewayExposeRule struct {
 	Mode string
 	// DebugLog is an optional relative path for HTTP transcript logging.
 	DebugLog string
+	// RewritePeerSubdomains controls rewrite-mode translation of peer local
+	// hostnames. Values are normalized to lowercase and trimmed. "*" rewrites
+	// all peer subdomains.
+	RewritePeerSubdomains []string
 }
 
 // GatewayExposeModes returns gateway-exposed process modes keyed by process name.
@@ -76,11 +80,13 @@ func parseGatewayExposeRule(raw any) GatewayExposeRule {
 	if val, ok := m["debug_log"].(string); ok {
 		debugLog = strings.TrimSpace(val)
 	}
+	rewritePeerSubdomains := normalizeGatewayRewritePeerSubdomains(m["rewrite_peer_subdomains"])
 	modeRaw, ok := m["mode"]
 	if !ok || modeRaw == nil {
 		return GatewayExposeRule{
-			Mode:     GatewayModeReverseProxy,
-			DebugLog: debugLog,
+			Mode:                  GatewayModeReverseProxy,
+			DebugLog:              debugLog,
+			RewritePeerSubdomains: rewritePeerSubdomains,
 		}
 	}
 	mode, ok := normalizeGatewayModeValue(modeRaw)
@@ -88,9 +94,37 @@ func parseGatewayExposeRule(raw any) GatewayExposeRule {
 		return GatewayExposeRule{Mode: GatewayModeDisable}
 	}
 	return GatewayExposeRule{
-		Mode:     mode,
-		DebugLog: debugLog,
+		Mode:                  mode,
+		DebugLog:              debugLog,
+		RewritePeerSubdomains: rewritePeerSubdomains,
 	}
+}
+
+func normalizeGatewayRewritePeerSubdomains(raw any) []string {
+	if raw == nil {
+		return nil
+	}
+	val := reflect.ValueOf(raw)
+	if val.Kind() != reflect.Slice && val.Kind() != reflect.Array {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, val.Len())
+	for i := 0; i < val.Len(); i++ {
+		value := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", val.Index(i).Interface())))
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func normalizeGatewayModeValue(raw any) (string, bool) {

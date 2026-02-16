@@ -114,3 +114,38 @@ expose = { rails = { mode = "rewrite", debug_log = "logs/gateway-http.log" }, we
 		t.Fatalf("expected webpack debug_log empty, got %q", got["webpack"].DebugLog)
 	}
 }
+
+func TestGatewayExposeRules_ParsesRewritePeerSubdomains(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".dev.toml")
+	body := `
+[project]
+name = "foocorp"
+
+[gateway]
+expose = { rails = { mode = "rewrite", rewrite_peer_subdomains = [" minio ", "API", ""] } }
+`
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := LoadProjectConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	got := GatewayExposeRules(cfg)
+	rule, ok := got["rails"]
+	if !ok {
+		t.Fatalf("expected rails expose rule")
+	}
+	want := []string{"minio", "api"}
+	if len(rule.RewritePeerSubdomains) != len(want) {
+		t.Fatalf("expected %d rewrite subdomains, got %d (%v)", len(want), len(rule.RewritePeerSubdomains), rule.RewritePeerSubdomains)
+	}
+	for i := range want {
+		if rule.RewritePeerSubdomains[i] != want[i] {
+			t.Fatalf("unexpected rewrite subdomains: got %v want %v", rule.RewritePeerSubdomains, want)
+		}
+	}
+}

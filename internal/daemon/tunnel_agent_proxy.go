@@ -39,7 +39,15 @@ func (s *Server) handleTunnelAgentRequest(ctx context.Context, tunnel agent.Tunn
 
 			result.GatewayMode = rule.Mode
 			result.GatewayDebugLog = rule.DebugLog
+			result.RewritePeerSubdomains = append([]string(nil), rule.RewritePeerSubdomains...)
 			result.ProxyTarget, err = s.manager.ensureProxyTargetForRuntime(runtimeKey, matcher)
+			if err == nil {
+				if resolvedLocalHost, ok := s.localProxyHostForTarget(host, result.ProxyTarget.Path); ok {
+					result.ResolvedLocalHost = resolvedLocalHost
+				} else {
+					result.ResolvedLocalHost = host
+				}
+			}
 
 			return result, err
 		},

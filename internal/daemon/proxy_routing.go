@@ -105,6 +105,33 @@ func (s *Server) localProxyRouteForTunnelRequest(host string) (tunnelProxyRoute,
 	return tunnelProxyRoute{}, false
 }
 
+func (s *Server) localProxyHostForTarget(host, targetPath string) (string, bool) {
+	host = normalizeProxyHost(host)
+	if host == "" || strings.TrimSpace(targetPath) == "" || s == nil || s.manager == nil {
+		return "", false
+	}
+	wt, ok := s.manager.WorktreeByRuntimeKey(runtimeKeyForPath(targetPath))
+	if !ok {
+		return "", false
+	}
+	targetLabel := strings.TrimSpace(strings.ToLower(wt.DNSLabel))
+	if targetLabel == "" {
+		return "", false
+	}
+	slug, subdomain, err := s.parseProxyHost(host)
+	if err != nil || strings.TrimSpace(slug) == "" {
+		return "", false
+	}
+	apex := strings.TrimPrefix(strings.ToLower(s.projectApexZone()), ".")
+	if apex == "" {
+		apex = "localhost"
+	}
+	if subdomain == "" {
+		return targetLabel + "." + apex, true
+	}
+	return subdomain + "." + targetLabel + "." + apex, true
+}
+
 func (s *Server) activeTunnelForLabel(label string) (*agent.TunnelStatus, bool) {
 	s.tunnelMu.Lock()
 	defer s.tunnelMu.Unlock()

@@ -235,3 +235,65 @@ func TestRewriteResponseBody_SkipsLarge(t *testing.T) {
 		t.Fatalf("expected body size unchanged, got %d want %d", len(got), len(body))
 	}
 }
+
+func TestRewriteLocationForTunnelWithPeerSubdomains_RewritesConfiguredPeer(t *testing.T) {
+	t.Parallel()
+
+	value := "https://minio.main.localhost/path"
+	got, ok := rewriteLocationForTunnelWithPeerSubdomains(value, "app.foocorp.localhost", "app.my-feature.wip.example.com", ".localhost", "wip.example.com", []string{"minio"})
+	if !ok {
+		t.Fatalf("expected rewrite")
+	}
+	if got != "https://minio.my-feature.wip.example.com/path" {
+		t.Fatalf("unexpected rewrite: %s", got)
+	}
+}
+
+func TestRewriteLocationForTunnelWithPeerSubdomains_DoesNotRewriteUnconfiguredPeer(t *testing.T) {
+	t.Parallel()
+
+	value := "https://redis.main.localhost/path"
+	got, ok := rewriteLocationForTunnelWithPeerSubdomains(value, "app.foocorp.localhost", "app.my-feature.wip.example.com", ".localhost", "wip.example.com", []string{"minio"})
+	if !ok {
+		t.Fatalf("expected apex rewrite")
+	}
+	if got != "https://redis.main.wip.example.com/path" {
+		t.Fatalf("unexpected rewrite: %s", got)
+	}
+}
+
+func TestRewriteCookieDomainForTunnelWithPeerSubdomains_WildcardRewritesPeer(t *testing.T) {
+	t.Parallel()
+
+	cookie := "session=abc; Path=/; Domain=minio.main.localhost; HttpOnly"
+	got := rewriteCookieDomainForTunnelWithPeerSubdomains(cookie, "app.foocorp.localhost", "app.my-feature.wip.example.com", ".localhost", "wip.example.com", []string{"*"})
+	if got != "session=abc; Path=/; Domain=minio.my-feature.wip.example.com; HttpOnly" {
+		t.Fatalf("unexpected cookie: %s", got)
+	}
+}
+
+func TestRewriteResponseBodyForTunnel_RewritesConfiguredPeerURLs(t *testing.T) {
+	t.Parallel()
+
+	body := []byte(`{"url":"https://minio.main.localhost/bucket/object","other":"https://redis.main.localhost/x"}`)
+	resp := &http.Response{
+		Header:        make(http.Header),
+		Body:          io.NopCloser(bytes.NewReader(body)),
+		ContentLength: int64(len(body)),
+	}
+	resp.Header.Set("Content-Type", "application/json")
+	if err := rewriteResponseBodyForTunnel(resp, "app.foocorp.localhost", "app.my-feature.wip.example.com", ".localhost", "wip.example.com", []string{"minio"}); err != nil {
+		t.Fatalf("rewriteResponseBodyForTunnel: %v", err)
+	}
+	got, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	out := string(got)
+	if !strings.Contains(out, "https://minio.my-feature.wip.example.com/bucket/object") {
+		t.Fatalf("expected minio peer rewrite, got: %s", out)
+	}
+	if !strings.Contains(out, "https://redis.main.localhost/x") {
+		t.Fatalf("expected redis to remain unchanged, got: %s", out)
+	}
+}

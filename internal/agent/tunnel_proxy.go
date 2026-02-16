@@ -25,6 +25,12 @@ type TunnelResolveResult struct {
 	GatewayMode string
 	// GatewayDebugLog is the relative path for HTTP transcript logging, if configured.
 	GatewayDebugLog string
+	// RewritePeerSubdomains controls rewrite-mode translation of peer local
+	// hostnames (for example "minio.main.localhost" -> "minio.<label>.<zone>").
+	RewritePeerSubdomains []string
+	// ResolvedLocalHost is the canonical local hostname for the resolved target
+	// process. HandleTunnelRequest uses this for upstream Host and rewrite logic.
+	ResolvedLocalHost string
 }
 
 // TunnelProxyOptions holds the callbacks needed by HandleTunnelRequest to
@@ -81,7 +87,11 @@ func HandleTunnelRequest(ctx context.Context, opts TunnelProxyOptions, tunnel Tu
 	outReq.URL.Scheme = "http"
 	outReq.URL.Host = "dev-tunnel-upstream"
 	outReq.RequestURI = ""
-	outReq.Host = localHost
+	resolvedLocalHost := normalizeProxyHost(resolved.ResolvedLocalHost)
+	if resolvedLocalHost == "" {
+		resolvedLocalHost = localHost
+	}
+	outReq.Host = resolvedLocalHost
 	if reqBody != nil {
 		outReq.Body = io.NopCloser(bytes.NewReader(reqBody))
 		outReq.ContentLength = int64(len(reqBody))
@@ -92,11 +102,11 @@ func HandleTunnelRequest(ctx context.Context, opts TunnelProxyOptions, tunnel Tu
 
 	rewriteMode := resolved.GatewayMode == config.GatewayModeRewrite
 	localApex := opts.ProjectApexZone()
-	publicApex, hasPublicApex := DerivePublicApex(localHost, publicHost, localApex)
+	publicApex, hasPublicApex := DerivePublicApex(resolvedLocalHost, publicHost, localApex)
 	applyForwardedHeaders(outReq, rewriteMode)
 	if rewriteMode && hasPublicApex {
-		RewriteRequestCookieDomainForTunnel(outReq.Header, publicHost, localHost, publicApex, localApex)
-		RewriteRequestOriginForTunnel(outReq.Header, publicHost, localHost, publicApex, localApex)
+		RewriteRequestCookieDomainForTunnel(outReq.Header, publicHost, resolvedLocalHost, publicApex, localApex)
+		RewriteRequestOriginForTunnel(outReq.Header, publicHost, resolvedLocalHost, publicApex, localApex)
 	}
 
 	transport := &http.Transport{
@@ -111,20 +121,20 @@ func HandleTunnelRequest(ctx context.Context, opts TunnelProxyOptions, tunnel Tu
 	defer resp.Body.Close()
 	defer transport.CloseIdleConnections()
 
-	rewriteDomain, rewroteDomain := ReplaceHostLocalToPublic(localHost, localHost, publicHost, localApex, publicApex)
+	rewriteDomain, rewroteDomain := ReplaceHostLocalToPublic(resolvedLocalHost, resolvedLocalHost, publicHost, localApex, publicApex)
 	if !rewroteDomain || rewriteDomain == "" {
 		rewriteDomain = publicHost
 	}
 	if rewriteMode {
 		if loc := resp.Header.Get("Location"); loc != "" {
-			if rewritten, ok := RewriteLocationForTunnel(loc, localHost, publicHost, localApex, publicApex); ok {
+			if rewritten, ok := RewriteLocationForTunnelWithPeerSubdomains(loc, resolvedLocalHost, publicHost, localApex, publicApex, resolved.RewritePeerSubdomains); ok {
 				resp.Header.Set("Location", rewritten)
 			}
 		}
 		if localApex != "" && hasPublicApex {
-			RewriteSetCookieDomainForTunnel(resp.Header, localHost, publicHost, localApex, publicApex)
+			RewriteSetCookieDomainForTunnelWithPeerSubdomains(resp.Header, resolvedLocalHost, publicHost, localApex, publicApex, resolved.RewritePeerSubdomains)
 		}
-		if err := RewriteResponseBody(resp, localHost, rewriteDomain); err != nil {
+		if err := RewriteResponseBodyForTunnel(resp, resolvedLocalHost, rewriteDomain, localApex, publicApex, resolved.RewritePeerSubdomains); err != nil {
 			return err
 		}
 	}

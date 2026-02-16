@@ -36,6 +36,7 @@ debug_log = ""
 [gateway.expose.webpack]
 mode = "rewrite"
 debug_log = "tmp/gateway-http.log"
+rewrite_peer_subdomains = ["minio"] # or ["*"] to rewrite all peer local hosts
 
 [process.postgres]
 singleton = true
@@ -129,6 +130,8 @@ Notes:
   - Only processes listed in `gateway.expose` are reachable from the gateway.
   - `mode = "reverse_proxy"`: sends `X-Forwarded-*` headers and does not rewrite response headers/body.
   - `mode = "rewrite"`: sends `X-Forwarded-Proto`, omits `X-Forwarded-Host`/`X-Forwarded-For`, rewrites `Location`, rewrites `Set-Cookie Domain`, rewrites RFC cookie `$Domain` on incoming requests, and rewrites text response bodies for local/public host mapping.
+  - `rewrite_peer_subdomains = ["minio"]`: when `mode = "rewrite"`, also rewrites peer local hosts that match listed subdomains (for example `minio.main.localhost` -> `minio.<share-label>.<gateway-dns-zone>`).
+  - `rewrite_peer_subdomains = ["*"]`: wildcard that rewrites all peer local hosts under the local apex.
   - `debug_log = "<path>"`: appends full gateway HTTP request/response transcripts to a log file. Relative paths are resolved from the matched process worktree directory. Response bodies are logged after rewrite handling.
 - `subdomain = null` matches `<slug>.<apex_zone>`. `subdomain = "app"` matches `app.<slug>.<apex_zone>`. `subdomain = "*"` matches any subdomain under `<slug>.<apex_zone>`.
 - `subdomains = [...]` is also supported in a matcher to map multiple subdomains in one block.

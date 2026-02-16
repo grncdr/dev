@@ -190,6 +190,45 @@ overrides = { main = "foocorp" }
 	}
 }
 
+func TestLocalProxyHostForTarget_UsesTargetWorktreeDNSLabel(t *testing.T) {
+	base := t.TempDir()
+	repoMain := filepath.Join(base, "repo-main")
+	repoFeature := filepath.Join(base, "repo-feature")
+	if err := os.MkdirAll(repoMain, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(repoFeature, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewManager()
+	mainKey := runtimeKeyForPath(repoMain)
+	featureKey := runtimeKeyForPath(repoFeature)
+	m.registerWorktreeLocked(mainKey, runtimeWorktree{
+		Slug:     "main",
+		Path:     repoMain,
+		DNSLabel: "main",
+	})
+	m.registerWorktreeLocked(featureKey, runtimeWorktree{
+		Slug:     "my-feature",
+		Path:     repoFeature,
+		DNSLabel: "my-feature",
+	})
+
+	s := &Server{
+		manager:      m,
+		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
+	}
+
+	got, ok := s.localProxyHostForTarget("minio.my-feature.localhost", repoMain)
+	if !ok {
+		t.Fatalf("expected host rewrite for target")
+	}
+	if got != "minio.main.localhost" {
+		t.Fatalf("expected minio.main.localhost, got %q", got)
+	}
+}
+
 func TestParseProxyMatchers(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), ".dev.toml")
 	body := `
