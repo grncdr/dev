@@ -30,6 +30,16 @@ type logSource struct {
 	Path string
 }
 
+const logsFollowPollInterval = 300 * time.Millisecond
+const logsFollowTailWindowBytes = 256 * 1024
+const logsFollowAnchorBytes = 8 * 1024
+
+type logFollowState struct {
+	Offset  int64
+	ModTime time.Time
+	Anchor  []byte
+}
+
 func newLogsCmd(opts *Options) *cobra.Command {
 	view := &logViewOptions{}
 	cmd := &cobra.Command{
@@ -199,27 +209,53 @@ func viewLogs(sources []logSource, follow bool, all bool, lines int) error {
 	if !follow {
 		return nil
 	}
-	offsets := map[string]int64{}
+	states := map[string]logFollowState{}
 	for _, src := range sources {
 		info, err := os.Stat(src.Path)
 		if err != nil {
-			offsets[src.Path] = 0
+			states[src.Path] = logFollowState{}
 			continue
 		}
-		offsets[src.Path] = info.Size()
+		anchor, readErr := readTailFromPath(src.Path, logsFollowAnchorBytes)
+		if readErr != nil {
+			anchor = nil
+		}
+		states[src.Path] = logFollowState{
+			Offset:  info.Size(),
+			ModTime: info.ModTime(),
+			Anchor:  anchor,
+		}
 	}
-	for {
-		time.Sleep(300 * time.Millisecond)
+	ticker := time.NewTicker(logsFollowPollInterval)
+	defer ticker.Stop()
+	for range ticker.C {
 		for _, src := range sources {
+			state := states[src.Path]
 			info, err := os.Stat(src.Path)
 			if err != nil {
 				continue
 			}
-			start := offsets[src.Path]
+			start := state.Offset
 			if info.Size() < start {
 				start = 0
 			}
 			if info.Size() == start {
+				if !info.ModTime().After(state.ModTime) {
+					continue
+				}
+				windowBytes := int64(logsFollowTailWindowBytes)
+				if info.Size() < windowBytes {
+					windowBytes = info.Size()
+				}
+				window, readErr := readTailFromPath(src.Path, int(windowBytes))
+				if readErr != nil {
+					continue
+				}
+				delta := followRolloverDelta(state.Anchor, window)
+				printLogBytes(src.Name, delta, len(sources) > 1)
+				state.ModTime = info.ModTime()
+				state.Anchor = tailAnchor(window, logsFollowAnchorBytes)
+				states[src.Path] = state
 				continue
 			}
 			file, err := os.Open(src.Path)
@@ -229,10 +265,102 @@ func viewLogs(sources []logSource, follow bool, all bool, lines int) error {
 			_, _ = file.Seek(start, io.SeekStart)
 			data, _ := io.ReadAll(file)
 			_ = file.Close()
-			offsets[src.Path] = info.Size()
+			state.Offset = info.Size()
+			state.ModTime = info.ModTime()
+			state.Anchor = appendAnchor(state.Anchor, data, logsFollowAnchorBytes)
+			states[src.Path] = state
 			printLogBytes(src.Name, data, len(sources) > 1)
 		}
 	}
+	return nil
+}
+
+func readTailFromPath(path string, n int) ([]byte, error) {
+	if n <= 0 {
+		return nil, nil
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	size := info.Size()
+	if size <= 0 {
+		return nil, nil
+	}
+	if int64(n) > size {
+		n = int(size)
+	}
+	start := size - int64(n)
+	if _, err := file.Seek(start, io.SeekStart); err != nil {
+		return nil, err
+	}
+	out := make([]byte, n)
+	_, err = io.ReadFull(file, out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func followRolloverDelta(anchor, window []byte) []byte {
+	if len(window) == 0 {
+		return nil
+	}
+	if len(anchor) == 0 {
+		return window
+	}
+	if idx := bytes.LastIndex(window, anchor); idx >= 0 {
+		return window[idx+len(anchor):]
+	}
+	max := len(anchor)
+	if len(window) < max {
+		max = len(window)
+	}
+	for overlap := max; overlap > 0; overlap-- {
+		if bytes.Equal(anchor[len(anchor)-overlap:], window[:overlap]) {
+			return window[overlap:]
+		}
+	}
+	return nil
+}
+
+func tailAnchor(data []byte, limit int) []byte {
+	if limit <= 0 || len(data) == 0 {
+		return nil
+	}
+	if len(data) > limit {
+		data = data[len(data)-limit:]
+	}
+	out := make([]byte, len(data))
+	copy(out, data)
+	return out
+}
+
+func appendAnchor(anchor, data []byte, limit int) []byte {
+	if limit <= 0 {
+		return nil
+	}
+	combined := make([]byte, 0, len(anchor)+len(data))
+	if len(anchor) > 0 {
+		combined = append(combined, anchor...)
+	}
+	if len(data) > 0 {
+		combined = append(combined, data...)
+	}
+	if len(combined) == 0 {
+		return nil
+	}
+	if len(combined) > limit {
+		combined = combined[len(combined)-limit:]
+	}
+	out := make([]byte, len(combined))
+	copy(out, combined)
+	return out
 }
 
 func printLogChunk(name string, data []byte, withPrefix bool, all bool, lines int) {

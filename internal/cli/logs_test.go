@@ -91,3 +91,58 @@ func TestSelectLogsTargets(t *testing.T) {
 		})
 	}
 }
+
+func TestFollowRolloverDelta(t *testing.T) {
+	tests := []struct {
+		name   string
+		anchor []byte
+		window []byte
+		want   string
+	}{
+		{
+			name:   "empty window",
+			anchor: []byte("abc"),
+			window: nil,
+			want:   "",
+		},
+		{
+			name:   "empty anchor returns window",
+			anchor: nil,
+			window: []byte("new-data"),
+			want:   "new-data",
+		},
+		{
+			name:   "exact anchor match",
+			anchor: []byte("tail"),
+			window: []byte("prefix-tail"),
+			want:   "",
+		},
+		{
+			name:   "anchor then suffix",
+			anchor: []byte("tail"),
+			window: []byte("old-tail-new"),
+			want:   "-new",
+		},
+		{
+			name:   "prefix overlap only",
+			anchor: []byte("abcdef"),
+			window: []byte("defXYZ"),
+			want:   "XYZ",
+		},
+		{
+			name:   "no overlap",
+			anchor: []byte("abc"),
+			window: []byte("XYZ"),
+			want:   "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := string(followRolloverDelta(tc.anchor, tc.window))
+			if got != tc.want {
+				t.Fatalf("followRolloverDelta() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
