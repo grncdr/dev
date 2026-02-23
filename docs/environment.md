@@ -45,6 +45,7 @@ Provided variables:
 - `DEV_WORKTREE_DNS_NAME`
 - `DEV_WORKTREE_PATH`
 - `DEV_WORKTREE_BRANCH`
+- `DEV_MAIN_WORKTREE`
 - `DEV_HOOK_NAME`
 - `DEV_OPERATION` (`add` or `cleanup`)
 - `DEV_IMPLICIT_TARGET` (`true`/`false`)

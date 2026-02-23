@@ -1,6 +1,13 @@
 # dev Hooks
 
-This document describes user-configurable hooks in `.dev.toml` and `daemon.toml`.
+This document describes hook configuration in project config (`.dev.toml`) and daemon config (`daemon.toml`).
+
+## Hook Scopes
+
+- Project hooks (`.dev.toml` `[hooks]`) support worktree lifecycle hooks and process start/stop hooks.
+- Daemon hooks (`~/.config/dev/daemon.toml` `[global-hooks]` and `[project-hooks."<project>"]`) support worktree lifecycle hooks only.
+
+## Project Hook Configuration (`.dev.toml`)
 
 ```toml
 [hooks]
@@ -14,7 +21,7 @@ pre_stop = "bin/pre-stop"
 post_stop = "bin/post-stop"
 ```
 
-## Available Hooks
+Available project hooks:
 
 - `pre_worktree_add`: runs before `dev worktree add` mutates git/worktree state.
 - `post_worktree_add`: runs after `dev worktree add` succeeds.
@@ -25,7 +32,7 @@ post_stop = "bin/post-stop"
 - `pre_stop`: runs before `dev stop`/`dev worktree stop` stops processes.
 - `post_stop`: runs after process stop flow completes.
 
-Daemon-level hook config (`~/.config/dev/daemon.toml`) supports worktree lifecycle hooks only:
+## Daemon Lifecycle Hook Configuration (`daemon.toml`)
 
 ```toml
 [global-hooks]
@@ -40,6 +47,13 @@ post_worktree_add = "bin/project-post-worktree-add-user"
 pre_worktree_cleanup = "bin/project-pre-worktree-cleanup-user"
 post_worktree_cleanup = "bin/project-post-worktree-cleanup-user"
 ```
+
+Available daemon hook events:
+
+- `pre_worktree_add`
+- `post_worktree_add`
+- `pre_worktree_cleanup`
+- `post_worktree_cleanup`
 
 ## Working Directory
 
@@ -67,6 +81,7 @@ The following variables are injected for worktree lifecycle hooks (`pre/post_wor
 - `DEV_WORKTREE_DNS_NAME`: DNS-normalized worktree name + apex zone.
 - `DEV_WORKTREE_PATH`: target worktree path.
 - `DEV_WORKTREE_BRANCH`: target branch name.
+- `DEV_MAIN_WORKTREE`: repository main worktree path.
 - `DEV_HOOK_NAME`: hook currently executing (for example `pre_worktree_add`).
 - `DEV_OPERATION`: `add` or `cleanup`.
 - `DEV_IMPLICIT_TARGET`: `true` when cleanup target was inferred from cwd, otherwise `false`.

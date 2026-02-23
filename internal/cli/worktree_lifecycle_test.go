@@ -200,10 +200,10 @@ name = "demo"
 wrapper = "env DEV_WRAPPED=1 $COMMAND"
 
 [hooks]
-pre_worktree_add = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_DNS_NAME} > hook_pre_add.txt\""
-post_worktree_add = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_DNS_NAME} > hook_post_add.txt\""
-pre_worktree_cleanup = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_DNS_NAME} > hook_pre_cleanup.txt\""
-post_worktree_cleanup = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_DNS_NAME} > hook_post_cleanup.txt\""
+pre_worktree_add = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_DNS_NAME}:${DEV_MAIN_WORKTREE} > hook_pre_add.txt\""
+post_worktree_add = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_DNS_NAME}:${DEV_MAIN_WORKTREE} > hook_post_add.txt\""
+pre_worktree_cleanup = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_DNS_NAME}:${DEV_MAIN_WORKTREE} > hook_pre_cleanup.txt\""
+post_worktree_cleanup = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_DNS_NAME}:${DEV_MAIN_WORKTREE} > hook_post_cleanup.txt\""
 `
 	if err := os.WriteFile(configPath, []byte(projectConfig), 0o600); err != nil {
 		t.Fatalf("write project config: %v", err)
@@ -250,8 +250,13 @@ post_worktree_cleanup = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_DNS_NAME} > 
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
-		if strings.TrimSpace(string(data)) != "1:feature.dev.test" {
-			t.Fatalf("expected wrapped dns in %s, got %q", path, strings.TrimSpace(string(data)))
+		got := strings.TrimSpace(string(data))
+		prefix := "1:feature.dev.test:"
+		if !strings.HasPrefix(got, prefix) {
+			t.Fatalf("expected wrapped dns prefix in %s, got %q", path, got)
+		}
+		if !samePath(strings.TrimPrefix(got, prefix), repoDir) {
+			t.Fatalf("expected main worktree path %q in %s, got %q", repoDir, path, got)
 		}
 	}
 
@@ -265,8 +270,13 @@ post_worktree_cleanup = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_DNS_NAME} > 
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
-		if strings.TrimSpace(string(data)) != "1:feature.dev.test" {
-			t.Fatalf("expected wrapped dns in %s, got %q", path, strings.TrimSpace(string(data)))
+		got := strings.TrimSpace(string(data))
+		prefix := "1:feature.dev.test:"
+		if !strings.HasPrefix(got, prefix) {
+			t.Fatalf("expected wrapped dns prefix in %s, got %q", path, got)
+		}
+		if !samePath(strings.TrimPrefix(got, prefix), repoDir) {
+			t.Fatalf("expected main worktree path %q in %s, got %q", repoDir, path, got)
 		}
 	}
 }
@@ -441,7 +451,7 @@ func TestWorktreeRegisterSupportsNonStandardPath(t *testing.T) {
 name = "demo"
 
 [hooks]
-post_worktree_add = "sh -c \"echo ${DEV_WORKTREE_DNS_NAME} > hook_post_add.txt\""
+post_worktree_add = "sh -c \"echo ${DEV_WORKTREE_DNS_NAME}:${DEV_MAIN_WORKTREE} > hook_post_add.txt\""
 `
 	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(projectConfig), 0o600); err != nil {
 		t.Fatalf("write project config: %v", err)
@@ -482,8 +492,13 @@ post_worktree_add = "sh -c \"echo ${DEV_WORKTREE_DNS_NAME} > hook_post_add.txt\"
 	if err != nil {
 		t.Fatalf("read hook output: %v", err)
 	}
-	if strings.TrimSpace(string(hookValue)) != "something.dev.test" {
-		t.Fatalf("unexpected hook output: %q", strings.TrimSpace(string(hookValue)))
+	got := strings.TrimSpace(string(hookValue))
+	prefix := "something.dev.test:"
+	if !strings.HasPrefix(got, prefix) {
+		t.Fatalf("unexpected hook output: %q", got)
+	}
+	if !samePath(strings.TrimPrefix(got, prefix), repoDir) {
+		t.Fatalf("unexpected hook output: %q", got)
 	}
 
 	opts.WorkingDir = repoDir

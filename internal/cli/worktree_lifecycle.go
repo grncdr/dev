@@ -153,7 +153,7 @@ func runWorktreeRegister(opts *Options, targetArg string, out, errOut io.Writer)
 	}
 	daemonHooks := config.ResolveDaemonWorktreeLifecycleHooks(daemonCfg, cfg.Project.Name, target.Project)
 	branch := worktree.BranchName(current.Branch)
-	hookEnv := lifecycleHookEnv(target.Project, target.Slug, current.Path, branch, "add", false, proxyApexZone(daemonCfg))
+	hookEnv := lifecycleHookEnv(target.Project, target.Slug, current.Path, branch, "add", false, mainPath, proxyApexZone(daemonCfg))
 	if err := worktree.Register(daemonCfg, worktree.Registration{
 		Project:  target.Project,
 		Slug:     target.Slug,
@@ -246,7 +246,7 @@ func runWorktreeAdd(opts *Options, targetArg, branchArg string, out, errOut io.W
 		fmt.Fprintf(errOut, "warning: branch %q already exists; reusing existing branch\n", branchName)
 	}
 
-	hookEnv := lifecycleHookEnv(target.Project, target.Slug, targetPath, branchName, "add", false, proxyApexZone(daemonCfg))
+	hookEnv := lifecycleHookEnv(target.Project, target.Slug, targetPath, branchName, "add", false, mainPath, proxyApexZone(daemonCfg))
 	if err := runLifecycleHook(cfg.Hooks.PreWorktreeAdd, cfg.Commands.Wrapper, "pre_worktree_add", mainPath, hookEnv, out, errOut); err != nil {
 		return err
 	}
@@ -332,7 +332,7 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 		return err
 	}
 	daemonHooks := config.ResolveDaemonWorktreeLifecycleHooks(daemonCfg, cfg.Project.Name, resolved.project)
-	hookEnv := lifecycleHookEnv(resolved.project, resolved.slug, resolved.path, resolved.branch, "cleanup", resolved.implicit, proxyApexZone(daemonCfg))
+	hookEnv := lifecycleHookEnv(resolved.project, resolved.slug, resolved.path, resolved.branch, "cleanup", resolved.implicit, resolved.mainPath, proxyApexZone(daemonCfg))
 
 	if cleanup.DryRun {
 		fmt.Fprintf(out, "would remove worktree: %s\n", resolved.path)
@@ -689,7 +689,7 @@ func gitWorktreeDirty(path string) (bool, error) {
 	return strings.TrimSpace(output) != "", nil
 }
 
-func lifecycleHookEnv(project, slug, worktreePath, branch, operation string, implicit bool, apexZone string) map[string]string {
+func lifecycleHookEnv(project, slug, worktreePath, branch, operation string, implicit bool, mainWorktreePath, apexZone string) map[string]string {
 	zone := strings.TrimPrefix(strings.TrimSpace(apexZone), ".")
 	if zone == "" {
 		zone = "localhost"
@@ -700,6 +700,7 @@ func lifecycleHookEnv(project, slug, worktreePath, branch, operation string, imp
 		"DEV_WORKTREE_SLUG":     slug,
 		"DEV_WORKTREE_PATH":     worktreePath,
 		"DEV_WORKTREE_BRANCH":   branch,
+		"DEV_MAIN_WORKTREE":     mainWorktreePath,
 		"DEV_WORKTREE_DNS_NAME": localDNSName,
 		"DEV_OPERATION":         operation,
 		"DEV_IMPLICIT_TARGET":   fmt.Sprintf("%t", implicit),
