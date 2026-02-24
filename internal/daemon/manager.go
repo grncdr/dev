@@ -1302,7 +1302,6 @@ func (m *Manager) EnsureProcessForTargetFromDir(slug, dirHint, process string) (
 		if err := waitForProcessReady(info); err != nil {
 			return "", "", err
 		}
-		m.wakeIdleFollowersFromDir(runtimeKey, slug, dirHint, process)
 		return info.network, info.address, nil
 	}
 	if ok && info != nil && info.cmd != nil && info.cmd.Process != nil && (info.address == "" || info.network == "") {
