@@ -1941,6 +1941,10 @@ func stopManagedProcess(info *processInfo) {
 		}
 	case <-info.exited:
 	}
+
+	// The leader has exited, but children in its process group may still be
+	// running. Kill the entire group so nothing is left behind.
+	_ = killManagedProcess(info.cmd)
 }
 
 func allocateRandomPort() (string, error) {
