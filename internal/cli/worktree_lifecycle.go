@@ -25,6 +25,10 @@ type worktreeCleanupOptions struct {
 	Force        bool
 }
 
+type worktreeListOptions struct {
+	AllProjects bool
+}
+
 func newWorktreeCmd(opts *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "worktree",
@@ -93,13 +97,15 @@ func newWorktreeRegisterCmd(opts *Options) *cobra.Command {
 }
 
 func newWorktreeListCmd(opts *Options) *cobra.Command {
+	list := &worktreeListOptions{}
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "list managed worktrees",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorktreeList(opts, cmd.OutOrStdout())
+			return runWorktreeList(opts, list, cmd.OutOrStdout())
 		},
 	}
+	cmd.Flags().BoolVar(&list.AllProjects, "all-projects", false, "list managed worktrees across all projects")
 	return cmd
 }
 
@@ -383,45 +389,156 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 	return nil
 }
 
-func runWorktreeList(opts *Options, out io.Writer) error {
+type worktreeListRow struct {
+	id     string
+	path   string
+	branch string
+	flags  []string
+}
+
+func runWorktreeList(opts *Options, list *worktreeListOptions, out io.Writer) error {
+	if list == nil {
+		list = &worktreeListOptions{}
+	}
 	daemonCfg, err := loadDaemonConfig(opts)
 	if err != nil {
 		return err
 	}
 	cwd := workingDir(opts)
-	entries, err := worktree.ListWorktreesInDir(cwd)
+	rows := []worktreeListRow{}
+	if list.AllProjects {
+		rows, err = collectAllProjectWorktreeRows(daemonCfg, cwd)
+	} else {
+		rows, err = collectCurrentProjectWorktreeRows(daemonCfg, cwd)
+	}
 	if err != nil {
 		return err
 	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].id < rows[j].id })
+	if len(rows) == 0 {
+		fmt.Fprintln(out, "no managed worktrees")
+		return nil
+	}
+	for _, r := range rows {
+		flagValue := "-"
+		if len(r.flags) > 0 {
+			flagValue = strings.Join(r.flags, ",")
+		}
+		fmt.Fprintf(out, "%s\tpath=%s\tbranch=%s\tflags=%s\n", r.id, r.path, r.branch, flagValue)
+	}
+	return nil
+}
+
+func collectCurrentProjectWorktreeRows(daemonCfg *config.DaemonConfig, cwd string) ([]worktreeListRow, error) {
+	entries, err := worktree.ListWorktreesInDir(cwd)
+	if err != nil {
+		return nil, err
+	}
 	if len(entries) == 0 || entries[0].Path == "" {
-		return errors.New("main worktree path missing")
+		return nil, errors.New("main worktree path missing")
 	}
 	mainPath := entries[0].Path
 	project, err := resolveProjectIdentifierFromMainPath(mainPath)
 	if err != nil {
-		return fmt.Errorf("resolve project identifier from repository path: %w", err)
+		return nil, fmt.Errorf("resolve project identifier from repository path: %w", err)
 	}
-	currentEntry, _ := matchCurrentEntry(entries, cwd)
 	registered, err := worktree.ListRegisteredWorktrees(daemonCfg, project)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	return collectProjectWorktreeRows(project, mainPath, entries, registered, cwd, false)
+}
+
+func collectAllProjectWorktreeRows(daemonCfg *config.DaemonConfig, cwd string) ([]worktreeListRow, error) {
+	rows := []worktreeListRow{}
+	includedProjects := map[string]struct{}{}
+
+	if currentRows, project, err := tryCollectCurrentProjectWorktreeRows(daemonCfg, cwd); err == nil {
+		rows = append(rows, currentRows...)
+		includedProjects[project] = struct{}{}
+	}
+
+	registered, err := worktree.ListRegisteredWorktrees(daemonCfg, "")
+	if err != nil {
+		return nil, err
+	}
+	registeredByProject := map[string][]worktree.Registration{}
+	for _, entry := range registered {
+		registeredByProject[entry.Project] = append(registeredByProject[entry.Project], entry)
+	}
+	for project, entries := range registeredByProject {
+		if _, ok := includedProjects[project]; ok {
+			continue
+		}
+		mainPath := projectMainPath(entries)
+		gitEntries := []worktree.Entry(nil)
+		if strings.TrimSpace(mainPath) != "" {
+			if listed, err := worktree.ListWorktreesInDir(mainPath); err == nil {
+				gitEntries = listed
+			}
+		}
+		projectRows, err := collectProjectWorktreeRows(project, mainPath, gitEntries, entries, cwd, true)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, projectRows...)
+	}
+	return rows, nil
+}
+
+func tryCollectCurrentProjectWorktreeRows(daemonCfg *config.DaemonConfig, cwd string) ([]worktreeListRow, string, error) {
+	entries, err := worktree.ListWorktreesInDir(cwd)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(entries) == 0 || entries[0].Path == "" {
+		return nil, "", errors.New("main worktree path missing")
+	}
+	mainPath := entries[0].Path
+	project, err := resolveProjectIdentifierFromMainPath(mainPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("resolve project identifier from repository path: %w", err)
+	}
+	registered, err := worktree.ListRegisteredWorktrees(daemonCfg, project)
+	if err != nil {
+		return nil, "", err
+	}
+	rows, err := collectProjectWorktreeRows(project, mainPath, entries, registered, cwd, false)
+	if err != nil {
+		return nil, "", err
+	}
+	return rows, project, nil
+}
+
+func collectProjectWorktreeRows(project, mainPath string, gitEntries []worktree.Entry, registered []worktree.Registration, cwd string, allowMissingMain bool) ([]worktreeListRow, error) {
+	rows := []worktreeListRow{}
+	if strings.TrimSpace(mainPath) == "" && len(gitEntries) > 0 {
+		mainPath = gitEntries[0].Path
+	}
+	currentEntry, _ := matchCurrentEntry(gitEntries, cwd)
 	registeredByID := map[string]worktree.Registration{}
 	for _, entry := range registered {
 		registeredByID[entry.Project+":"+entry.Slug] = entry
 	}
-	type row struct {
-		id     string
-		path   string
-		branch string
-		flags  []string
+	if allowMissingMain && strings.TrimSpace(mainPath) != "" {
+		if _, ok := findGitEntryByPath(gitEntries, mainPath); !ok {
+			slug, err := worktreeListMainSlug(mainPath)
+			if err != nil {
+				return nil, err
+			}
+			rows = append(rows, worktreeListRow{
+				id:     project + ":" + slug,
+				path:   mainPath,
+				branch: "HEAD",
+				flags:  []string{"main", "missing"},
+			})
+		}
 	}
-	rows := make([]row, 0, len(entries))
-	for _, entry := range entries {
+	for _, entry := range gitEntries {
 		if entry.Path == "" {
 			continue
 		}
-		isMain := samePath(entry.Path, mainPath)
+		isMain := strings.TrimSpace(mainPath) != "" && samePath(entry.Path, mainPath)
 		var registeredEntry worktree.Registration
 		if !isMain {
 			matched, ok := findRegisteredEntryByPath(registered, entry.Path)
@@ -430,17 +547,13 @@ func runWorktreeList(opts *Options, out io.Writer) error {
 			}
 			registeredEntry = matched
 		}
-		slug := ""
+		slug := registeredEntry.Slug
 		if isMain {
-			if configuredMainSlug, ok, err := worktree.ResolveConfiguredMainSlug(mainPath); err != nil {
-				return err
-			} else if ok {
-				slug = configuredMainSlug
-			} else {
-				slug = "main"
+			var err error
+			slug, err = worktreeListMainSlug(mainPath)
+			if err != nil {
+				return nil, err
 			}
-		} else {
-			slug = registeredEntry.Slug
 		}
 		if strings.TrimSpace(slug) == "" {
 			continue
@@ -460,7 +573,7 @@ func runWorktreeList(opts *Options, out io.Writer) error {
 		if branch == "" {
 			branch = "HEAD"
 		}
-		rows = append(rows, row{
+		rows = append(rows, worktreeListRow{
 			id:     project + ":" + slug,
 			path:   entry.Path,
 			branch: branch,
@@ -468,34 +581,39 @@ func runWorktreeList(opts *Options, out io.Writer) error {
 		})
 	}
 	for id, entry := range registeredByID {
-		if _, ok := findGitEntryByPath(entries, entry.Path); ok {
+		if _, ok := findGitEntryByPath(gitEntries, entry.Path); ok {
 			continue
 		}
 		branch := strings.TrimSpace(entry.Branch)
 		if branch == "" {
 			branch = "HEAD"
 		}
-		rows = append(rows, row{
+		rows = append(rows, worktreeListRow{
 			id:     id,
 			path:   entry.Path,
 			branch: branch,
 			flags:  []string{"missing"},
 		})
 	}
+	return rows, nil
+}
 
-	sort.Slice(rows, func(i, j int) bool { return rows[i].id < rows[j].id })
-	if len(rows) == 0 {
-		fmt.Fprintln(out, "no managed worktrees")
-		return nil
-	}
-	for _, r := range rows {
-		flagValue := "-"
-		if len(r.flags) > 0 {
-			flagValue = strings.Join(r.flags, ",")
+func projectMainPath(entries []worktree.Registration) string {
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.MainPath) != "" {
+			return entry.MainPath
 		}
-		fmt.Fprintf(out, "%s\tpath=%s\tbranch=%s\tflags=%s\n", r.id, r.path, r.branch, flagValue)
 	}
-	return nil
+	return ""
+}
+
+func worktreeListMainSlug(mainPath string) (string, error) {
+	if configuredMainSlug, ok, err := worktree.ResolveConfiguredMainSlug(mainPath); err != nil {
+		return "", err
+	} else if ok {
+		return configuredMainSlug, nil
+	}
+	return "main", nil
 }
 
 type cleanupTarget struct {

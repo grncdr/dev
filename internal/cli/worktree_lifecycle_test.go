@@ -45,7 +45,7 @@ func TestWorktreeLifecycleAddListCleanupDryRun(t *testing.T) {
 	}
 
 	var listOut bytes.Buffer
-	if err := runWorktreeList(opts, &listOut); err != nil {
+	if err := runWorktreeList(opts, nil, &listOut); err != nil {
 		t.Fatalf("runWorktreeList: %v", err)
 	}
 	if !strings.Contains(listOut.String(), projectID+":feature") {
@@ -104,11 +104,92 @@ func TestWorktreeListUsesConfiguredMainSlug(t *testing.T) {
 	opts := &Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
 
 	var out bytes.Buffer
-	if err := runWorktreeList(opts, &out); err != nil {
+	if err := runWorktreeList(opts, nil, &out); err != nil {
 		t.Fatalf("runWorktreeList: %v", err)
 	}
 	if !strings.Contains(out.String(), "demo:primary") {
 		t.Fatalf("expected main slug in list output, got %q", out.String())
+	}
+}
+
+func TestWorktreeListAllProjectsIncludesOtherProjects(t *testing.T) {
+	base := t.TempDir()
+	daemonConfigPath := filepath.Join(base, "daemon.toml")
+	daemonConfig := "state_dir = \"" + filepath.Join(base, "state") + "\"\nworktree_dir = \"" + filepath.Join(base, "managed") + "\"\n"
+	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
+		t.Fatalf("write daemon config: %v", err)
+	}
+
+	makeRepo := func(project string) string {
+		repoDir := filepath.Join(base, project)
+		if err := os.MkdirAll(repoDir, 0o755); err != nil {
+			t.Fatalf("mkdir repo: %v", err)
+		}
+		if err := runGitForTest(repoDir, "init"); err != nil {
+			t.Fatalf("git init: %v", err)
+		}
+		cfg := "[project]\nname = \"" + project + "\"\n"
+		if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(cfg), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte(project), 0o600); err != nil {
+			t.Fatalf("write readme: %v", err)
+		}
+		if err := runGitForTest(repoDir, "add", "."); err != nil {
+			t.Fatalf("git add: %v", err)
+		}
+		if err := runGitForTest(repoDir, "commit", "-m", "init"); err != nil {
+			t.Fatalf("git commit: %v", err)
+		}
+		return repoDir
+	}
+
+	repoOne := makeRepo("demo-one")
+	repoTwo := makeRepo("demo-two")
+	optsOne := &Options{WorkingDir: repoOne, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+	optsTwo := &Options{WorkingDir: repoTwo, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+
+	origWD := rememberCWD()
+	t.Cleanup(func() {
+		_ = os.Chdir(origWD)
+	})
+
+	var addOut bytes.Buffer
+	var addErr bytes.Buffer
+	if err := os.Chdir(repoOne); err != nil {
+		t.Fatalf("chdir repo one: %v", err)
+	}
+	if err := runWorktreeAdd(optsOne, "feature", "", &addOut, &addErr); err != nil {
+		t.Fatalf("runWorktreeAdd repo one: %v", err)
+	}
+
+	addOut.Reset()
+	addErr.Reset()
+	if err := os.Chdir(repoTwo); err != nil {
+		t.Fatalf("chdir repo two: %v", err)
+	}
+	if err := runWorktreeAdd(optsTwo, "hotfix", "", &addOut, &addErr); err != nil {
+		t.Fatalf("runWorktreeAdd repo two: %v", err)
+	}
+
+	optsOne.WorkingDir = repoOne
+	var out bytes.Buffer
+	if err := runWorktreeList(optsOne, &worktreeListOptions{AllProjects: true}, &out); err != nil {
+		t.Fatalf("runWorktreeList all projects: %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "demo-one:feature") {
+		t.Fatalf("expected first project worktree in output, got %q", output)
+	}
+	if !strings.Contains(output, "demo-one:main") {
+		t.Fatalf("expected first project main in output, got %q", output)
+	}
+	if !strings.Contains(output, "demo-two:hotfix") {
+		t.Fatalf("expected second project worktree in output, got %q", output)
+	}
+	if !strings.Contains(output, "demo-two:main") {
+		t.Fatalf("expected second project main in output, got %q", output)
 	}
 }
 
@@ -503,7 +584,7 @@ post_worktree_add = "sh -c \"echo ${DEV_WORKTREE_DNS_NAME}:${DEV_MAIN_WORKTREE} 
 
 	opts.WorkingDir = repoDir
 	var listOut bytes.Buffer
-	if err := runWorktreeList(opts, &listOut); err != nil {
+	if err := runWorktreeList(opts, nil, &listOut); err != nil {
 		t.Fatalf("runWorktreeList: %v", err)
 	}
 	if !strings.Contains(listOut.String(), "demo:feature/something") || !strings.Contains(listOut.String(), "feature-dir") {
