@@ -255,6 +255,25 @@ func TestResolveGatewayCredentialDirForURL(t *testing.T) {
 	}
 }
 
+func TestExpandCommandPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	got, err := ExpandCommandPath([]string{"~/bin/hook", "--flag"})
+	if err != nil {
+		t.Fatalf("ExpandCommandPath: %v", err)
+	}
+	want := []string{filepath.Join(home, "bin", "hook"), "--flag"}
+	if len(got) != len(want) {
+		t.Fatalf("unexpected command length: got %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected arg %d: got %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestResolveWorktreeDir_Default(t *testing.T) {
 	base := t.TempDir()
 	old := os.Getenv("DEV_STATE_DIR")

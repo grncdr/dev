@@ -2065,10 +2065,18 @@ func runHook(command, wrapper, hookName, dir string, vars map[string]string) err
 	if len(args) == 0 {
 		return nil
 	}
+	args, err = config.ExpandCommandPath(args)
+	if err != nil {
+		return fmt.Errorf("expand hook path: %w", err)
+	}
 	if strings.TrimSpace(wrapper) != "" {
 		args, err = procenv.ApplyWrapper(wrapper, args)
 		if err != nil {
 			return fmt.Errorf("apply hook wrapper: %w", err)
+		}
+		args, err = config.ExpandCommandPath(args)
+		if err != nil {
+			return fmt.Errorf("expand hook wrapper path: %w", err)
 		}
 	}
 

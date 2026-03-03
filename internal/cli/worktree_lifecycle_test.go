@@ -456,6 +456,75 @@ post_worktree_cleanup = "sh -c \"echo daemon-project-post-cleanup >> ` + orderLo
 	}
 }
 
+func TestWorktreeLifecycleHooks_ExpandsHomeInDaemonHookPath(t *testing.T) {
+	base := t.TempDir()
+	homeDir := filepath.Join(base, "home")
+	hookBinDir := filepath.Join(homeDir, "bin")
+	if err := os.MkdirAll(hookBinDir, 0o755); err != nil {
+		t.Fatalf("mkdir hook bin: %v", err)
+	}
+	t.Setenv("HOME", homeDir)
+
+	hookLog := filepath.Join(base, "hook.log")
+	hookScript := filepath.Join(hookBinDir, "global-pre-add")
+	hookBody := "#!/bin/sh\n" +
+		"echo daemon-global-pre-add >> \"$1\"\n"
+	if err := os.WriteFile(hookScript, []byte(hookBody), 0o755); err != nil {
+		t.Fatalf("write hook script: %v", err)
+	}
+
+	repoDir := filepath.Join(base, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if err := runGitForTest(repoDir, "init"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	projectConfig := `
+[project]
+name = "demo"
+`
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(projectConfig), 0o600); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	if err := runGitForTest(repoDir, "add", "."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := runGitForTest(repoDir, "commit", "-m", "init"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	daemonConfigPath := filepath.Join(base, "daemon.toml")
+	daemonConfig := `
+state_dir = "` + filepath.Join(base, "state") + `"
+worktree_dir = "` + filepath.Join(base, "managed") + `"
+
+[global-hooks]
+pre_worktree_add = "~/bin/global-pre-add ` + hookLog + `"
+`
+	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
+		t.Fatalf("write daemon config: %v", err)
+	}
+
+	opts := &Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	if err := runWorktreeAdd(opts, "feature", "", &out, &errOut); err != nil {
+		t.Fatalf("runWorktreeAdd: %v", err)
+	}
+
+	data, err := os.ReadFile(hookLog)
+	if err != nil {
+		t.Fatalf("read hook log: %v", err)
+	}
+	if strings.TrimSpace(string(data)) != "daemon-global-pre-add" {
+		t.Fatalf("unexpected hook log: %q", string(data))
+	}
+}
+
 func TestWorktreeLifecycleProjectAndSlugWithSlashes(t *testing.T) {
 	base := t.TempDir()
 	repoDir := filepath.Join(base, "foocorp", "monorepo")

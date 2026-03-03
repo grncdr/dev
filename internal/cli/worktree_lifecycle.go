@@ -837,10 +837,18 @@ func runLifecycleHook(command, wrapper, phase, dir string, env map[string]string
 	if len(args) == 0 {
 		return nil
 	}
+	args, err = config.ExpandCommandPath(args)
+	if err != nil {
+		return fmt.Errorf("%s hook path expansion failed: %w", phase, err)
+	}
 	if strings.TrimSpace(wrapper) != "" {
 		args, err = procenv.ApplyWrapper(wrapper, args)
 		if err != nil {
 			return fmt.Errorf("%s hook wrapper parse failed: %w", phase, err)
+		}
+		args, err = config.ExpandCommandPath(args)
+		if err != nil {
+			return fmt.Errorf("%s hook wrapper path expansion failed: %w", phase, err)
 		}
 	}
 

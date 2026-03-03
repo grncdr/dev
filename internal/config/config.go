@@ -236,6 +236,19 @@ func ExpandUserPath(path string) (string, error) {
 	return filepath.Join(home, path[1:]), nil
 }
 
+func ExpandCommandPath(args []string) ([]string, error) {
+	if len(args) == 0 {
+		return nil, nil
+	}
+	expanded, err := ExpandUserPath(args[0])
+	if err != nil {
+		return nil, err
+	}
+	clone := append([]string(nil), args...)
+	clone[0] = expanded
+	return clone, nil
+}
+
 const DefaultStateDir = "~/.local/state/dev"
 
 func ResolveStateDir(cfg *DaemonConfig) (string, error) {
