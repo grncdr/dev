@@ -6,6 +6,15 @@ import (
 	"strings"
 )
 
+// ProcessDisabled reports whether a process config explicitly sets disabled = true.
+func ProcessDisabled(proc map[string]any) bool {
+	if proc == nil {
+		return false
+	}
+	disabled, ok := proc["disabled"].(bool)
+	return ok && disabled
+}
+
 // ParseProcessNeeds normalizes the `needs` field into a de-duplicated list of process names.
 // Accepts a single string or an array of strings.
 func ParseProcessNeeds(raw any) ([]string, error) {

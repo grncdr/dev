@@ -755,12 +755,24 @@ func resolveProjectIdentifier(cfg *config.ProjectConfig) (string, error) {
 }
 
 func selectProcesses(allProcesses map[string]map[string]any, names []string, all bool) map[string]map[string]any {
-	if all || len(names) == 0 {
-		return allProcesses
+	if len(allProcesses) == 0 {
+		return nil
 	}
 	selected := map[string]map[string]any{}
+	if all || len(names) == 0 {
+		for name, proc := range allProcesses {
+			if config.ProcessDisabled(proc) {
+				continue
+			}
+			selected[name] = proc
+		}
+		return selected
+	}
 	for _, name := range names {
 		if proc, ok := allProcesses[name]; ok {
+			if config.ProcessDisabled(proc) {
+				continue
+			}
 			selected[name] = proc
 		}
 	}
@@ -769,6 +781,7 @@ func selectProcesses(allProcesses map[string]map[string]any, names []string, all
 
 type processNeeds struct {
 	needs       map[string][]string
+	disabled    map[string]bool
 	singleton   map[string]bool
 	processes   map[string]map[string]any
 	parsedCache map[string][]string
@@ -782,6 +795,7 @@ type idleFollowGraph struct {
 func buildProcessNeeds(processes map[string]map[string]any) (*processNeeds, error) {
 	out := &processNeeds{
 		needs:     make(map[string][]string, len(processes)),
+		disabled:  make(map[string]bool, len(processes)),
 		singleton: make(map[string]bool, len(processes)),
 		processes: processes,
 	}
@@ -789,11 +803,23 @@ func buildProcessNeeds(processes map[string]map[string]any) (*processNeeds, erro
 		if rawSingleton, ok := proc["singleton"].(bool); ok {
 			out.singleton[name] = rawSingleton
 		}
+		if config.ProcessDisabled(proc) {
+			out.disabled[name] = true
+		}
+	}
+	for name, proc := range processes {
 		parsed, err := config.ParseProcessNeeds(proc["needs"])
 		if err != nil {
 			return nil, fmt.Errorf("process %s needs: %w", name, err)
 		}
-		out.needs[name] = parsed
+		filtered := parsed[:0]
+		for _, dep := range parsed {
+			if out.disabled[dep] {
+				continue
+			}
+			filtered = append(filtered, dep)
+		}
+		out.needs[name] = filtered
 	}
 	return out, nil
 }
@@ -895,6 +921,9 @@ func (p *processNeeds) buildStartSets(selected map[string]map[string]any, isMain
 		if err := p.ensureExists(parent, name); err != nil {
 			return err
 		}
+		if p.disabled[name] {
+			return nil
+		}
 		mainSet[name] = true
 		for _, dep := range p.needs[name] {
 			if err := addMain(name, dep); err != nil {
@@ -910,6 +939,9 @@ func (p *processNeeds) buildStartSets(selected map[string]map[string]any, isMain
 		}
 		if err := p.ensureExists(parent, name); err != nil {
 			return err
+		}
+		if p.disabled[name] {
+			return nil
 		}
 		if p.singleton[name] && !isMain {
 			return addMain(parent, name)
@@ -1791,6 +1823,9 @@ func (m *Manager) dependencyPortEnvVars(process string, needs *processNeeds, run
 	for _, dep := range needs.needs[process] {
 		if err := needs.ensureExists(process, dep); err != nil {
 			return nil, err
+		}
+		if needs.disabled[dep] {
+			continue
 		}
 		depRuntimeKey := runtimeKey
 		if !isMain && needs.singleton[dep] {

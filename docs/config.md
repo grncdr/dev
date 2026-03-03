@@ -46,6 +46,7 @@ port = "random"
 
 [process.rails]
 singleton = false
+disabled = false
 command = "rails server"
 port = "unix"
 wrapper = "bundle exec $COMMAND"
@@ -106,6 +107,7 @@ Notes:
 - `local-dns.overrides` is optional and remaps worktree slugs to proxy DNS labels for host routing/status output.
   - Example: `main = "foocorp"` maps `foocorp.localhost` to the main worktree.
 - All runnable units live under `process.*`; use `singleton = true` for project-wide services.
+- `disabled = true` prevents that process from starting. If another process lists it in `needs`, that dependency is ignored and the dependent still starts.
 - Worktree lifecycle hooks are optional:
   - `pre_worktree_add` and `post_worktree_add`
   - `pre_worktree_cleanup` and `post_worktree_cleanup`
