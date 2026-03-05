@@ -256,6 +256,9 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
 			return net.Dial(targetInfo.Network, targetInfo.Address)
 		},
+		// This transport is created per proxied request. Disable keep-alive so
+		// we do not retain idle upstream sockets and leak file descriptors.
+		DisableKeepAlives: true,
 	}
 	reverseProxy.ModifyResponse = func(resp *http.Response) error {
 		return nil
