@@ -112,6 +112,51 @@ func TestWorktreeListUsesConfiguredMainSlug(t *testing.T) {
 	}
 }
 
+func TestWorktreeListCollapsesHomePrefixInPaths(t *testing.T) {
+	base := t.TempDir()
+	homeDir := filepath.Join(base, "home")
+	repoDir := filepath.Join(homeDir, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	t.Setenv("HOME", homeDir)
+	if err := runGitForTest(repoDir, "init"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	cfg := "[project]\nname = \"demo\"\n"
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	if err := runGitForTest(repoDir, "add", "."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := runGitForTest(repoDir, "commit", "-m", "init"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	daemonConfigPath := filepath.Join(base, "daemon.toml")
+	daemonConfig := "state_dir = \"" + filepath.Join(base, "state") + "\"\nworktree_dir = \"" + filepath.Join(base, "managed") + "\"\n"
+	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
+		t.Fatalf("write daemon config: %v", err)
+	}
+	opts := &Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+
+	var out bytes.Buffer
+	if err := runWorktreeList(opts, nil, &out); err != nil {
+		t.Fatalf("runWorktreeList: %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "path=~/repo") {
+		t.Fatalf("expected home-prefixed path in list output, got %q", output)
+	}
+	if strings.Contains(output, "path="+homeDir) {
+		t.Fatalf("expected list output to omit absolute home path, got %q", output)
+	}
+}
+
 func TestWorktreeListAllProjectsIncludesOtherProjects(t *testing.T) {
 	base := t.TempDir()
 	daemonConfigPath := filepath.Join(base, "daemon.toml")

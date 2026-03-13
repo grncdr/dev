@@ -274,6 +274,65 @@ func TestExpandCommandPath(t *testing.T) {
 	}
 }
 
+func TestCollapseUserPath(t *testing.T) {
+	home := t.TempDir()
+	outsideHome := t.TempDir()
+	t.Setenv("HOME", home)
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "home directory",
+			path: home,
+			want: "~",
+		},
+		{
+			name: "path under home",
+			path: filepath.Join(home, "src", "repo"),
+			want: filepath.Join("~", "src", "repo"),
+		},
+		{
+			name: "path outside home",
+			path: filepath.Join(outsideHome, "repo"),
+			want: filepath.Join(outsideHome, "repo"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CollapseUserPath(tt.path); got != tt.want {
+				t.Fatalf("CollapseUserPath(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCollapseUserPath_HandlesHomeSymlinkDifferences(t *testing.T) {
+	base := t.TempDir()
+	homeReal := filepath.Join(base, "home-real")
+	homeLink := filepath.Join(base, "home-link")
+	if err := os.MkdirAll(filepath.Join(homeReal, "src"), 0o755); err != nil {
+		t.Fatalf("mkdir home real: %v", err)
+	}
+	if err := os.Symlink(homeReal, homeLink); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+	t.Setenv("HOME", homeLink)
+
+	worktreePath := filepath.Join(homeReal, "src", "repo")
+	if err := os.MkdirAll(worktreePath, 0o755); err != nil {
+		t.Fatalf("mkdir worktree path: %v", err)
+	}
+	got := CollapseUserPath(worktreePath)
+	want := filepath.Join("~", "src", "repo")
+	if got != want {
+		t.Fatalf("CollapseUserPath with symlinked home = %q, want %q", got, want)
+	}
+}
+
 func TestResolveWorktreeDir_Default(t *testing.T) {
 	base := t.TempDir()
 	old := os.Getenv("DEV_STATE_DIR")

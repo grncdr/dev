@@ -424,7 +424,7 @@ func runWorktreeList(opts *Options, list *worktreeListOptions, out io.Writer) er
 		if len(r.flags) > 0 {
 			flagValue = strings.Join(r.flags, ",")
 		}
-		fmt.Fprintf(out, "%s\tpath=%s\tbranch=%s\tflags=%s\n", r.id, r.path, r.branch, flagValue)
+		fmt.Fprintf(out, "%s\tpath=%s\tbranch=%s\tflags=%s\n", r.id, config.CollapseUserPath(r.path), r.branch, flagValue)
 	}
 	return nil
 }

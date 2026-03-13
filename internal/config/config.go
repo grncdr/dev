@@ -249,6 +249,41 @@ func ExpandCommandPath(args []string) ([]string, error) {
 	return clone, nil
 }
 
+func CollapseUserPath(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	cleanHome := filepath.Clean(strings.TrimSpace(home))
+	cleanPath := filepath.Clean(strings.TrimSpace(path))
+	if cleanHome == "" {
+		return path
+	}
+	if collapsed, ok := collapsePathForDisplay(cleanPath, cleanHome); ok {
+		return collapsed
+	}
+	resolvedPath, pathErr := filepath.EvalSymlinks(cleanPath)
+	resolvedHome, homeErr := filepath.EvalSymlinks(cleanHome)
+	if pathErr != nil || homeErr != nil {
+		return path
+	}
+	if collapsed, ok := collapsePathForDisplay(resolvedPath, resolvedHome); ok {
+		return collapsed
+	}
+	return path
+}
+
+func collapsePathForDisplay(path, home string) (string, bool) {
+	if path == home {
+		return "~", true
+	}
+	rel, err := filepath.Rel(home, path)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return filepath.Join("~", rel), true
+}
+
 const DefaultStateDir = "~/.local/state/dev"
 
 func ResolveStateDir(cfg *DaemonConfig) (string, error) {
