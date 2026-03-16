@@ -144,81 +144,18 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 	if err != nil {
 		return err
 	}
-	clientVersion := version.String()
-	daemonVersion := "(not running)"
-	if daemonUp {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		health, err := client.Health(ctx)
-		cancel()
-		if err == nil && strings.TrimSpace(health.Version) != "" {
-			daemonVersion = strings.TrimSpace(health.Version)
-		} else {
-			daemonVersion = "(unknown)"
-		}
-	}
-	fmt.Printf("Client version: %s\n", clientVersion)
-	fmt.Printf("Daemon version: %s\n\n", daemonVersion)
-
-	daemonCfg, _ := loadDaemonConfig(opts)
-	mainStatusByWorktree := map[string]*daemon.WorktreeStatus{}
+	renderTargets := make([]worktreeStatusRenderTarget, 0, len(targets))
 	cwd := workingDir(opts)
-
-	for i, slug := range sortedTargetSlugs(targets) {
+	for _, slug := range sortedTargetSlugs(targets) {
 		target := targets[slug]
-		projectPath := ""
-		projectName := target.project
-		var status *daemon.WorktreeStatus
-		if daemonUp {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			resp, err := client.WorktreeStatusForTarget(ctx, slug, target.project, cwd)
-			cancel()
-			if err == nil {
-				status = filterWorktreeStatus(resp, target)
-				projectPath = strings.TrimSpace(resp.Path)
-				if strings.TrimSpace(resp.Project) != "" {
-					projectName = strings.TrimSpace(resp.Project)
-				}
-			}
-		}
-		if projectPath == "" {
-			projectPath, _ = worktree.ResolvePathWithProjectHint(slug, target.project, cwd, daemonCfg)
-		}
-		var cfg *config.ProjectConfig
-		if projectPath != "" {
-			cfgPath := filepath.Join(projectPath, config.DefaultProjectConfig)
-			if loaded, _, err := config.LoadProjectConfig(cfgPath); err == nil {
-				cfg = loaded
-			}
-		}
-		if projectName == "" && cfg != nil {
-			projectName = strings.TrimSpace(cfg.Project.Name)
-		}
-		if i > 0 {
-			fmt.Println()
-		}
-		mainStatus := status
-		mainSlug := mainWorktreeSlug(cfg)
-		if daemonUp && shouldUseMainWorktreeStatus(cfg, projectPath) {
-			cacheKey := projectName + "\x00" + projectPath + "\x00" + mainSlug
-			if cached, ok := mainStatusByWorktree[cacheKey]; ok {
-				mainStatus = cached
-			} else {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				hintPath := cwd
-				if projectPath != "" {
-					hintPath = projectPath
-				}
-				resp, err := client.WorktreeStatusForTarget(ctx, mainSlug, projectName, hintPath)
-				cancel()
-				if err == nil {
-					mainStatus = resp
-				}
-				mainStatusByWorktree[cacheKey] = mainStatus
-			}
-		}
-		printWorktreeDetailedStatus(slug, projectPath, projectName, cfg, status, mainStatus, daemonUp, target)
+		renderTargets = append(renderTargets, worktreeStatusRenderTarget{
+			slug:    slug,
+			project: target.project,
+			dirHint: cwd,
+			target:  target,
+		})
 	}
-	return nil
+	return renderWorktreeDetailedStatuses(client, opts, daemonUp, resolveDaemonVersion(client, daemonUp), renderTargets)
 }
 
 func runWorktreeRestart(targetArgs []string, opts *Options) error {
@@ -681,4 +618,96 @@ func sortedTargetSlugs(targets map[string]*processTarget) []string {
 	}
 	sort.Strings(slugs)
 	return slugs
+}
+
+type worktreeStatusRenderTarget struct {
+	slug    string
+	project string
+	dirHint string
+	target  *processTarget
+}
+
+func resolveDaemonVersion(client *daemon.Client, daemonUp bool) string {
+	if !daemonUp {
+		return "(not running)"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	health, err := client.Health(ctx)
+	cancel()
+	if err == nil && strings.TrimSpace(health.Version) != "" {
+		return strings.TrimSpace(health.Version)
+	}
+	return "(unknown)"
+}
+
+func renderWorktreeDetailedStatuses(client *daemon.Client, opts *Options, daemonUp bool, daemonVersion string, targets []worktreeStatusRenderTarget) error {
+	fmt.Printf("Client version: %s\n", version.String())
+	fmt.Printf("Daemon version: %s\n\n", daemonVersion)
+
+	daemonCfg, _ := loadDaemonConfig(opts)
+	mainStatusByWorktree := map[string]*daemon.WorktreeStatus{}
+	defaultHint := workingDir(opts)
+
+	for i, entry := range targets {
+		slug := entry.slug
+		target := entry.target
+		hintPath := strings.TrimSpace(entry.dirHint)
+		if hintPath == "" {
+			hintPath = defaultHint
+		}
+
+		projectPath := ""
+		projectName := entry.project
+		var status *daemon.WorktreeStatus
+		if daemonUp {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			resp, err := client.WorktreeStatusForTarget(ctx, slug, entry.project, hintPath)
+			cancel()
+			if err == nil {
+				status = filterWorktreeStatus(resp, target)
+				projectPath = strings.TrimSpace(resp.Path)
+				if strings.TrimSpace(resp.Project) != "" {
+					projectName = strings.TrimSpace(resp.Project)
+				}
+			}
+		}
+		if projectPath == "" {
+			projectPath, _ = worktree.ResolvePathWithProjectHint(slug, entry.project, hintPath, daemonCfg)
+		}
+		var cfg *config.ProjectConfig
+		if projectPath != "" {
+			cfgPath := filepath.Join(projectPath, config.DefaultProjectConfig)
+			if loaded, _, err := config.LoadProjectConfig(cfgPath); err == nil {
+				cfg = loaded
+			}
+		}
+		if projectName == "" && cfg != nil {
+			projectName = strings.TrimSpace(cfg.Project.Name)
+		}
+		if i > 0 {
+			fmt.Println()
+		}
+		mainStatus := status
+		mainSlug := mainWorktreeSlug(cfg)
+		if daemonUp && shouldUseMainWorktreeStatus(cfg, projectPath) {
+			cacheKey := projectName + "\x00" + projectPath + "\x00" + mainSlug
+			if cached, ok := mainStatusByWorktree[cacheKey]; ok {
+				mainStatus = cached
+			} else {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				mainHint := hintPath
+				if projectPath != "" {
+					mainHint = projectPath
+				}
+				resp, err := client.WorktreeStatusForTarget(ctx, mainSlug, projectName, mainHint)
+				cancel()
+				if err == nil {
+					mainStatus = resp
+				}
+				mainStatusByWorktree[cacheKey] = mainStatus
+			}
+		}
+		printWorktreeDetailedStatus(slug, projectPath, projectName, cfg, status, mainStatus, daemonUp, target)
+	}
+	return nil
 }

@@ -86,6 +86,7 @@ func NewServer(socketPath string) (*Server, error) {
 	mux.HandleFunc("/worktrees/start", s.handleWorktreeStart)
 	mux.HandleFunc("/worktrees/stop", s.handleWorktreeStop)
 	mux.HandleFunc("/worktrees/status", s.handleWorktreeStatus)
+	mux.HandleFunc("/worktrees/running", s.handleWorktreesRunning)
 	mux.HandleFunc("/processes/start", s.handleProcessStart)
 	mux.HandleFunc("/processes/stop", s.handleProcessStop)
 	mux.HandleFunc("/processes/connect", s.handleProcessConnect)
@@ -237,6 +238,14 @@ func (s *Server) handleWorktreeStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (s *Server) handleWorktreesRunning(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErrorWithCode(w, http.StatusMethodNotAllowed, "method_not_allowed", errors.New("method not allowed"))
+		return
+	}
+	writeJSON(w, http.StatusOK, RunningWorktreesResponse{Worktrees: s.runningWorktreesForResume()})
+}
+
 func (s *Server) handleProcessConnect(w http.ResponseWriter, r *http.Request) {
 	process := r.URL.Query().Get("process")
 	slug := r.URL.Query().Get("slug")
@@ -365,11 +374,11 @@ func (s *Server) restoreFromResume() error {
 	return clearResumeState()
 }
 
-func (s *Server) runningWorktreesForResume() []resumeWorktree {
+func (s *Server) runningWorktreesForResume() []RunningWorktree {
 	if s.manager == nil {
 		return nil
 	}
-	return s.manager.runningWorktrees()
+	return s.manager.RunningWorktrees()
 }
 
 func (s *Server) loadConfig() error {

@@ -65,6 +65,14 @@ func (c *Client) WorktreeStatusForTarget(ctx context.Context, slug, project, pat
 	return c.worktreeAction(ctx, "/worktrees/status", slug, project, path)
 }
 
+func (c *Client) RunningWorktrees(ctx context.Context) (*RunningWorktreesResponse, error) {
+	var resp RunningWorktreesResponse
+	if err := c.doJSON(ctx, http.MethodGet, "/worktrees/running", nil, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 func (c *Client) ProcessStart(ctx context.Context, slug string, processes []string, all bool) (*WorktreeStatus, error) {
 	return c.processAction(ctx, "/processes/start", slug, "", "", processes, all)
 }

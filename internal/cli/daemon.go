@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -62,13 +63,16 @@ func newDaemonStopCmd(opts *Options) *cobra.Command {
 }
 
 func newDaemonStatusCmd(opts *Options) *cobra.Command {
-	return &cobra.Command{
+	var verbose bool
+	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "show daemon status",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDaemonStatus()
+			return runDaemonStatus(opts, verbose)
 		},
 	}
+	cmd.Flags().BoolVar(&verbose, "verbose", false, "show detailed status for running worktrees")
+	return cmd
 }
 
 func newDaemonRestartCmd(opts *Options) *cobra.Command {
@@ -245,7 +249,7 @@ func runDaemonRestart(opts *Options) error {
 	return runDaemonStart(opts)
 }
 
-func runDaemonStatus() error {
+func runDaemonStatus(opts *Options, verbose bool) error {
 	socketPath, err := daemon.ResolveSocketPath()
 	if err != nil {
 		return err
@@ -266,7 +270,42 @@ func runDaemonStatus() error {
 		version = "unknown"
 	}
 	fmt.Printf("daemon running (pid %d, version %s)\n", health.PID, version)
-	return nil
+
+	if !verbose {
+		return nil
+	}
+
+	running, err := client.RunningWorktrees(ctx)
+	if err != nil {
+		return err
+	}
+	if running == nil || len(running.Worktrees) == 0 {
+		fmt.Println()
+		fmt.Println("No running worktrees.")
+		return nil
+	}
+
+	targets := make([]worktreeStatusRenderTarget, 0, len(running.Worktrees))
+	for _, wt := range running.Worktrees {
+		slug := strings.TrimSpace(wt.Slug)
+		if slug == "" {
+			continue
+		}
+		targets = append(targets, worktreeStatusRenderTarget{
+			slug:    slug,
+			dirHint: strings.TrimSpace(wt.Path),
+			target:  &processTarget{all: true},
+		})
+	}
+	sort.Slice(targets, func(i, j int) bool {
+		if targets[i].slug == targets[j].slug {
+			return targets[i].dirHint < targets[j].dirHint
+		}
+		return targets[i].slug < targets[j].slug
+	})
+
+	fmt.Println()
+	return renderWorktreeDetailedStatuses(client, opts, true, version, targets)
 }
 
 func daemonRunning(socketPath string) (bool, error) {

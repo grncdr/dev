@@ -12,20 +12,15 @@ import (
 const resumeFileName = "resume.json"
 
 type resumeState struct {
-	Worktrees []resumeWorktree `json:"worktrees"`
-	Tunnels   []TunnelRequest  `json:"tunnels,omitempty"`
+	Worktrees []RunningWorktree `json:"worktrees"`
+	Tunnels   []TunnelRequest   `json:"tunnels,omitempty"`
 }
 
-type resumeWorktree struct {
-	Slug string `json:"slug"`
-	Path string `json:"path,omitempty"`
-}
-
-func (m *Manager) runningWorktrees() []resumeWorktree {
+func (m *Manager) RunningWorktrees() []RunningWorktree {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	out := make([]resumeWorktree, 0, len(m.processes))
+	out := make([]RunningWorktree, 0, len(m.processes))
 	for runtimeKey, procs := range m.processes {
 		running := false
 		for _, info := range procs {
@@ -37,7 +32,7 @@ func (m *Manager) runningWorktrees() []resumeWorktree {
 		if !running {
 			continue
 		}
-		entry := resumeWorktree{}
+		entry := RunningWorktree{}
 		if wt, ok := m.worktrees[runtimeKey]; ok {
 			entry.Slug = wt.Slug
 			entry.Path = wt.Path

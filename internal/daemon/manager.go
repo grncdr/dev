@@ -1486,7 +1486,7 @@ func (m *Manager) ensureProxyTargetForRuntime(runtimeKey string, matcher *router
 }
 
 func (m *Manager) StopAllWorktrees() {
-	entries := m.runningWorktrees()
+	entries := m.RunningWorktrees()
 	for _, entry := range entries {
 		_, _ = m.StopWorktreeFromDir(entry.Slug, entry.Path)
 	}

@@ -64,3 +64,16 @@ type TunnelsResponse struct {
 }
 
 type ProxyTarget = agent.ProxyTarget
+
+// RunningWorktree is a lightweight reference for a worktree that currently has
+// at least one running process managed by the daemon.
+type RunningWorktree struct {
+	Slug string `json:"slug"`
+	Path string `json:"path,omitempty"`
+}
+
+// RunningWorktreesResponse wraps running worktree references returned by the
+// GET /worktrees/running endpoint.
+type RunningWorktreesResponse struct {
+	Worktrees []RunningWorktree `json:"worktrees"`
+}

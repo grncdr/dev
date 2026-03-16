@@ -128,6 +128,19 @@ post_stop = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_SLUG}:${DEV_WORKTREE_DNS
 	if len(status.Processes) != 1 || status.Processes[0].PID == 0 {
 		t.Fatalf("expected running pid, got %+v", status.Processes)
 	}
+	running, err := client.RunningWorktrees(ctx)
+	if err != nil {
+		t.Fatalf("running worktrees: %v", err)
+	}
+	if len(running.Worktrees) != 1 {
+		t.Fatalf("expected 1 running worktree, got %+v", running.Worktrees)
+	}
+	if running.Worktrees[0].Slug != slug {
+		t.Fatalf("expected running worktree slug %q, got %q", slug, running.Worktrees[0].Slug)
+	}
+	if running.Worktrees[0].Path == "" {
+		t.Fatalf("expected running worktree path, got empty")
+	}
 
 	stop, err := client.WorktreeStop(ctx, slug)
 	if err != nil {
@@ -135,6 +148,13 @@ post_stop = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_SLUG}:${DEV_WORKTREE_DNS
 	}
 	if len(stop.Processes) != 1 || stop.Processes[0].Status != "stopped" {
 		t.Fatalf("expected stopped process, got %+v", stop.Processes)
+	}
+	running, err = client.RunningWorktrees(ctx)
+	if err != nil {
+		t.Fatalf("running worktrees after stop: %v", err)
+	}
+	if len(running.Worktrees) != 0 {
+		t.Fatalf("expected no running worktrees after stop, got %+v", running.Worktrees)
 	}
 
 	for _, name := range []string{
