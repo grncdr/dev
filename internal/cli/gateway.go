@@ -2,12 +2,8 @@ package cli
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -17,13 +13,13 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"dev/internal/agent"
 	"dev/internal/config"
 	"dev/internal/gateway"
 )
@@ -257,7 +253,7 @@ func runGatewayLogin(opts *Options, inviteCode, name, gatewayURL string) error {
 		return errors.New("gateway URL is required (use --gateway-url or set gateway.url in project config)")
 	}
 
-	key, csrPEM, err := generateGatewayCSR(name)
+	key, csrPEM, err := agent.GenerateGatewayCSR(name)
 	if err != nil {
 		return err
 	}
@@ -299,24 +295,17 @@ func runGatewayLogin(opts *Options, inviteCode, name, gatewayURL string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(credDir, 0o700); err != nil {
-		return err
-	}
 	keyDER, err := x509.MarshalECPrivateKey(key)
 	if err != nil {
 		return err
 	}
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-	keyPath := filepath.Join(credDir, "client-key.pem")
-	certPath := filepath.Join(credDir, "client.pem")
-	caPath := filepath.Join(credDir, "ca.pem")
-	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
-		return err
-	}
-	if err := os.WriteFile(certPath, []byte(out.CertPEM), 0o600); err != nil {
-		return err
-	}
-	if err := os.WriteFile(caPath, []byte(out.CAPEM), 0o600); err != nil {
+	if err := config.WriteGatewayCredentials(credDir, config.GatewayCredentialMaterial{
+		KeyPEM:     keyPEM,
+		CertPEM:    []byte(out.CertPEM),
+		CAPEM:      []byte(out.CAPEM),
+		GatewayURL: gatewayURL,
+	}); err != nil {
 		return err
 	}
 	fmt.Printf("gateway login succeeded for %s\n", name)
@@ -337,21 +326,6 @@ func resolveGatewayURLForLogin(opts *Options, explicit string) string {
 		return ""
 	}
 	return config.ProjectGatewayURL(projectCfg)
-}
-
-func generateGatewayCSR(name string) (*ecdsa.PrivateKey, []byte, error) {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return nil, nil, err
-	}
-	csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
-		Subject: pkix.Name{CommonName: name},
-	}, key)
-	if err != nil {
-		return nil, nil, err
-	}
-	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
-	return key, csrPEM, nil
 }
 
 func listenLooksTLS(listen string) bool {

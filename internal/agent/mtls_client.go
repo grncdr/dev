@@ -8,9 +8,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
+
+	"dev/internal/config"
 )
 
 func MTLSClientForGatewayURL(gatewayURL, credentialDir string) (*http.Client, *tls.Config, error) {
@@ -29,13 +30,14 @@ func MTLSClientForGatewayURL(gatewayURL, credentialDir string) (*http.Client, *t
 	if credDir == "" {
 		return nil, nil, fmt.Errorf("missing gateway credentials for %s (run dev gateway login --gateway-url %s)", host, gatewayURL)
 	}
-	keyPath := filepath.Join(credDir, "client-key.pem")
-	certPath := filepath.Join(credDir, "client.pem")
-	caPath := filepath.Join(credDir, "ca.pem")
+	keyPath, certPath, caPath := config.GatewayCredentialPaths(credDir)
 	if _, err := os.Stat(keyPath); err != nil {
 		return nil, nil, fmt.Errorf("missing gateway credentials for %s (run dev gateway login --gateway-url %s)", host, gatewayURL)
 	}
-	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	loadClientCert := func() (tls.Certificate, error) {
+		return tls.LoadX509KeyPair(certPath, keyPath)
+	}
+	cert, err := loadClientCert()
 	if err != nil {
 		return nil, nil, fmt.Errorf("load gateway client certificate: %w", err)
 	}
@@ -51,11 +53,18 @@ func MTLSClientForGatewayURL(gatewayURL, credentialDir string) (*http.Client, *t
 		return nil, nil, errors.New("invalid gateway CA certificate")
 	}
 	tlsCfg := &tls.Config{
-		MinVersion:   tls.VersionTLS12,
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      rootCAs,
-		ServerName:   host,
+		MinVersion: tls.VersionTLS12,
+		RootCAs:    rootCAs,
+		ServerName: host,
+		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			loaded, err := loadClientCert()
+			if err != nil {
+				return nil, err
+			}
+			return &loaded, nil
+		},
 	}
+	tlsCfg.Certificates = []tls.Certificate{cert}
 	client := &http.Client{
 		Timeout: 5 * time.Minute,
 		Transport: &http.Transport{

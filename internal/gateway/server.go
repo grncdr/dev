@@ -90,6 +90,12 @@ type CertIssueRequest struct {
 	CSR string `json:"csr"`
 }
 
+// CertRenewRequest is the JSON body for renewing a client certificate via mTLS.
+type CertRenewRequest struct {
+	// CSR is the PEM-encoded certificate signing request for the new keypair.
+	CSR string `json:"csr"`
+}
+
 func NewServer(opts ServerOptions) (*Server, error) {
 	if opts.ListenAddr == "" {
 		opts.ListenAddr = ":8080"
@@ -145,6 +151,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	mux.HandleFunc("/_agent/unregister", s.handleAgentUnregister)
 	mux.HandleFunc("/_agent/invites/create", s.handleAgentInviteCreate)
 	mux.HandleFunc("/_agent/cert/issue", s.handleAgentCertIssue)
+	mux.HandleFunc("/_agent/cert/renew", s.handleAgentCertRenew)
 	mux.HandleFunc("/_agent/tunnel/", s.handleAgentTunnel)
 	mux.HandleFunc("/_admin/invites/create", s.handleAdminInviteCreate)
 	mux.HandleFunc("/_registry/labels", s.handleRegistryLabels)
@@ -375,11 +382,44 @@ func (s *Server) handleAgentCertIssue(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"code": "invite_invalid", "error": err.Error()})
 		return
 	}
-	certPEM, caPEM, expiresAt, err := s.issuer.IssueClientCert([]byte(req.CSR), req.Name, 30*24*time.Hour)
+	certPEM, caPEM, expiresAt, err := s.issueClientCertificate([]byte(req.CSR), req.Name)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"code": "cert_issue_failed", "error": err.Error()})
 		return
 	}
+	s.writeClientCertificateResponse(w, certPEM, caPEM, expiresAt)
+}
+
+func (s *Server) handleAgentCertRenew(w http.ResponseWriter, r *http.Request) {
+	if !s.ensureAgentAuth(w, r) {
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	var req CertRenewRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"code": "invalid_body", "error": err.Error()})
+		return
+	}
+	name := clientCertCommonName(r)
+	if name == "" {
+		name = "dev-user"
+	}
+	certPEM, caPEM, expiresAt, err := s.issueClientCertificate([]byte(req.CSR), name)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"code": "cert_renew_failed", "error": err.Error()})
+		return
+	}
+	s.writeClientCertificateResponse(w, certPEM, caPEM, expiresAt)
+}
+
+func (s *Server) issueClientCertificate(csrPEM []byte, name string) ([]byte, []byte, time.Time, error) {
+	return s.issuer.IssueClientCert(csrPEM, name, 30*24*time.Hour)
+}
+
+func (s *Server) writeClientCertificateResponse(w http.ResponseWriter, certPEM, caPEM []byte, expiresAt time.Time) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"cert_pem":   string(certPEM),
 		"ca_pem":     string(caPEM),
@@ -448,6 +488,19 @@ func (s *Server) ensureAgentAuth(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+func clientCertCommonName(r *http.Request) string {
+	if r == nil || r.TLS == nil {
+		return ""
+	}
+	if len(r.TLS.VerifiedChains) > 0 && len(r.TLS.VerifiedChains[0]) > 0 {
+		return strings.TrimSpace(r.TLS.VerifiedChains[0][0].Subject.CommonName)
+	}
+	if len(r.TLS.PeerCertificates) > 0 {
+		return strings.TrimSpace(r.TLS.PeerCertificates[0].Subject.CommonName)
+	}
+	return ""
 }
 
 func (s *Server) handlePublic(w http.ResponseWriter, r *http.Request) {

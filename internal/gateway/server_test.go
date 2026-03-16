@@ -977,6 +977,63 @@ func TestServer_IssuesCertFromInvite(t *testing.T) {
 	}
 }
 
+func TestServer_RenewsCertFromVerifiedClientIdentity(t *testing.T) {
+	issuer, err := NewCertIssuer(t.TempDir())
+	if err != nil {
+		t.Fatalf("new cert issuer: %v", err)
+	}
+	srv := &Server{
+		enforceAgentMTLS: true,
+		issuer:           issuer,
+	}
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		Subject: pkix.Name{CommonName: "ignored"},
+	}, key)
+	if err != nil {
+		t.Fatalf("create csr: %v", err)
+	}
+	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
+	body, err := json.Marshal(map[string]string{"csr": string(csrPEM)})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/_agent/cert/renew", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.TLS = &tls.ConnectionState{
+		VerifiedChains: [][]*x509.Certificate{{
+			{Subject: pkix.Name{CommonName: "existing-agent"}},
+		}},
+	}
+	rr := httptest.NewRecorder()
+	srv.handleAgentCertRenew(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var out struct {
+		CertPEM string `json:"cert_pem"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	block, _ := pem.Decode([]byte(out.CertPEM))
+	if block == nil {
+		t.Fatalf("expected certificate PEM in response")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("parse certificate: %v", err)
+	}
+	if got := cert.Subject.CommonName; got != "existing-agent" {
+		t.Fatalf("expected renewed CN to match existing identity, got %q", got)
+	}
+}
+
 func TestEnsureAgentAuth_RequiresClientCertWhenEnabled(t *testing.T) {
 	s := &Server{enforceAgentMTLS: true}
 	req, err := http.NewRequest(http.MethodPost, "/_agent/register", nil)

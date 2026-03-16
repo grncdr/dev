@@ -1,9 +1,17 @@
 package config
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestLoadProjectConfig_OverridesAndValidation(t *testing.T) {
@@ -252,6 +260,47 @@ func TestResolveGatewayCredentialDirForURL(t *testing.T) {
 	want := filepath.Join(base, "gateway", "agent-credentials", "gw.example.test")
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestGatewayCredentialHelpers(t *testing.T) {
+	dir := t.TempDir()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "renew-me"},
+		NotBefore:             time.Now().Add(-time.Minute),
+		NotAfter:              time.Now().Add(2 * time.Hour),
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal key: %v", err)
+	}
+	err = WriteGatewayCredentials(dir, GatewayCredentialMaterial{
+		KeyPEM:  pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}),
+		CertPEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		CAPEM:   pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+	})
+	if err != nil {
+		t.Fatalf("WriteGatewayCredentials: %v", err)
+	}
+	info, err := LoadGatewayCredentialInfo(dir)
+	if err != nil {
+		t.Fatalf("LoadGatewayCredentialInfo: %v", err)
+	}
+	if info.CommonName != "renew-me" {
+		t.Fatalf("expected CN renew-me, got %q", info.CommonName)
+	}
+	if !info.ExpiresAt.After(time.Now()) {
+		t.Fatalf("expected future expiry, got %s", info.ExpiresAt)
 	}
 }
 

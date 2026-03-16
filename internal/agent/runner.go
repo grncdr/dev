@@ -239,11 +239,12 @@ func (a *Agent) connectTunnel(ctx context.Context) (net.Conn, error) {
 			}
 		}
 		conn, err = tls.DialWithDialer(dialer, "tcp", address, &tls.Config{
-			ServerName:         tlsCfg.ServerName,
-			MinVersion:         tlsCfg.MinVersion,
-			Certificates:       tlsCfg.Certificates,
-			RootCAs:            tlsCfg.RootCAs,
-			InsecureSkipVerify: tlsCfg.InsecureSkipVerify,
+			ServerName:           tlsCfg.ServerName,
+			MinVersion:           tlsCfg.MinVersion,
+			Certificates:         tlsCfg.Certificates,
+			GetClientCertificate: tlsCfg.GetClientCertificate,
+			RootCAs:              tlsCfg.RootCAs,
+			InsecureSkipVerify:   tlsCfg.InsecureSkipVerify,
 		})
 	} else {
 		conn, err = dialer.DialContext(ctx, "tcp", address)

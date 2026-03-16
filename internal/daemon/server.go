@@ -40,6 +40,8 @@ type Server struct {
 	localDNSTCP  *mdns.Server
 	tunnelMu     sync.Mutex
 	agents       map[string]*agent.Connection // keyed by gateway_url
+	credTracker  *gatewayCredentialTracker
+	credStop     context.CancelFunc
 }
 
 // NewServer creates the daemon control-plane server.
@@ -128,6 +130,10 @@ func (s *Server) Serve() error {
 		return err
 	}
 	defer s.stopLocalDNS()
+	if err := s.startGatewayCredentialTracking(); err != nil {
+		return err
+	}
+	defer s.stopGatewayCredentialTracking()
 	if err := s.startProxy(); err != nil {
 		return err
 	}
@@ -279,6 +285,7 @@ func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "shutting_down"})
 	go func() {
 		s.persistAndStopRuntime()
+		s.stopGatewayCredentialTracking()
 		s.stopLocalDNS()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -440,6 +447,29 @@ func (s *Server) projectApexZone() string {
 
 func (s *Server) Wait() {
 	<-s.shutdown
+}
+
+func (s *Server) startGatewayCredentialTracking() error {
+	if s.credStop != nil {
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.credStop = cancel
+	s.credTracker = newGatewayCredentialTracker(s.daemonConfig)
+	go func() {
+		if err := s.credTracker.run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			logError(http.StatusInternalServerError, "gateway_credential_tracker_failed", err)
+		}
+	}()
+	return nil
+}
+
+func (s *Server) stopGatewayCredentialTracking() {
+	if s.credStop == nil {
+		return
+	}
+	s.credStop()
+	s.credStop = nil
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
