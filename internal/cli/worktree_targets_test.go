@@ -69,6 +69,155 @@ func TestResolveProcessTargetsWildcardWins(t *testing.T) {
 	}
 }
 
+func TestResolveStopProcessTargetsProjectWildcardSlug(t *testing.T) {
+	base := t.TempDir()
+	mainPath := filepath.Join(base, "repo")
+	featurePath := filepath.Join(base, "feature")
+	bugfixPath := filepath.Join(base, "bugfix")
+	if err := os.MkdirAll(mainPath, 0o755); err != nil {
+		t.Fatalf("mkdir main: %v", err)
+	}
+	if err := os.MkdirAll(featurePath, 0o755); err != nil {
+		t.Fatalf("mkdir feature: %v", err)
+	}
+	if err := os.MkdirAll(bugfixPath, 0o755); err != nil {
+		t.Fatalf("mkdir bugfix: %v", err)
+	}
+
+	cfg := "[project]\nname=\"demo\"\nmain_slug=\"primary\"\n"
+	if err := os.WriteFile(filepath.Join(mainPath, ".dev.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+
+	daemonConfigPath := filepath.Join(base, "daemon.toml")
+	daemonConfig := "state_dir = \"" + filepath.Join(base, "state") + "\"\n"
+	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
+		t.Fatalf("write daemon config: %v", err)
+	}
+	daemonCfg, _, err := config.LoadDaemonConfig(daemonConfigPath)
+	if err != nil {
+		t.Fatalf("load daemon config: %v", err)
+	}
+
+	if err := worktree.Register(daemonCfg, worktree.Registration{
+		Project:  "demo",
+		Slug:     "feature",
+		Path:     featurePath,
+		MainPath: mainPath,
+	}); err != nil {
+		t.Fatalf("register feature: %v", err)
+	}
+	if err := worktree.Register(daemonCfg, worktree.Registration{
+		Project:  "demo",
+		Slug:     "bugfix",
+		Path:     bugfixPath,
+		MainPath: mainPath,
+	}); err != nil {
+		t.Fatalf("register bugfix: %v", err)
+	}
+
+	opts := &Options{
+		WorkingDir: base,
+		ResolvedPaths: ResolvedPaths{
+			DaemonConfig: daemonConfigPath,
+		},
+	}
+	targets, err := resolveStopProcessTargets([]string{"demo:*:*"}, opts)
+	if err != nil {
+		t.Fatalf("resolveStopProcessTargets: %v", err)
+	}
+
+	for _, slug := range []string{"feature", "bugfix", "primary"} {
+		target := targets[slug]
+		if target == nil {
+			t.Fatalf("expected target for slug %q", slug)
+		}
+		if target.project != "demo" {
+			t.Fatalf("expected project demo for %q, got %q", slug, target.project)
+		}
+		if !target.all {
+			t.Fatalf("expected all=true for %q", slug)
+		}
+	}
+}
+
+func TestResolveStopProcessTargetsProjectWildcardSlugSpecificProcess(t *testing.T) {
+	base := t.TempDir()
+	mainPath := filepath.Join(base, "repo")
+	featurePath := filepath.Join(base, "feature")
+	if err := os.MkdirAll(mainPath, 0o755); err != nil {
+		t.Fatalf("mkdir main: %v", err)
+	}
+	if err := os.MkdirAll(featurePath, 0o755); err != nil {
+		t.Fatalf("mkdir feature: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mainPath, ".dev.toml"), []byte("[project]\nname=\"demo\"\n"), 0o600); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+
+	daemonConfigPath := filepath.Join(base, "daemon.toml")
+	daemonConfig := "state_dir = \"" + filepath.Join(base, "state") + "\"\n"
+	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
+		t.Fatalf("write daemon config: %v", err)
+	}
+	daemonCfg, _, err := config.LoadDaemonConfig(daemonConfigPath)
+	if err != nil {
+		t.Fatalf("load daemon config: %v", err)
+	}
+	if err := worktree.Register(daemonCfg, worktree.Registration{
+		Project:  "demo",
+		Slug:     "feature",
+		Path:     featurePath,
+		MainPath: mainPath,
+	}); err != nil {
+		t.Fatalf("register feature: %v", err)
+	}
+
+	opts := &Options{
+		WorkingDir: base,
+		ResolvedPaths: ResolvedPaths{
+			DaemonConfig: daemonConfigPath,
+		},
+	}
+	targets, err := resolveStopProcessTargets([]string{"demo:*:worker"}, opts)
+	if err != nil {
+		t.Fatalf("resolveStopProcessTargets: %v", err)
+	}
+	for _, slug := range []string{"feature", "main"} {
+		target := targets[slug]
+		if target == nil {
+			t.Fatalf("expected target for slug %q", slug)
+		}
+		if target.all {
+			t.Fatalf("expected all=false for %q", slug)
+		}
+		list := target.processList()
+		if len(list) != 1 || list[0] != "worker" {
+			t.Fatalf("unexpected process list for %q: %+v", slug, list)
+		}
+	}
+}
+
+func TestResolveStopProcessTargetsProjectWildcardNoMatches(t *testing.T) {
+	base := t.TempDir()
+	daemonConfigPath := filepath.Join(base, "daemon.toml")
+	daemonConfig := "state_dir = \"" + filepath.Join(base, "state") + "\"\n"
+	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
+		t.Fatalf("write daemon config: %v", err)
+	}
+	opts := &Options{
+		WorkingDir: base,
+		ResolvedPaths: ResolvedPaths{
+			DaemonConfig: daemonConfigPath,
+		},
+	}
+
+	_, err := resolveStopProcessTargets([]string{"demo:*:*"}, opts)
+	if err == nil {
+		t.Fatalf("expected error for missing project worktrees")
+	}
+}
+
 func TestResolveSlugProjectQualified(t *testing.T) {
 	base := t.TempDir()
 	repoDir := filepath.Join(base, "repo")

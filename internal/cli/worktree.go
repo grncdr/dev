@@ -110,7 +110,7 @@ func runWorktreeStop(targetArgs []string, opts *Options) error {
 	defer cancel()
 	cwd := workingDir(opts)
 
-	targets, err := resolveProcessTargets(targetArgs, opts)
+	targets, err := resolveStopProcessTargets(targetArgs, opts)
 	if err != nil {
 		return err
 	}
@@ -609,6 +609,87 @@ func resolveProcessTargets(args []string, opts *Options) (map[string]*processTar
 		target.addProcess(id.Process)
 	}
 	return targets, nil
+}
+
+func resolveStopProcessTargets(args []string, opts *Options) (map[string]*processTarget, error) {
+	if len(args) == 0 {
+		return resolveProcessTargets(args, opts)
+	}
+
+	targets := map[string]*processTarget{}
+	var daemonCfg *config.DaemonConfig
+
+	for _, arg := range args {
+		id, err := worktree.ParseProcessIdentifier(arg)
+		if err != nil {
+			return nil, err
+		}
+		if id.Project == "*" {
+			return nil, fmt.Errorf("wildcard project is not supported in %q", arg)
+		}
+		if id.Slug == "*" {
+			if daemonCfg == nil {
+				daemonCfg, err = loadDaemonConfig(opts)
+				if err != nil {
+					return nil, err
+				}
+			}
+			project := strings.TrimSpace(id.Project)
+			if project == "" {
+				project, err = resolveProjectFromCurrentDir(opts)
+				if err != nil {
+					return nil, err
+				}
+			}
+			project, err = worktree.NormalizeIdentifierSegment(project)
+			if err != nil {
+				return nil, err
+			}
+			slugs, err := worktree.ListProjectSlugsFromRegistry(daemonCfg, project)
+			if err != nil {
+				return nil, err
+			}
+			if len(slugs) == 0 {
+				return nil, fmt.Errorf("no registered worktrees found for project %q", project)
+			}
+			for _, slug := range slugs {
+				if err := addProcessTarget(targets, project, slug, id.Process); err != nil {
+					return nil, err
+				}
+			}
+			continue
+		}
+
+		slug := id.Slug
+		if slug == "" {
+			slug, err = resolveSlug(opts, "")
+			if err != nil {
+				return nil, err
+			}
+		}
+		if err := addProcessTarget(targets, id.Project, slug, id.Process); err != nil {
+			return nil, err
+		}
+	}
+
+	return targets, nil
+}
+
+func addProcessTarget(targets map[string]*processTarget, project, slug, process string) error {
+	target, ok := targets[slug]
+	if !ok {
+		target = &processTarget{project: project, processes: map[string]bool{}}
+		targets[slug] = target
+	} else if target.project != project {
+		return fmt.Errorf("conflicting project qualifiers for worktree %q", slug)
+	}
+	if process == "*" {
+		target.all = true
+		target.processes = nil
+		return nil
+	}
+	target.addProcess(process)
+	return nil
 }
 
 func sortedTargetSlugs(targets map[string]*processTarget) []string {
