@@ -67,20 +67,10 @@ func ResolvePathWithProjectHint(slug, project, cwd string, daemonCfg *config.Dae
 }
 
 func findProjectMainPathFromRegistry(daemonCfg *config.DaemonConfig, project string) (string, bool, error) {
-	entries, err := ListRegisteredWorktrees(daemonCfg, project)
-	if err != nil {
+	if mainPath, ok, err := findProjectMainPath(daemonCfg, project); err != nil {
 		return "", false, err
-	}
-	for _, entry := range entries {
-		mainPath := strings.TrimSpace(entry.MainPath)
-		if mainPath != "" {
-			return mainPath, true, nil
-		}
-	}
-	for _, entry := range entries {
-		if strings.TrimSpace(entry.Slug) == "main" && strings.TrimSpace(entry.Path) != "" {
-			return entry.Path, true, nil
-		}
+	} else if ok {
+		return mainPath, true, nil
 	}
 	return "", false, nil
 }

@@ -25,6 +25,13 @@ func ResolveDefaultSlug(cwd string, daemonCfg *config.DaemonConfig) (string, err
 		return "", err
 	}
 	mainPath := entries[0].Path
+	project, err := resolveProjectIdentifierFromMainPath(mainPath)
+	if err != nil {
+		return "", err
+	}
+	if err := ensureProjectState(daemonCfg, project, mainPath); err != nil {
+		return "", err
+	}
 	if samePath(current.Path, mainPath) {
 		if configuredMainSlug, ok, err := ResolveConfiguredMainSlug(mainPath); err != nil {
 			return "", err
@@ -32,10 +39,6 @@ func ResolveDefaultSlug(cwd string, daemonCfg *config.DaemonConfig) (string, err
 			return configuredMainSlug, nil
 		}
 		return "main", nil
-	}
-	project, err := resolveProjectIdentifierFromMainPath(mainPath)
-	if err != nil {
-		return "", err
 	}
 	registered, ok, err := FindRegistrationByPath(daemonCfg, project, current.Path)
 	if err != nil {
@@ -60,16 +63,22 @@ func ResolvePathFromSlugWithRegistry(slug, cwd string, daemonCfg *config.DaemonC
 	}
 	mainPath := entries[0].Path
 	if slug == "main" {
-		return mainPath, nil
-	}
-	if configuredMainSlug, ok, err := ResolveConfiguredMainSlug(mainPath); err != nil {
-		return "", err
-	} else if ok && slug == configuredMainSlug {
+		if project, err := resolveProjectIdentifierFromMainPath(mainPath); err == nil {
+			_ = ensureProjectState(daemonCfg, project, mainPath)
+		}
 		return mainPath, nil
 	}
 	project, err := resolveProjectIdentifierFromMainPath(mainPath)
 	if err != nil {
 		return "", err
+	}
+	if err := ensureProjectState(daemonCfg, project, mainPath); err != nil {
+		return "", err
+	}
+	if configuredMainSlug, ok, err := ResolveConfiguredMainSlug(mainPath); err != nil {
+		return "", err
+	} else if ok && slug == configuredMainSlug {
+		return mainPath, nil
 	}
 	if registered, ok, err := FindRegisteredWorktree(daemonCfg, project, slug); err != nil {
 		return "", err
