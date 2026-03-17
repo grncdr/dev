@@ -475,7 +475,12 @@ func runtimeKeyForPath(path string) string {
 }
 
 func (m *Manager) registerWorktreeLocked(key string, wt runtimeWorktree) {
-	if key == "" {
+	key = strings.TrimSpace(key)
+	wt.Slug = strings.TrimSpace(wt.Slug)
+	wt.Project = strings.TrimSpace(wt.Project)
+	wt.Path = strings.TrimSpace(wt.Path)
+	wt.DNSLabel = strings.TrimSpace(wt.DNSLabel)
+	if key == "" || wt.Slug == "" || wt.Path == "" {
 		return
 	}
 	if previous, ok := m.worktrees[key]; ok {
