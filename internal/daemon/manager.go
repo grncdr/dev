@@ -452,6 +452,13 @@ func (m *Manager) resolveWorktreePath(slug, project, dirHint string) (string, er
 	m.mu.Lock()
 	daemonCfg := m.daemonCfg
 	m.mu.Unlock()
+	if strings.TrimSpace(dirHint) != "" {
+		// Best-effort: the project should already be registered by the time callers
+		// reach here, but seed the registry defensively so resolution has the best
+		// chance of finding the path. Failures are safe to ignore — resolution
+		// still falls back to runtime indexes and git metadata.
+		_, _, _ = worktree.EnsureProjectStateForDir(daemonCfg, dirHint)
+	}
 	return worktree.ResolvePathWithProjectHint(slug, project, dirHint, daemonCfg)
 }
 

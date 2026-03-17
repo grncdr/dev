@@ -24,8 +24,13 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 	if (req.AuthUsername == "") != (req.AuthPassword == "") {
 		return nil, errors.New("auth_username and auth_password must both be set")
 	}
+	if strings.TrimSpace(req.Path) != "" {
+		if _, _, err := worktree.EnsureProjectStateForDir(s.daemonConfig, req.Path); err != nil {
+			return nil, err
+		}
+	}
 
-	localBaseHost, err := s.resolveTunnelLocalBaseHost(req.Slug)
+	localBaseHost, err := s.resolveTunnelLocalBaseHost(req.Slug, req.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -146,6 +151,9 @@ func (s *Server) runningTunnelsForResume() []TunnelRequest {
 			continue
 		}
 		for _, spec := range conn.RunningRequests() {
+			// Path is intentionally omitted: by the time a tunnel is running,
+			// openTunnel has already persisted the project via EnsureProjectStateForDir,
+			// so resolution on resume works without the dir hint.
 			req := TunnelRequest{
 				Slug:         spec.Slug,
 				Label:        spec.Label,
@@ -164,8 +172,8 @@ func (s *Server) runningTunnelsForResume() []TunnelRequest {
 	return out
 }
 
-func (s *Server) resolveTunnelLocalBaseHost(slug string) (string, error) {
-	cfg, repoPath, err := s.projectConfigForSlug(slug)
+func (s *Server) resolveTunnelLocalBaseHost(slug, dirHint string) (string, error) {
+	cfg, repoPath, err := s.projectConfigForSlugFromDir(slug, dirHint)
 	if err != nil {
 		return "", err
 	}

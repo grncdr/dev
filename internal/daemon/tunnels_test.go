@@ -103,6 +103,7 @@ url = "http://unused.local"
 	slug := defaultSlugForRepo(t, repoDir)
 	_, err = client.TunnelOpen(ctx, TunnelRequest{
 		Slug:       slug,
+		Path:       repoDir,
 		Label:      slug,
 		GatewayURL: "http://" + gw.Addr(),
 		Project:    "demo",
@@ -165,5 +166,126 @@ func TestOpenTunnel_RejectsIncompleteAuth(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "auth_username and auth_password") {
 		t.Fatalf("expected auth validation error, got %v", err)
+	}
+}
+
+func TestTunnelOpenImplicitlyRegistersProjectFromPath(t *testing.T) {
+	baseDir := t.TempDir()
+	repoDir := filepath.Join(baseDir, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(repoDir, "init"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(`
+[project]
+name = "demo"
+
+[gateway]
+url = "http://unused.local"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(repoDir, "add", "."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := runGit(repoDir, "commit", "-m", "init"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	oldHome := os.Getenv("HOME")
+	oldCwd, _ := os.Getwd()
+	oldProxyListenHTTP := os.Getenv("DEV_PROXY_LISTEN_HTTP")
+	oldProxyListenHTTPS := os.Getenv("DEV_PROXY_LISTEN_HTTPS")
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", oldHome)
+		_ = os.Setenv("DEV_PROXY_LISTEN_HTTP", oldProxyListenHTTP)
+		_ = os.Setenv("DEV_PROXY_LISTEN_HTTPS", oldProxyListenHTTPS)
+		_ = os.Chdir(oldCwd)
+	})
+	if err := os.Setenv("HOME", baseDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTP", "off"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Setenv("DEV_PROXY_LISTEN_HTTPS", "off"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(baseDir); err != nil {
+		t.Fatal(err)
+	}
+
+	gwDir := filepath.Join(baseDir, "gateway")
+	gw, err := gateway.NewServer(gateway.ServerOptions{
+		ListenAddr: "127.0.0.1:0",
+		DataDir:    gwDir,
+		DNSZone:    "public.example.dev",
+	})
+	if err != nil {
+		t.Fatalf("new gateway: %v", err)
+	}
+	go func() { _ = gw.Serve() }()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = gw.Shutdown(ctx)
+	})
+
+	socketPath := filepath.Join(baseDir, "devd-implicit.sock")
+	if len(socketPath) > 80 {
+		socketPath = filepath.Join(os.TempDir(), fmt.Sprintf("devd-implicit-%d.sock", time.Now().UnixNano()))
+	}
+	srv, err := NewServer(socketPath)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	srv.daemonConfig = &config.DaemonConfig{StateDir: filepath.Join(baseDir, "state")}
+	srv.manager.SetDaemonConfig(srv.daemonConfig)
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Serve() }()
+
+	client := NewClient(socketPath)
+	if err := waitForHealth(client, 2*time.Second); err != nil {
+		t.Fatalf("daemon not healthy: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	slug := defaultSlugForRepo(t, repoDir)
+	if _, err := client.TunnelOpen(ctx, TunnelRequest{
+		Slug:       slug,
+		Path:       repoDir,
+		Label:      slug,
+		GatewayURL: "http://" + gw.Addr(),
+		Project:    "demo",
+	}); err != nil {
+		t.Fatalf("tunnel open: %v", err)
+	}
+
+	projectStatePath := filepath.Join(baseDir, "state", "worktree-projects.json")
+	data, err := os.ReadFile(projectStatePath)
+	if err != nil {
+		t.Fatalf("read project state: %v", err)
+	}
+	if !strings.Contains(string(data), "\"main_path\"") {
+		t.Fatalf("expected project state to contain main_path, got %s", string(data))
+	}
+
+	if err := client.Shutdown(ctx); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Fatalf("daemon serve: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("daemon did not stop")
 	}
 }

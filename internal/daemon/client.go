@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -94,6 +95,9 @@ func (c *Client) Shutdown(ctx context.Context) error {
 }
 
 func (c *Client) TunnelOpen(ctx context.Context, req TunnelRequest) (*TunnelStatus, error) {
+	if strings.TrimSpace(req.Path) == "" {
+		return nil, errors.New("TunnelRequest.Path is required")
+	}
 	var resp TunnelStatus
 	if err := c.doJSON(ctx, http.MethodPost, "/tunnels/open", req, &resp); err != nil {
 		return nil, err

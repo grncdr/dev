@@ -29,6 +29,8 @@ type WorktreeRequest struct {
 type TunnelRequest struct {
 	// Slug identifies the worktree to tunnel.
 	Slug string `json:"slug,omitempty"`
+	// Path is a directory hint for resolving the worktree on disk.
+	Path string `json:"path,omitempty"`
 	// Label is the unique tunnel label registered with the gateway.
 	Label string `json:"label,omitempty"`
 	// GatewayURL is the gateway server URL to connect to.

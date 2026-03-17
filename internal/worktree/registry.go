@@ -212,6 +212,27 @@ func ensureProjectState(daemonCfg *config.DaemonConfig, project, mainPath string
 	return nil
 }
 
+// EnsureProjectStateForDir resolves the repository main path for dir and records
+// the project in daemon state even if it has no registered non-main worktrees.
+func EnsureProjectStateForDir(daemonCfg *config.DaemonConfig, dir string) (string, string, error) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return "", "", errors.New("dir is required")
+	}
+	mainPath, err := ResolveMainPathInDir(dir)
+	if err != nil {
+		return "", "", err
+	}
+	project, err := resolveProjectIdentifierFromMainPath(mainPath)
+	if err != nil {
+		return "", "", err
+	}
+	if err := ensureProjectState(daemonCfg, project, mainPath); err != nil {
+		return "", "", err
+	}
+	return project, mainPath, nil
+}
+
 func findProjectMainPath(daemonCfg *config.DaemonConfig, project string) (string, bool, error) {
 	projectPath, legacyPath, err := registryPaths(daemonCfg)
 	if err != nil {

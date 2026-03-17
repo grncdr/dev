@@ -92,6 +92,7 @@ func runTunnelOpen(opts *Options, slugArg, labelArg, gatewayURLArg, authArg stri
 
 	req := daemon.TunnelRequest{
 		Slug:         slug,
+		Path:         path,
 		Label:        label,
 		GatewayURL:   gatewayURL,
 		Project:      cfg.Project.Name,
