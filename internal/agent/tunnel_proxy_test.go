@@ -17,8 +17,10 @@ func TestHandleTunnelRequest_RewriteMode_RewritesSingletonPeerHostToMainLabel(t 
 	t.Parallel()
 
 	var upstreamHost string
+	var gatewayMode string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upstreamHost = r.Host
+		gatewayMode = r.Header.Get("Dev-Gateway-Mode")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -90,5 +92,86 @@ func TestHandleTunnelRequest_RewriteMode_RewritesSingletonPeerHostToMainLabel(t 
 	}
 	if upstreamHost != "minio.main.localhost" {
 		t.Fatalf("expected upstream host minio.main.localhost, got %q", upstreamHost)
+	}
+	if gatewayMode != config.GatewayModeRewrite {
+		t.Fatalf("expected Dev-Gateway-Mode=%q, got %q", config.GatewayModeRewrite, gatewayMode)
+	}
+}
+
+func TestHandleTunnelRequest_ReverseProxyMode_SetsGatewayModeHeader(t *testing.T) {
+	t.Parallel()
+
+	var upstreamHost string
+	var gatewayMode string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHost = r.Host
+		gatewayMode = r.Header.Get("Dev-Gateway-Mode")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	t.Cleanup(upstream.Close)
+
+	upstreamURL, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatalf("parse upstream url: %v", err)
+	}
+
+	opts := TunnelProxyOptions{
+		ResolveTarget: func(host, path string) (TunnelResolveResult, error) {
+			return TunnelResolveResult{
+				ProxyTarget: ProxyTarget{
+					Network: "tcp",
+					Address: upstreamURL.Host,
+					Slug:    "feature",
+					Path:    "/repo/feature",
+					Process: "app",
+				},
+				GatewayMode:       config.GatewayModeReverseProxy,
+				GatewayDebugLog:   "",
+				ResolvedLocalHost: "app.feature.localhost",
+			}, nil
+		},
+		EndProxySession: func(targetSlug, targetPath, process string) {},
+		ProjectApexZone: func() string { return ".localhost" },
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "https://app.feature.public.example.com/", nil)
+	req.Host = "app.feature.public.example.com"
+
+	tunnel := TunnelStatus{
+		Slug:          "feature",
+		Label:         "feature",
+		LocalBaseHost: "feature.localhost",
+	}
+
+	serverSide, clientSide := net.Pipe()
+	defer clientSide.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		defer serverSide.Close()
+		errCh <- HandleTunnelRequest(context.Background(), opts, tunnel, req, serverSide)
+	}()
+
+	resp, err := http.ReadResponse(bufio.NewReader(clientSide), req)
+	if err != nil {
+		t.Fatalf("read tunneled response: %v", err)
+	}
+	defer resp.Body.Close()
+	if _, err := io.ReadAll(resp.Body); err != nil {
+		t.Fatalf("read tunneled body: %v", err)
+	}
+
+	if err := <-errCh; err != nil {
+		t.Fatalf("handle tunnel request: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+	if upstreamHost != "app.feature.localhost" {
+		t.Fatalf("expected upstream host app.feature.localhost, got %q", upstreamHost)
+	}
+	if gatewayMode != config.GatewayModeReverseProxy {
+		t.Fatalf("expected Dev-Gateway-Mode=%q, got %q", config.GatewayModeReverseProxy, gatewayMode)
 	}
 }

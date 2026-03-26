@@ -108,6 +108,9 @@ func HandleTunnelRequest(ctx context.Context, opts TunnelProxyOptions, tunnel Tu
 		RewriteRequestCookieDomainForTunnel(outReq.Header, publicHost, resolvedLocalHost, publicApex, localApex)
 		RewriteRequestOriginForTunnel(outReq.Header, publicHost, resolvedLocalHost, publicApex, localApex)
 	}
+	if resolved.GatewayMode != "" {
+		outReq.Header.Set("Dev-Gateway-Mode", resolved.GatewayMode)
+	}
 
 	transport := &http.Transport{
 		DialContext: func(context.Context, string, string) (net.Conn, error) {
