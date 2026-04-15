@@ -49,7 +49,7 @@ func TestRunDaemonStop(t *testing.T) {
 		errCh <- srv.Serve()
 	}()
 
-	if err := waitForDaemon(socketPath, 2*time.Second); err != nil {
+	if err := waitForDaemon(socketPath, "", nil, 2*time.Second); err != nil {
 		t.Fatalf("daemon not healthy: %v", err)
 	}
 

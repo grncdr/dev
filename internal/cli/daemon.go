@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -22,8 +23,10 @@ import (
 )
 
 const (
-	daemonLogPathEnv = "DEV_DAEMON_LOG"
-	maxLogBytes      = 20 * 1024 * 1024
+	daemonLogPathEnv        = "DEV_DAEMON_LOG"
+	maxLogBytes             = 20 * 1024 * 1024
+	daemonStartLogTailBytes = 8 * 1024
+	daemonStartLogTailLines = 20
 )
 
 func newDaemonCmd(opts *Options) *cobra.Command {
@@ -132,10 +135,12 @@ func runDaemonStart(opts *Options) error {
 	}
 
 	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
 		return err
 	}
+	_ = logFile.Close()
 
-	if err := waitForDaemon(socketPath, 3*time.Second); err != nil {
+	if err := waitForDaemon(socketPath, logPath, monitorCmdExit(cmd), 3*time.Second); err != nil {
 		return err
 	}
 
@@ -359,24 +364,98 @@ func ensureDaemonRunning(opts *Options, socketPath string) error {
 		cmd.SysProcAttr = &sysProc
 	}
 	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
 		return err
 	}
-	return waitForDaemon(socketPath, 3*time.Second)
+	_ = logFile.Close()
+	return waitForDaemon(socketPath, logPath, monitorCmdExit(cmd), 3*time.Second)
 }
 
-func waitForDaemon(socketPath string, timeout time.Duration) error {
+func monitorCmdExit(cmd *exec.Cmd) <-chan error {
+	if cmd == nil {
+		return nil
+	}
+	exitCh := make(chan error, 1)
+	go func() {
+		exitCh <- cmd.Wait()
+	}()
+	return exitCh
+}
+
+func waitForDaemon(socketPath, logPath string, exitCh <-chan error, timeout time.Duration) error {
 	client := daemon.NewClient(socketPath)
 	deadline := time.Now().Add(timeout)
+	var lastErr error
 	for time.Now().Before(deadline) {
+		select {
+		case err := <-exitCh:
+			if err == nil {
+				err = errors.New("daemon exited before becoming healthy")
+			}
+			return daemonStartFailure(err, lastErr, logPath)
+		default:
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 		_, err := client.Health(ctx)
 		cancel()
 		if err == nil {
 			return nil
 		}
+		lastErr = err
 		time.Sleep(100 * time.Millisecond)
 	}
-	return errors.New("daemon failed to start")
+	return daemonStartFailure(errors.New("timed out waiting for daemon health check"), lastErr, logPath)
+}
+
+func daemonStartFailure(cause, lastErr error, logPath string) error {
+	msg := "daemon failed to start"
+	if cause != nil {
+		msg = fmt.Sprintf("%s: %v", msg, cause)
+	}
+	if lastErr != nil {
+		msg = fmt.Sprintf("%s (last health check: %v)", msg, lastErr)
+	}
+	logTail, err := readDaemonStartupLogTail(logPath)
+	if err != nil {
+		return fmt.Errorf("%s; failed to read %s: %w", msg, logPath, err)
+	}
+	if logTail == "" {
+		if strings.TrimSpace(logPath) == "" {
+			return errors.New(msg)
+		}
+		return fmt.Errorf("%s; see %s", msg, logPath)
+	}
+	return fmt.Errorf("%s\n\nRecent daemon log output from %s:\n%s", msg, logPath, logTail)
+}
+
+func readDaemonStartupLogTail(logPath string) (string, error) {
+	if strings.TrimSpace(logPath) == "" {
+		return "", nil
+	}
+	data, err := readTailFromPath(logPath, daemonStartLogTailBytes)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	return lastLogLines(data, daemonStartLogTailLines), nil
+}
+
+func lastLogLines(data []byte, lines int) string {
+	if lines <= 0 {
+		return ""
+	}
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return ""
+	}
+	parts := bytes.Split(trimmed, []byte("\n"))
+	if len(parts) > lines {
+		parts = parts[len(parts)-lines:]
+	}
+	return string(bytes.Join(parts, []byte("\n")))
 }
 
 func waitForDaemonStopped(socketPath string, timeout time.Duration) error {
