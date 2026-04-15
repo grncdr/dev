@@ -62,6 +62,23 @@ type ProcessIdentifier struct {
 	Process string
 }
 
+// FormatProcessIdentifier formats a fully-qualified process identifier.
+// Empty leading segments are omitted so callers can still use it with
+// partially-resolved identifiers.
+func FormatProcessIdentifier(project, slug, process string) string {
+	parts := make([]string, 0, 3)
+	if project = strings.TrimSpace(project); project != "" {
+		parts = append(parts, project)
+	}
+	if slug = strings.TrimSpace(slug); slug != "" {
+		parts = append(parts, slug)
+	}
+	if process = strings.TrimSpace(process); process != "" {
+		parts = append(parts, process)
+	}
+	return strings.Join(parts, ":")
+}
+
 // ParseProcessIdentifier parses process identifiers in format:
 // - "process"
 // - "slug:process"

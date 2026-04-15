@@ -409,9 +409,9 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 		m.mu.Unlock()
 		m.rescheduleIdleTimer(runtimeKey, name, info)
 
-		logProcessEvent("start", slug, name, cmd.Process.Pid, network, address)
+		logProcessEvent("start", projectID, slug, name, cmd.Process.Pid, network, address)
 
-		go func(slugName, procName string, proc *exec.Cmd, meta *processInfo) {
+		go func(projectName, slugName, procName string, proc *exec.Cmd, meta *processInfo) {
 			err := proc.Wait()
 			exitCode := 0
 			if err != nil {
@@ -429,14 +429,14 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 			}
 			meta.mu.Unlock()
 			close(meta.exited)
-			logProcessExit(slugName, procName, proc.Process.Pid, exitCode, err)
+			logProcessExit(projectName, slugName, procName, proc.Process.Pid, exitCode, err)
 			if meta.pty != nil {
 				_ = meta.pty.Close()
 			}
 			if meta.logFile != nil {
 				_ = meta.logFile.Close()
 			}
-		}(slug, name, cmd, info)
+		}(projectID, slug, name, cmd, info)
 
 		statuses = append(statuses, ProcessStatus{Name: name, PID: cmd.Process.Pid, Status: "running"})
 	}
