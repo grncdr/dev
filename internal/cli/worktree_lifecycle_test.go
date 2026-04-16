@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -498,6 +499,86 @@ post_worktree_cleanup = "sh -c \"echo daemon-project-post-cleanup >> ` + orderLo
 		if got[i] != want[i] {
 			t.Fatalf("unexpected hook order at %d: got %q, want %q (all=%v)", i, got[i], want[i], got)
 		}
+	}
+}
+
+func TestWorktreeCleanupPostHookUsesMainWorktreeConfig(t *testing.T) {
+	base := t.TempDir()
+	repoDir := filepath.Join(base, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	if err := runGitForTest(repoDir, "init"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+
+	mainHookLog := filepath.Join(base, "main-post-cleanup.log")
+	worktreeHookLog := filepath.Join(base, "worktree-post-cleanup.log")
+	projectConfig := `
+[project]
+name = "demo"
+
+[commands]
+wrapper = "env DEV_WRAPPED=main $COMMAND"
+
+[hooks]
+post_worktree_cleanup = "sh -c \"echo ${DEV_WRAPPED} > ` + mainHookLog + `\""
+`
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(projectConfig), 0o600); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("demo"), 0o600); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	if err := runGitForTest(repoDir, "add", "."); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := runGitForTest(repoDir, "commit", "-m", "init"); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	worktreeRoot := filepath.Join(base, "managed")
+	daemonConfigPath := filepath.Join(base, "daemon.toml")
+	daemonConfig := "state_dir = \"" + filepath.Join(base, "state") + "\"\nworktree_dir = \"" + worktreeRoot + "\"\n"
+	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
+		t.Fatalf("write daemon config: %v", err)
+	}
+	opts := &Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	if err := runWorktreeAdd(opts, "feature", "", &out, &errOut); err != nil {
+		t.Fatalf("runWorktreeAdd: %v", err)
+	}
+
+	worktreePath := filepath.Join(worktreeRoot, "demo", "feature")
+	worktreeConfig := `
+[project]
+name = "demo"
+
+[commands]
+wrapper = "env DEV_WRAPPED=worktree $COMMAND"
+
+[hooks]
+post_worktree_cleanup = "sh -c \"echo ${DEV_WRAPPED} > ` + worktreeHookLog + `\""
+`
+	if err := os.WriteFile(filepath.Join(worktreePath, ".dev.toml"), []byte(worktreeConfig), 0o600); err != nil {
+		t.Fatalf("write worktree config: %v", err)
+	}
+
+	if err := runWorktreeCleanup(opts, "feature", &worktreeCleanupOptions{Force: true}, &out, &errOut); err != nil {
+		t.Fatalf("runWorktreeCleanup: %v", err)
+	}
+
+	mainData, err := os.ReadFile(mainHookLog)
+	if err != nil {
+		t.Fatalf("read main hook log: %v", err)
+	}
+	if got := strings.TrimSpace(string(mainData)); got != "main" {
+		t.Fatalf("unexpected main hook log: got %q, want %q", got, "main")
+	}
+	if _, err := os.Stat(worktreeHookLog); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected worktree hook log to be absent, got err=%v", err)
 	}
 }
 

@@ -333,11 +333,15 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 		return errors.New("target worktree has uncommitted changes (use --force)")
 	}
 
-	cfg, err := loadProjectConfigFromDir(resolved.path)
+	preCleanupCfg, err := loadProjectConfigFromDir(resolved.path)
 	if err != nil {
 		return err
 	}
-	daemonHooks := config.ResolveDaemonWorktreeLifecycleHooks(daemonCfg, cfg.Project.Name, resolved.project)
+	postCleanupCfg, err := loadProjectConfigFromDir(resolved.mainPath)
+	if err != nil {
+		return err
+	}
+	daemonHooks := config.ResolveDaemonWorktreeLifecycleHooks(daemonCfg, preCleanupCfg.Project.Name, resolved.project)
 	hookEnv := lifecycleHookEnv(resolved.project, resolved.slug, resolved.path, resolved.branch, "cleanup", resolved.implicit, resolved.mainPath, proxyApexZone(daemonCfg))
 
 	if cleanup.DryRun {
@@ -351,7 +355,7 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 	if err := runLifecycleHooks(daemonHooks.PreWorktreeCleanup, "", "pre_worktree_cleanup", resolved.path, hookEnv, out, errOut); err != nil {
 		return err
 	}
-	if err := runLifecycleHook(cfg.Hooks.PreWorktreeCleanup, cfg.Commands.Wrapper, "pre_worktree_cleanup", resolved.path, hookEnv, out, errOut); err != nil {
+	if err := runLifecycleHook(preCleanupCfg.Hooks.PreWorktreeCleanup, preCleanupCfg.Commands.Wrapper, "pre_worktree_cleanup", resolved.path, hookEnv, out, errOut); err != nil {
 		return err
 	}
 
@@ -381,7 +385,7 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 	if err := runLifecycleHooks(daemonHooks.PostWorktreeCleanup, "", "post_worktree_cleanup", resolved.mainPath, hookEnv, out, errOut); err != nil {
 		return fmt.Errorf("worktree cleaned up at %s, but %w", resolved.path, err)
 	}
-	if err := runLifecycleHook(cfg.Hooks.PostWorktreeCleanup, cfg.Commands.Wrapper, "post_worktree_cleanup", resolved.mainPath, hookEnv, out, errOut); err != nil {
+	if err := runLifecycleHook(postCleanupCfg.Hooks.PostWorktreeCleanup, postCleanupCfg.Commands.Wrapper, "post_worktree_cleanup", resolved.mainPath, hookEnv, out, errOut); err != nil {
 		return fmt.Errorf("worktree cleaned up at %s, but %w", resolved.path, err)
 	}
 
