@@ -261,6 +261,20 @@ func TestWorktreeCleanupMainFails(t *testing.T) {
 
 func TestWorktreeCleanupMissingPathWarnsAndUnregisters(t *testing.T) {
 	repoDir, daemonConfigPath, opts := setupWorktreeLifecycleRepo(t)
+	postCleanupLog := filepath.Join(filepath.Dir(daemonConfigPath), "missing-post-cleanup.log")
+	projectConfig := `
+[project]
+name = "demo"
+
+[commands]
+wrapper = "env DEV_WRAPPED=missing $COMMAND"
+
+[hooks]
+post_worktree_cleanup = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_SLUG}:${DEV_WORKTREE_PATH}:${DEV_MAIN_WORKTREE} > ` + postCleanupLog + `\""
+`
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(projectConfig), 0o600); err != nil {
+		t.Fatalf("rewrite project config: %v", err)
+	}
 	target := "feature"
 	origWD := rememberCWD()
 	t.Cleanup(func() {
@@ -294,6 +308,18 @@ func TestWorktreeCleanupMissingPathWarnsAndUnregisters(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "cleaned up daemon state for missing worktree demo:feature") {
 		t.Fatalf("expected daemon state cleanup output, got %q", out.String())
+	}
+	postCleanupData, err := os.ReadFile(postCleanupLog)
+	if err != nil {
+		t.Fatalf("read post cleanup log: %v", err)
+	}
+	got := strings.TrimSpace(string(postCleanupData))
+	wantPrefix := "missing:feature:" + worktreePath + ":"
+	if !strings.HasPrefix(got, wantPrefix) {
+		t.Fatalf("unexpected post cleanup output: %q", got)
+	}
+	if !samePath(strings.TrimPrefix(got, wantPrefix), repoDir) {
+		t.Fatalf("expected main worktree path %q in post cleanup output, got %q", repoDir, got)
 	}
 
 	daemonCfg, err := loadDaemonConfig(opts)

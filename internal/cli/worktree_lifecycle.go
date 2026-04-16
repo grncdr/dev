@@ -305,6 +305,12 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 	if err != nil {
 		return err
 	}
+	postCleanupCfg, err := loadProjectConfigFromDir(resolved.mainPath)
+	if err != nil {
+		return err
+	}
+	daemonHooks := config.ResolveDaemonWorktreeLifecycleHooks(daemonCfg, postCleanupCfg.Project.Name, resolved.project)
+	hookEnv := lifecycleHookEnv(resolved.project, resolved.slug, resolved.path, resolved.branch, "cleanup", resolved.implicit, resolved.mainPath, proxyApexZone(daemonCfg))
 	if !resolved.exists {
 		fmt.Fprintf(errOut, "warning: worktree not found at %s; cleaning up daemon state only\n", resolved.path)
 		if cleanup.DryRun {
@@ -313,6 +319,12 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 		}
 		if err := worktree.Unregister(daemonCfg, resolved.project, resolved.slug); err != nil {
 			return fmt.Errorf("cleanup stale worktree registration: %w", err)
+		}
+		if err := runLifecycleHooks(daemonHooks.PostWorktreeCleanup, "", "post_worktree_cleanup", resolved.mainPath, hookEnv, out, errOut); err != nil {
+			return fmt.Errorf("worktree daemon state cleaned up at %s, but %w", resolved.path, err)
+		}
+		if err := runLifecycleHook(postCleanupCfg.Hooks.PostWorktreeCleanup, postCleanupCfg.Commands.Wrapper, "post_worktree_cleanup", resolved.mainPath, hookEnv, out, errOut); err != nil {
+			return fmt.Errorf("worktree daemon state cleaned up at %s, but %w", resolved.path, err)
 		}
 		fmt.Fprintf(out, "cleaned up daemon state for missing worktree %s:%s\n", resolved.project, resolved.slug)
 		return nil
@@ -337,12 +349,6 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 	if err != nil {
 		return err
 	}
-	postCleanupCfg, err := loadProjectConfigFromDir(resolved.mainPath)
-	if err != nil {
-		return err
-	}
-	daemonHooks := config.ResolveDaemonWorktreeLifecycleHooks(daemonCfg, preCleanupCfg.Project.Name, resolved.project)
-	hookEnv := lifecycleHookEnv(resolved.project, resolved.slug, resolved.path, resolved.branch, "cleanup", resolved.implicit, resolved.mainPath, proxyApexZone(daemonCfg))
 
 	if cleanup.DryRun {
 		fmt.Fprintf(out, "would remove worktree: %s\n", resolved.path)
@@ -688,7 +694,22 @@ func resolveCleanupTarget(arg string, daemonCfg *config.DaemonConfig, cwd string
 	targetPath := registered.Path
 	if _, err := os.Stat(targetPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return &cleanupTarget{project: parsed.Project, slug: parsed.Slug, path: targetPath, implicit: false, exists: false}, nil
+			mainPath := strings.TrimSpace(registered.MainPath)
+			if mainPath == "" {
+				mainPath, err = worktree.ResolvePathFromProjectSlug(parsed.Project, "main", daemonCfg)
+				if err != nil {
+					return nil, err
+				}
+			}
+			return &cleanupTarget{
+				project:  parsed.Project,
+				slug:     parsed.Slug,
+				path:     targetPath,
+				mainPath: mainPath,
+				branch:   strings.TrimSpace(registered.Branch),
+				implicit: false,
+				exists:   false,
+			}, nil
 		}
 		return nil, fmt.Errorf("check target worktree path: %w", err)
 	}
