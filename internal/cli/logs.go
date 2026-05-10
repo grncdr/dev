@@ -15,6 +15,7 @@ import (
 	"golang.org/x/term"
 
 	"dev/internal/config"
+	"dev/internal/logfile"
 	"dev/internal/worktree"
 )
 
@@ -196,7 +197,7 @@ func viewLogs(sources []logSource, follow bool, all bool, lines int) error {
 		lines = 20
 	}
 	for _, src := range sources {
-		data, err := os.ReadFile(src.Path)
+		data, err := logfile.ReadAll(src.Path)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				fmt.Printf("[%s] (missing log file)\n", src.Name)
@@ -216,7 +217,7 @@ func viewLogs(sources []logSource, follow bool, all bool, lines int) error {
 			states[src.Path] = logFollowState{}
 			continue
 		}
-		anchor, readErr := readTailFromPath(src.Path, logsFollowAnchorBytes)
+		anchor, readErr := logfile.ReadTail(src.Path, logsFollowAnchorBytes)
 		if readErr != nil {
 			anchor = nil
 		}
@@ -235,26 +236,33 @@ func viewLogs(sources []logSource, follow bool, all bool, lines int) error {
 			if err != nil {
 				continue
 			}
-			start := state.Offset
-			if info.Size() < start {
-				start = 0
-			}
-			if info.Size() == start {
-				if !info.ModTime().After(state.ModTime) {
-					continue
-				}
-				windowBytes := int64(logsFollowTailWindowBytes)
-				if info.Size() < windowBytes {
-					windowBytes = info.Size()
-				}
-				window, readErr := readTailFromPath(src.Path, int(windowBytes))
+			if info.Size() < state.Offset {
+				// Rotation: catch up by anchor-matching against the
+				// combined tail of <path>.1 + <path>.
+				combined, readErr := logfile.ReadTail(src.Path, logsFollowTailWindowBytes)
 				if readErr != nil {
 					continue
 				}
-				delta := followRolloverDelta(state.Anchor, window)
+				delta := followRolloverDelta(state.Anchor, combined)
+				printLogBytes(src.Name, delta, len(sources) > 1)
+				state.Offset = info.Size()
+				state.ModTime = info.ModTime()
+				state.Anchor = tailAnchor(combined, logsFollowAnchorBytes)
+				states[src.Path] = state
+				continue
+			}
+			if info.Size() == state.Offset {
+				if !info.ModTime().After(state.ModTime) {
+					continue
+				}
+				combined, readErr := logfile.ReadTail(src.Path, logsFollowTailWindowBytes)
+				if readErr != nil {
+					continue
+				}
+				delta := followRolloverDelta(state.Anchor, combined)
 				printLogBytes(src.Name, delta, len(sources) > 1)
 				state.ModTime = info.ModTime()
-				state.Anchor = tailAnchor(window, logsFollowAnchorBytes)
+				state.Anchor = tailAnchor(combined, logsFollowAnchorBytes)
 				states[src.Path] = state
 				continue
 			}
@@ -262,7 +270,7 @@ func viewLogs(sources []logSource, follow bool, all bool, lines int) error {
 			if err != nil {
 				continue
 			}
-			_, _ = file.Seek(start, io.SeekStart)
+			_, _ = file.Seek(state.Offset, io.SeekStart)
 			data, _ := io.ReadAll(file)
 			_ = file.Close()
 			state.Offset = info.Size()
@@ -273,38 +281,6 @@ func viewLogs(sources []logSource, follow bool, all bool, lines int) error {
 		}
 	}
 	return nil
-}
-
-func readTailFromPath(path string, n int) ([]byte, error) {
-	if n <= 0 {
-		return nil, nil
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-	size := info.Size()
-	if size <= 0 {
-		return nil, nil
-	}
-	if int64(n) > size {
-		n = int(size)
-	}
-	start := size - int64(n)
-	if _, err := file.Seek(start, io.SeekStart); err != nil {
-		return nil, err
-	}
-	out := make([]byte, n)
-	_, err = io.ReadFull(file, out)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func followRolloverDelta(anchor, window []byte) []byte {

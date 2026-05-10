@@ -20,6 +20,7 @@ import (
 
 	"dev/internal/config"
 	"dev/internal/daemon"
+	"dev/internal/logfile"
 )
 
 const (
@@ -433,7 +434,7 @@ func readDaemonStartupLogTail(logPath string) (string, error) {
 	if strings.TrimSpace(logPath) == "" {
 		return "", nil
 	}
-	data, err := readTailFromPath(logPath, daemonStartLogTailBytes)
+	data, err := logfile.ReadTail(logPath, daemonStartLogTailBytes)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", nil

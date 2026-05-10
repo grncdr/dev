@@ -137,6 +137,7 @@ type processInfo struct {
 	idleTimer      *time.Timer
 	pty            *os.File
 	logFile        *os.File
+	logPath        string
 	logSize        int64
 	ready          bool
 	readyErr       error
@@ -397,6 +398,7 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 			lastActivity:   time.Now(),
 			pty:            ptmx,
 			logFile:        logFile,
+			logPath:        logPath,
 			logSize:        logSize,
 			exited:         make(chan struct{}),
 			subs:           make(map[int]io.Writer),
@@ -2028,8 +2030,9 @@ func (p *processInfo) startOutputPump() {
 			if n > 0 {
 				if p.logFile != nil {
 					p.mu.Lock()
-					newSize, writeErr := appendOpenFileWithRetention(p.logFile, p.logSize, buf[:n], managedLogMaxBytes)
+					newFile, newSize, writeErr := appendWithRotation(p.logPath, p.logFile, p.logSize, buf[:n], managedLogMaxBytes)
 					if writeErr == nil {
+						p.logFile = newFile
 						p.logSize = newSize
 					}
 					p.mu.Unlock()
