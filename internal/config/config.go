@@ -34,6 +34,10 @@ type ProjectConfig struct {
 	Hooks HooksBlock `toml:"hooks" json:"hooks,omitempty"`
 	// Commands holds the [commands] table (wrapper configuration).
 	Commands CommandsBlock `toml:"commands" json:"commands,omitempty"`
+	// DefaultSubdomain is the subdomain to redirect to when a request hits
+	// the worktree's base host (e.g. <slug>.<apex>) and no proxy matcher
+	// matches. The value is a literal DNS label, not a process name.
+	DefaultSubdomain string `toml:"default_subdomain" json:"default_subdomain,omitempty"`
 }
 
 // ProjectBlock holds the [project] table in a .dev.toml file.

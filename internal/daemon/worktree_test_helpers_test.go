@@ -76,15 +76,16 @@ func resolveProxyTargetForTest(s *Server, host, path string, fromGateway bool) (
 	if s.manager == nil || s.manager.router == nil {
 		return "", "", "", "", "", "", "", errors.New("proxy router unavailable")
 	}
-	runtimeKey, matcher, err := s.manager.router.Resolve(host, path)
+	res, err := s.manager.router.Resolve(host, path)
 	if err != nil {
 		return "", "", "", "", "", "", "", err
 	}
-	rule := s.manager.gatewayExposeRuleForRuntimeProcess(runtimeKey, matcher.Process)
+	matcher := res.Matcher
+	rule := s.manager.gatewayExposeRuleForRuntimeProcess(res.RuntimeKey, matcher.Process)
 	if fromGateway && rule.Mode == config.GatewayModeDisable {
 		return "", "", "", "", "", "", "", errGatewayProcessNotExposed
 	}
-	wt, ok := s.manager.WorktreeByRuntimeKey(runtimeKey)
+	wt, ok := s.manager.WorktreeByRuntimeKey(res.RuntimeKey)
 	if !ok {
 		return "", "", "", "", "", "", "", router.ErrWorktreeNotMapped
 	}

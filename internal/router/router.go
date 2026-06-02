@@ -59,14 +59,31 @@ type WorktreeInput struct {
 	Labels []string
 	// Matchers are the proxy rules parsed from the worktree's project config.
 	Matchers []Matcher
+	// DefaultSubdomain is the subdomain to redirect to when a request hits
+	// the worktree's base host and no matcher matches the empty subdomain.
+	// Empty disables the redirect.
+	DefaultSubdomain string
+}
+
+// Resolution is the outcome of matching a request host/path against the Router.
+// A successful match has Matcher != nil. When Matcher == nil and the returned
+// error is ErrNoProxyMatcherMatched, RuntimeKey and Subdomain still identify
+// the worktree the host belongs to, and DefaultSubdomain carries the worktree's
+// fallback subdomain (if any) so the caller can issue a redirect.
+type Resolution struct {
+	RuntimeKey       string
+	Subdomain        string
+	Matcher          *Matcher
+	DefaultSubdomain string
 }
 
 type worktreeRoute struct {
-	runtimeKey string
-	slug       string
-	repoPath   string
-	labels     []string
-	matchers   []Matcher
+	runtimeKey       string
+	slug             string
+	repoPath         string
+	labels           []string
+	matchers         []Matcher
+	defaultSubdomain string
 }
 
 // Router resolves incoming HTTP requests to a worktree and process by matching
@@ -108,11 +125,12 @@ func (r *Router) UpsertWorktree(in WorktreeInput) {
 
 	labels := normalizeLabels(in.Labels)
 	route := worktreeRoute{
-		runtimeKey: runtimeKey,
-		slug:       strings.TrimSpace(in.Slug),
-		repoPath:   strings.TrimSpace(in.RepoPath),
-		labels:     labels,
-		matchers:   append([]Matcher(nil), in.Matchers...),
+		runtimeKey:       runtimeKey,
+		slug:             strings.TrimSpace(in.Slug),
+		repoPath:         strings.TrimSpace(in.RepoPath),
+		labels:           labels,
+		matchers:         append([]Matcher(nil), in.Matchers...),
+		defaultSubdomain: strings.ToLower(strings.TrimSpace(in.DefaultSubdomain)),
 	}
 	r.worktrees[runtimeKey] = route
 	r.addToLabelIndexLocked(labels, runtimeKey)
@@ -133,75 +151,74 @@ func (r *Router) RemoveWorktree(runtimeKey string) {
 	r.removeFromLabelIndexLocked(route.labels, key)
 }
 
-func (r *Router) Resolve(host, path string) (string, *Matcher, error) {
+func (r *Router) Resolve(host, path string) (Resolution, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	if len(r.worktrees) == 0 {
-		return "", nil, ErrNoWorktreesAvailable
+		return Resolution{}, ErrNoWorktreesAvailable
 	}
 	labels, err := parseHostLabels(host, r.apexZone)
 	if err != nil {
-		return "", nil, err
+		return Resolution{}, err
 	}
 
-	var selected worktreeRoute
-	subdomain := ""
-	found := false
 	for i := 0; i < len(labels); i++ {
 		label := strings.Join(labels[i:], ".")
 		keys := r.labelKeys[label]
-		if len(keys) == 0 {
+		switch len(keys) {
+		case 0:
 			continue
-		}
-		if len(keys) > 1 {
-			return "", nil, r.ambiguousLabelErr(label, keys)
+		case 1:
+		default:
+			return Resolution{}, r.ambiguousLabelErr(label, keys)
 		}
 		var key string
-		for candidate := range keys {
-			key = candidate
+		for k := range keys {
+			key = k
 		}
 		route, ok := r.worktrees[key]
 		if !ok {
 			continue
 		}
-		selected = route
-		subdomain = strings.Join(labels[:i], ".")
-		found = true
-		break
+		subdomain := strings.Join(labels[:i], ".")
+		matcher, err := resolveFromRoute(route, subdomain, path)
+		return Resolution{
+			RuntimeKey:       route.runtimeKey,
+			Subdomain:        subdomain,
+			Matcher:          matcher,
+			DefaultSubdomain: route.defaultSubdomain,
+		}, err
 	}
-	if !found {
-		return "", nil, ErrHostNotMapped
-	}
-
-	matcher, err := resolveFromRoute(selected, subdomain, path)
-	if err != nil {
-		return "", nil, err
-	}
-	return selected.runtimeKey, matcher, nil
+	return Resolution{}, ErrHostNotMapped
 }
 
-func (r *Router) ResolveWithinWorktree(runtimeKey, host, path string) (*Matcher, error) {
+func (r *Router) ResolveWithinWorktree(runtimeKey, host, path string) (Resolution, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	if len(r.worktrees) == 0 {
-		return nil, ErrNoWorktreesAvailable
+		return Resolution{}, ErrNoWorktreesAvailable
 	}
-	key := strings.TrimSpace(runtimeKey)
-	route, ok := r.worktrees[key]
+	route, ok := r.worktrees[strings.TrimSpace(runtimeKey)]
 	if !ok {
-		return nil, ErrWorktreeNotMapped
+		return Resolution{}, ErrWorktreeNotMapped
 	}
 	labels, err := parseHostLabels(host, r.apexZone)
 	if err != nil {
-		return nil, err
+		return Resolution{}, err
 	}
 	subdomain, ok := subdomainForRouteLabels(labels, route.labels)
 	if !ok {
-		return nil, ErrHostNotMapped
+		return Resolution{}, ErrHostNotMapped
 	}
-	return resolveFromRoute(route, subdomain, path)
+	matcher, err := resolveFromRoute(route, subdomain, path)
+	return Resolution{
+		RuntimeKey:       route.runtimeKey,
+		Subdomain:        subdomain,
+		Matcher:          matcher,
+		DefaultSubdomain: route.defaultSubdomain,
+	}, err
 }
 
 func (r *Router) ambiguousLabelErr(label string, keys map[string]struct{}) error {

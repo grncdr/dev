@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -173,5 +174,79 @@ func TestHandleTunnelRequest_ReverseProxyMode_SetsGatewayModeHeader(t *testing.T
 	}
 	if gatewayMode != config.GatewayModeReverseProxy {
 		t.Fatalf("expected Dev-Gateway-Mode=%q, got %q", config.GatewayModeReverseProxy, gatewayMode)
+	}
+}
+
+func TestHandleTunnelRequest_RedirectsBaseHostToDefaultSubdomain(t *testing.T) {
+	t.Parallel()
+
+	opts := TunnelProxyOptions{
+		ResolveTarget: func(host, path string) (TunnelResolveResult, error) {
+			return TunnelResolveResult{DefaultSubdomain: "app"}, errors.New("no proxy matcher matched")
+		},
+		EndProxySession: func(targetSlug, targetPath, process string) {
+			t.Fatalf("EndProxySession must not run when redirecting; got slug=%q path=%q process=%q", targetSlug, targetPath, process)
+		},
+		ProjectApexZone: func() string { return ".localhost" },
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "https://my-feature.public.example.com/foo?bar=1", nil)
+	req.Host = "my-feature.public.example.com"
+
+	tunnel := TunnelStatus{Slug: "my-feature", Label: "my-feature", LocalBaseHost: "my-feature.localhost"}
+
+	serverSide, clientSide := net.Pipe()
+	defer clientSide.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		defer serverSide.Close()
+		errCh <- HandleTunnelRequest(context.Background(), opts, tunnel, req, serverSide)
+	}()
+
+	resp, err := http.ReadResponse(bufio.NewReader(clientSide), req)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	defer resp.Body.Close()
+	if _, err := io.ReadAll(resp.Body); err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("handle tunnel request: %v", err)
+	}
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("expected status 302, got %d", resp.StatusCode)
+	}
+	want := "https://app.my-feature.public.example.com/foo?bar=1"
+	if got := resp.Header.Get("Location"); got != want {
+		t.Fatalf("expected Location %q, got %q", want, got)
+	}
+}
+
+func TestHandleTunnelRequest_DoesNotRedirectWhenSubdomainPresent(t *testing.T) {
+	t.Parallel()
+
+	resolveErr := errors.New("no proxy matcher matched")
+	opts := TunnelProxyOptions{
+		ResolveTarget: func(host, path string) (TunnelResolveResult, error) {
+			return TunnelResolveResult{DefaultSubdomain: "app"}, resolveErr
+		},
+		EndProxySession: func(targetSlug, targetPath, process string) {},
+		ProjectApexZone: func() string { return ".localhost" },
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "https://missing.my-feature.public.example.com/", nil)
+	req.Host = "missing.my-feature.public.example.com"
+
+	tunnel := TunnelStatus{Slug: "my-feature", Label: "my-feature", LocalBaseHost: "my-feature.localhost"}
+
+	serverSide, clientSide := net.Pipe()
+	defer clientSide.Close()
+	defer serverSide.Close()
+
+	err := HandleTunnelRequest(context.Background(), opts, tunnel, req, serverSide)
+	if !errors.Is(err, resolveErr) {
+		t.Fatalf("expected resolve error to propagate, got %v", err)
 	}
 }

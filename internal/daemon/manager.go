@@ -577,11 +577,12 @@ func (m *Manager) routerWorktreeInputLocked(runtimeKey string, wt runtimeWorktre
 		return router.WorktreeInput{}, false
 	}
 	return router.WorktreeInput{
-		RuntimeKey: runtimeKey,
-		Slug:       wt.Slug,
-		RepoPath:   wt.Path,
-		Labels:     labels,
-		Matchers:   matchers,
+		RuntimeKey:       runtimeKey,
+		Slug:             wt.Slug,
+		RepoPath:         wt.Path,
+		Labels:           labels,
+		Matchers:         matchers,
+		DefaultSubdomain: strings.TrimSpace(cfg.DefaultSubdomain),
 	}, true
 }
 

@@ -31,6 +31,11 @@ type TunnelResolveResult struct {
 	// ResolvedLocalHost is the canonical local hostname for the resolved target
 	// process. HandleTunnelRequest uses this for upstream Host and rewrite logic.
 	ResolvedLocalHost string
+	// DefaultSubdomain is the worktree's fallback subdomain, populated even
+	// when ResolveTarget returns an error. When set and the request hits the
+	// base public host with no matcher, HandleTunnelRequest redirects to
+	// <DefaultSubdomain>.<public host>.
+	DefaultSubdomain string
 }
 
 // TunnelProxyOptions holds the callbacks needed by HandleTunnelRequest to
@@ -67,6 +72,9 @@ func HandleTunnelRequest(ctx context.Context, opts TunnelProxyOptions, tunnel Tu
 
 	resolved, err := opts.ResolveTarget(localHost, req.URL.Path)
 	if err != nil {
+		if location, ok := defaultSubdomainRedirectForTunnel(publicHost, tunnel.Label, resolved.DefaultSubdomain, req); ok {
+			return writeTunnelRedirect(stream, location)
+		}
 		return err
 	}
 	defer opts.EndProxySession(resolved.Slug, resolved.Path, resolved.Process)
@@ -184,6 +192,44 @@ func writeTunnelAuthRequired(stream net.Conn) error {
 	resp.Header.Set("Content-Type", "text/plain")
 	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(msg)))
 	resp.Header.Set("WWW-Authenticate", `Basic realm="dev share"`)
+	return resp.Write(stream)
+}
+
+func defaultSubdomainRedirectForTunnel(publicHost, label, defaultSubdomain string, req *http.Request) (string, bool) {
+	defaultSubdomain = strings.ToLower(strings.TrimSpace(defaultSubdomain))
+	label = strings.ToLower(strings.TrimSpace(label))
+	host := normalizeProxyHost(publicHost)
+	if defaultSubdomain == "" || label == "" || host == "" {
+		return "", false
+	}
+	parts := strings.Split(host, ".")
+	if len(parts) == 0 || parts[0] != label {
+		return "", false
+	}
+	target := &url.URL{
+		Scheme: "https",
+		Host:   defaultSubdomain + "." + host,
+	}
+	if req != nil && req.URL != nil {
+		target.Path = req.URL.Path
+		target.RawPath = req.URL.RawPath
+		target.RawQuery = req.URL.RawQuery
+	}
+	return target.String(), true
+}
+
+func writeTunnelRedirect(stream net.Conn, location string) error {
+	resp := &http.Response{
+		StatusCode: http.StatusFound,
+		Status:     fmt.Sprintf("%d %s", http.StatusFound, http.StatusText(http.StatusFound)),
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader("")),
+	}
+	resp.Header.Set("Location", location)
+	resp.Header.Set("Content-Length", "0")
 	return resp.Write(stream)
 }
 

@@ -232,12 +232,16 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 		writeErrorWithCode(w, http.StatusBadGateway, "proxy_target_error", errors.New("proxy router unavailable"))
 		return
 	}
-	runtimeKey, matcher, err := s.manager.router.Resolve(host, r.URL.Path)
+	res, err := s.manager.router.Resolve(host, r.URL.Path)
 	if err != nil {
+		if errors.Is(err, router.ErrNoProxyMatcherMatched) && res.Subdomain == "" && res.DefaultSubdomain != "" {
+			http.Redirect(w, r, defaultSubdomainRedirectURL(res.DefaultSubdomain, r), http.StatusFound)
+			return
+		}
 		writeErrorWithCode(w, http.StatusBadGateway, "proxy_target_error", err)
 		return
 	}
-	targetInfo, err := s.manager.ensureProxyTargetForRuntime(runtimeKey, matcher)
+	targetInfo, err := s.manager.ensureProxyTargetForRuntime(res.RuntimeKey, res.Matcher)
 	if err != nil {
 		writeErrorWithCode(w, http.StatusBadGateway, "proxy_target_error", err)
 		return
@@ -267,6 +271,19 @@ func (s *Server) handleProxyHTTPS(w http.ResponseWriter, r *http.Request) {
 		writeErrorWithCode(rw, http.StatusBadGateway, "proxy_upstream_error", err)
 	}
 	reverseProxy.ServeHTTP(w, r)
+}
+
+func defaultSubdomainRedirectURL(subdomain string, r *http.Request) string {
+	target := &url.URL{
+		Scheme: "https",
+		Host:   subdomain + "." + r.Host,
+	}
+	if r.URL != nil {
+		target.Path = r.URL.Path
+		target.RawPath = r.URL.RawPath
+		target.RawQuery = r.URL.RawQuery
+	}
+	return target.String()
 }
 
 func snapshotRequestBody(req *http.Request) ([]byte, error) {

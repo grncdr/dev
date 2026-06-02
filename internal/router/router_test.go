@@ -128,11 +128,53 @@ func TestResolveWithinWorktree_ConstrainsCandidates(t *testing.T) {
 		t.Fatalf("expected host-not-mapped for constrained worktree, got %v", err)
 	}
 
-	matcher, err := r.ResolveWithinWorktree("wt-b", "app.some-other-worktree.localhost", "/")
+	res, err := r.ResolveWithinWorktree("wt-b", "app.some-other-worktree.localhost", "/")
 	if err != nil {
 		t.Fatalf("resolve within worktree: %v", err)
 	}
-	if matcher == nil || matcher.Process != "frontend" {
-		t.Fatalf("unexpected resolve matcher: %+v", matcher)
+	if res.Matcher == nil || res.Matcher.Process != "frontend" {
+		t.Fatalf("unexpected resolve matcher: %+v", res.Matcher)
+	}
+}
+
+func TestResolve_ReturnsResolutionOnNoMatcher(t *testing.T) {
+	r := New(".localhost")
+	r.UpsertWorktree(WorktreeInput{
+		RuntimeKey:       "wt-a",
+		Slug:             "feature",
+		RepoPath:         "/tmp/a",
+		Labels:           []string{"feature"},
+		DefaultSubdomain: "app",
+		Matchers: []Matcher{
+			{Process: "app", Kind: SubdomainExplicit, Subdomain: "app", Path: "/", Match: "prefix"},
+		},
+	})
+
+	res, err := r.Resolve("feature.localhost", "/")
+	if !errors.Is(err, ErrNoProxyMatcherMatched) {
+		t.Fatalf("expected no-matcher error, got %v", err)
+	}
+	if res.RuntimeKey != "wt-a" {
+		t.Fatalf("expected runtimeKey wt-a, got %q", res.RuntimeKey)
+	}
+	if res.Subdomain != "" {
+		t.Fatalf("expected empty subdomain, got %q", res.Subdomain)
+	}
+	if res.Matcher != nil {
+		t.Fatalf("expected nil matcher, got %+v", res.Matcher)
+	}
+	if res.DefaultSubdomain != "app" {
+		t.Fatalf("expected DefaultSubdomain=app, got %q", res.DefaultSubdomain)
+	}
+
+	res, err = r.Resolve("unknown.feature.localhost", "/")
+	if !errors.Is(err, ErrNoProxyMatcherMatched) {
+		t.Fatalf("expected no-matcher error, got %v", err)
+	}
+	if res.Subdomain != "unknown" {
+		t.Fatalf("expected subdomain unknown, got %q", res.Subdomain)
+	}
+	if res.DefaultSubdomain != "app" {
+		t.Fatalf("expected DefaultSubdomain=app even on no-match, got %q", res.DefaultSubdomain)
 	}
 }

@@ -17,6 +17,8 @@ main_slug = "primary" # optional, logical main-worktree slug alias
 
 [local-dns]
 overrides = { main = "foocorp" } # optional, remap slug->host label for proxy/status URLs
+
+default_subdomain = "app" # optional, redirect base host to <default_subdomain>.<base host>
 ```
 
 Optional sections:
@@ -106,6 +108,7 @@ Notes:
 - `project.main_slug` is optional and sets the logical slug alias for the main worktree.
 - `local-dns.overrides` is optional and remaps worktree slugs to proxy DNS labels for host routing/status output.
   - Example: `main = "foocorp"` maps `foocorp.localhost` to the main worktree.
+- `default_subdomain` is optional and redirects requests for the worktree base host (`<slug>.<apex>`) to `<default_subdomain>.<slug>.<apex>` when no proxy matcher matches the base subdomain. The value is a literal DNS label (e.g. `"app"`), not a process name.
 - All runnable units live under `process.*`; use `singleton = true` for project-wide services.
 - `disabled = true` prevents that process from starting. If another process lists it in `needs`, that dependency is ignored and the dependent still starts.
 - Worktree lifecycle hooks are optional:

@@ -28,11 +28,12 @@ func (s *Server) handleTunnelAgentRequest(ctx context.Context, tunnel agent.Tunn
 			if s.manager == nil {
 				return result, errors.New("manager went away")
 			}
-			matcher, err := s.manager.router.ResolveWithinWorktree(runtimeKey, host, path)
+			res, err := s.manager.router.ResolveWithinWorktree(runtimeKey, host, path)
+			result.DefaultSubdomain = res.DefaultSubdomain
 			if err != nil {
 				return result, err
 			}
-			rule := s.manager.gatewayExposeRuleForRuntimeProcess(runtimeKey, matcher.Process)
+			rule := s.manager.gatewayExposeRuleForRuntimeProcess(runtimeKey, res.Matcher.Process)
 			if rule.Mode == config.GatewayModeDisable {
 				return result, errGatewayProcessNotExposed
 			}
@@ -40,7 +41,7 @@ func (s *Server) handleTunnelAgentRequest(ctx context.Context, tunnel agent.Tunn
 			result.GatewayMode = rule.Mode
 			result.GatewayDebugLog = rule.DebugLog
 			result.RewritePeerSubdomains = append([]string(nil), rule.RewritePeerSubdomains...)
-			result.ProxyTarget, err = s.manager.ensureProxyTargetForRuntime(runtimeKey, matcher)
+			result.ProxyTarget, err = s.manager.ensureProxyTargetForRuntime(runtimeKey, res.Matcher)
 			if err == nil {
 				if resolvedLocalHost, ok := s.localProxyHostForTarget(host, result.ProxyTarget.Path); ok {
 					result.ResolvedLocalHost = resolvedLocalHost
