@@ -64,6 +64,7 @@ func (s *Server) handleTunnelAgentRequest(ctx context.Context, tunnel agent.Tunn
 			}
 
 			routedMatcher = res.Matcher
+			result.ProxyTarget.Process = res.Matcher.Process
 			result.GatewayMode = rule.Mode
 			result.GatewayDebugLog = rule.DebugLog
 			result.RewritePeerSubdomains = append([]string(nil), rule.RewritePeerSubdomains...)
