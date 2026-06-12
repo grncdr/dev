@@ -23,6 +23,9 @@ type GatewayExposeRule struct {
 	// hostnames. Values are normalized to lowercase and trimmed. "*" rewrites
 	// all peer subdomains.
 	RewritePeerSubdomains []string
+	// NoAuth disables share auth for this process when set via `auth = false`.
+	// The zero value keeps share auth required, so opting out is explicit.
+	NoAuth bool
 }
 
 // GatewayExposeModes returns gateway-exposed process modes keyed by process name.
@@ -80,6 +83,10 @@ func parseGatewayExposeRule(raw any) GatewayExposeRule {
 	if val, ok := m["debug_log"].(string); ok {
 		debugLog = strings.TrimSpace(val)
 	}
+	noAuth := false
+	if val, ok := m["auth"].(bool); ok && !val {
+		noAuth = true
+	}
 	rewritePeerSubdomains := normalizeGatewayRewritePeerSubdomains(m["rewrite_peer_subdomains"])
 	modeRaw, ok := m["mode"]
 	if !ok || modeRaw == nil {
@@ -87,6 +94,7 @@ func parseGatewayExposeRule(raw any) GatewayExposeRule {
 			Mode:                  GatewayModeReverseProxy,
 			DebugLog:              debugLog,
 			RewritePeerSubdomains: rewritePeerSubdomains,
+			NoAuth:                noAuth,
 		}
 	}
 	mode, ok := normalizeGatewayModeValue(modeRaw)
@@ -97,6 +105,7 @@ func parseGatewayExposeRule(raw any) GatewayExposeRule {
 		Mode:                  mode,
 		DebugLog:              debugLog,
 		RewritePeerSubdomains: rewritePeerSubdomains,
+		NoAuth:                noAuth,
 	}
 }
 

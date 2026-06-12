@@ -32,17 +32,32 @@ type TunnelResolveResult struct {
 	// process. HandleTunnelRequest uses this for upstream Host and rewrite logic.
 	ResolvedLocalHost string
 	// DefaultSubdomain is the worktree's fallback subdomain, populated even
-	// when ResolveTarget returns an error. When set and the request hits the
+	// when ResolveRouting returns an error. When set and the request hits the
 	// base public host with no matcher, HandleTunnelRequest redirects to
 	// <DefaultSubdomain>.<public host>.
 	DefaultSubdomain string
+	// NoAuth reports that the resolved service opts out of share auth
+	// (`[gateway.expose.<service>] auth = false`). When true, the request is
+	// served without Basic Auth even if the tunnel carries credentials.
+	NoAuth bool
+	// DefaultSubdomainNoAuth reports that the worktree's default-subdomain
+	// service opts out of share auth. Used only on the base-host redirect path
+	// to decide whether the redirect itself requires auth.
+	DefaultSubdomainNoAuth bool
 }
 
 // TunnelProxyOptions holds the callbacks needed by HandleTunnelRequest to
 // resolve targets, manage proxy sessions, and log.
 type TunnelProxyOptions struct {
-	// ResolveTarget maps a local hostname and request path to an upstream process.
-	ResolveTarget func(host, path string) (TunnelResolveResult, error)
+	// ResolveRouting maps a local hostname and request path to a target service,
+	// returning routing metadata (including the auth opt-out) WITHOUT starting
+	// the process. On a no-match error it still populates DefaultSubdomain and
+	// DefaultSubdomainNoAuth so the caller can issue a redirect.
+	ResolveRouting func(host, path string) (TunnelResolveResult, error)
+	// EnsureTarget starts (if needed) the resolved service's process and returns
+	// its dialable target plus the canonical local host. It runs only after the
+	// auth decision, so an unauthenticated request never starts a process.
+	EnsureTarget func(host string, resolved TunnelResolveResult) (target ProxyTarget, resolvedLocalHost string, err error)
 	// EndProxySession is called when the proxied request completes, allowing
 	// the daemon to decrement active proxy session counts.
 	EndProxySession func(targetSlug, targetPath, process string)
@@ -58,11 +73,8 @@ func HandleTunnelRequest(ctx context.Context, opts TunnelProxyOptions, tunnel Tu
 	if req == nil {
 		return errors.New("missing request")
 	}
-	if opts.ResolveTarget == nil || opts.EndProxySession == nil || opts.ProjectApexZone == nil {
+	if opts.ResolveRouting == nil || opts.EnsureTarget == nil || opts.EndProxySession == nil || opts.ProjectApexZone == nil {
 		return errors.New("incomplete tunnel proxy options")
-	}
-	if !authenticateGatewayTunnelCredentials(req, tunnel.AuthUsername, tunnel.AuthPassword) {
-		return writeTunnelAuthRequired(stream)
 	}
 	publicHost := normalizeProxyHost(req.Host)
 	localHost := localHostForTunnelRequest(publicHost, tunnel)
@@ -70,13 +82,36 @@ func HandleTunnelRequest(ctx context.Context, opts TunnelProxyOptions, tunnel Tu
 		return fmt.Errorf("could not resolve local host for tunnel request host %q", req.Host)
 	}
 
-	resolved, err := opts.ResolveTarget(localHost, req.URL.Path)
+	authenticated := func() bool {
+		return authenticateGatewayTunnelCredentials(req, tunnel.AuthUsername, tunnel.AuthPassword)
+	}
+
+	resolved, err := opts.ResolveRouting(localHost, req.URL.Path)
 	if err != nil {
+		// Default-secure: the redirect (and any error) still requires auth unless
+		// the target the request would reach is an explicitly public service.
 		if location, ok := defaultSubdomainRedirectForTunnel(publicHost, tunnel.Label, resolved.DefaultSubdomain, req); ok {
+			if !resolved.DefaultSubdomainNoAuth && !authenticated() {
+				return writeTunnelAuthRequired(stream)
+			}
 			return writeTunnelRedirect(stream, location)
+		}
+		if !authenticated() {
+			return writeTunnelAuthRequired(stream)
 		}
 		return err
 	}
+
+	if !resolved.NoAuth && !authenticated() {
+		return writeTunnelAuthRequired(stream)
+	}
+
+	target, resolvedLocalHost, err := opts.EnsureTarget(localHost, resolved)
+	if err != nil {
+		return err
+	}
+	resolved.ProxyTarget = target
+	resolved.ResolvedLocalHost = resolvedLocalHost
 	defer opts.EndProxySession(resolved.Slug, resolved.Path, resolved.Process)
 
 	if isUpgradeHTTPRequest(req) {
@@ -95,7 +130,7 @@ func HandleTunnelRequest(ctx context.Context, opts TunnelProxyOptions, tunnel Tu
 	outReq.URL.Scheme = "http"
 	outReq.URL.Host = "dev-tunnel-upstream"
 	outReq.RequestURI = ""
-	resolvedLocalHost := normalizeProxyHost(resolved.ResolvedLocalHost)
+	resolvedLocalHost = normalizeProxyHost(resolvedLocalHost)
 	if resolvedLocalHost == "" {
 		resolvedLocalHost = localHost
 	}

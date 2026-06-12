@@ -40,6 +40,10 @@ mode = "rewrite"
 debug_log = "tmp/gateway-http.log"
 rewrite_peer_subdomains = ["minio"] # or ["*"] to rewrite all peer local hosts
 
+[gateway.expose.webhooks]
+mode = "reverse_proxy"
+auth = false # publicly reachable with no Basic Auth, even when gateway.auth is set
+
 [process.postgres]
 singleton = true
 command = "devbox services start postgresql"
@@ -138,6 +142,7 @@ Notes:
   - `rewrite_peer_subdomains = ["minio"]`: when `mode = "rewrite"`, also rewrites peer local hosts that match listed subdomains (for example `minio.main.localhost` -> `minio.<share-label>.<gateway-dns-zone>`).
   - `rewrite_peer_subdomains = ["*"]`: wildcard that rewrites all peer local hosts under the local apex.
   - `debug_log = "<path>"`: appends full gateway HTTP request/response transcripts to a log file. Relative paths are resolved from the matched process worktree directory. Response bodies are logged after rewrite handling.
+  - `auth = false`: opts this process out of share auth, making it publicly reachable with no Basic Auth even when `gateway.auth` (or `--auth`) protects the rest of the tunnel. Defaults to `true`; requires the table form (not the bare-string `mode` shorthand). If the worktree's default-subdomain service opts out, the bare `<label>.<zone>` URL also redirects without auth.
 - `subdomain = null` matches `<slug>.<apex_zone>`. `subdomain = "app"` matches `app.<slug>.<apex_zone>`. `subdomain = "*"` matches any subdomain under `<slug>.<apex_zone>`.
 - `subdomains = [...]` is also supported in a matcher to map multiple subdomains in one block.
 - `path` defaults to `/`, `match` defaults to `prefix`, and `priority` defaults to `0`.

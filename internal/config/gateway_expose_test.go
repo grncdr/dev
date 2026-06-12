@@ -115,6 +115,61 @@ expose = { rails = { mode = "rewrite", debug_log = "logs/gateway-http.log" }, we
 	}
 }
 
+func TestGatewayExposeRules_ParsesAuthOptOut(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".dev.toml")
+	body := `
+[project]
+name = "foocorp"
+
+[gateway]
+expose = { webhooks = { mode = "reverse_proxy", auth = false }, rails = { mode = "rewrite", auth = true }, webpack = { mode = "reverse_proxy" } }
+`
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := LoadProjectConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	got := GatewayExposeRules(cfg)
+	if !got["webhooks"].NoAuth {
+		t.Fatalf("expected webhooks NoAuth=true for auth=false")
+	}
+	if got["rails"].NoAuth {
+		t.Fatalf("expected rails NoAuth=false for auth=true")
+	}
+	if got["webpack"].NoAuth {
+		t.Fatalf("expected webpack NoAuth=false when auth omitted")
+	}
+}
+
+func TestGatewayExposeRules_BareStringModeRequiresAuth(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".dev.toml")
+	body := `
+[project]
+name = "foocorp"
+
+[gateway]
+expose = { rails = "rewrite" }
+`
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := LoadProjectConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if GatewayExposeRules(cfg)["rails"].NoAuth {
+		t.Fatalf("expected bare-string rule NoAuth=false")
+	}
+}
+
 func TestGatewayExposeRules_ParsesRewritePeerSubdomains(t *testing.T) {
 	t.Parallel()
 
