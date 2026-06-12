@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -542,6 +544,55 @@ func TestHandleTunnelRequest_WebSocketUpgradeOnNonExemptPathRequiresAuth(t *test
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for WS on non-exempt path, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleTunnelRequest_LogsUpgradeAndAuthDecisions(t *testing.T) {
+	t.Parallel()
+
+	var logs []string
+	opts := TunnelProxyOptions{
+		ResolveRouting: func(host, path string) (TunnelResolveResult, error) {
+			return TunnelResolveResult{
+				ProxyTarget:    ProxyTarget{Slug: "feature", Path: "/repo/feature", Process: "rails"},
+				GatewayMode:    config.GatewayModeReverseProxy,
+				WebSocketPaths: []string{"/cable"},
+			}, nil
+		},
+		EnsureTarget: func(host string, resolved TunnelResolveResult) (ProxyTarget, string, error) {
+			t.Fatalf("EnsureTarget must not run for unauthenticated WS on non-exempt path")
+			return ProxyTarget{}, "", nil
+		},
+		EndProxySession: func(targetSlug, targetPath, process string) {},
+		ProjectApexZone: func() string { return ".localhost" },
+		Logf: func(format string, args ...any) {
+			logs = append(logs, fmt.Sprintf(format, args...))
+		},
+	}
+
+	req := newWebSocketUpgradeRequest("https://rails.feature.public.example.com/admin")
+	tunnel := TunnelStatus{Slug: "feature", Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
+
+	resp, _ := runTunnelUpgrade(t, opts, tunnel, req)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	}
+
+	var sawUpgrade, sawAuth bool
+	for _, line := range logs {
+		if strings.Contains(line, "upgrade") && strings.Contains(line, "/admin") {
+			sawUpgrade = true
+		}
+		if strings.Contains(line, "auth required") && strings.Contains(line, "/admin") {
+			sawAuth = true
+		}
+	}
+	if !sawUpgrade {
+		t.Fatalf("expected an upgrade log line referencing /admin; got %v", logs)
+	}
+	if !sawAuth {
+		t.Fatalf("expected an auth-required log line referencing /admin; got %v", logs)
 	}
 }
 

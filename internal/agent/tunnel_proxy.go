@@ -93,26 +93,45 @@ func HandleTunnelRequest(ctx context.Context, opts TunnelProxyOptions, tunnel Tu
 		return authenticateGatewayTunnelCredentials(req, tunnel.AuthUsername, tunnel.AuthPassword)
 	}
 
+	logf := func(format string, args ...any) {
+		if opts.Logf != nil {
+			opts.Logf(format, args...)
+		}
+	}
+
+	isUpgrade := isUpgradeHTTPRequest(req)
+	if isUpgrade {
+		logf("tunnel upgrade request host=%s path=%s upgrade=%s", publicHost, req.URL.Path, req.Header.Get("Upgrade"))
+	}
+
+	authRequired := func(reason string) error {
+		logf("tunnel auth required host=%s path=%s upgrade=%t reason=%s", publicHost, req.URL.Path, isUpgrade, reason)
+		return writeTunnelAuthRequired(stream)
+	}
+
 	resolved, err := opts.ResolveRouting(localHost, req.URL.Path)
 	if err != nil {
 		// Default-secure: the redirect (and any error) still requires auth unless
 		// the target the request would reach is an explicitly public service.
 		if location, ok := defaultSubdomainRedirectForTunnel(publicHost, tunnel.Label, resolved.DefaultSubdomain, req); ok {
 			if !resolved.DefaultSubdomainNoAuth && !authenticated() {
-				return writeTunnelAuthRequired(stream)
+				return authRequired("redirect-protected-default")
 			}
 			return writeTunnelRedirect(stream, location)
 		}
 		if !authenticated() {
-			return writeTunnelAuthRequired(stream)
+			return authRequired("unmatched-host")
 		}
 		return err
 	}
 
-	isUpgrade := isUpgradeHTTPRequest(req)
 	authExempt := resolved.NoAuth || (isUpgrade && pathMatchesWebSocketExempt(req.URL.Path, resolved.WebSocketPaths))
+	if isUpgrade {
+		logf("tunnel upgrade resolved host=%s path=%s process=%s websocket_paths=%v auth_exempt=%t no_auth=%t",
+			publicHost, req.URL.Path, resolved.Process, resolved.WebSocketPaths, authExempt, resolved.NoAuth)
+	}
 	if !authExempt && !authenticated() {
-		return writeTunnelAuthRequired(stream)
+		return authRequired("service-protected")
 	}
 
 	target, resolvedLocalHost, err := opts.EnsureTarget(localHost, resolved)
