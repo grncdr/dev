@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/subtle"
@@ -13,6 +14,7 @@ import (
 	"strings"
 
 	"dev/internal/config"
+	"dev/internal/utils"
 )
 
 // TunnelResolveResult extends ProxyTarget with gateway-specific metadata
@@ -44,6 +46,11 @@ type TunnelResolveResult struct {
 	// service opts out of share auth. Used only on the base-host redirect path
 	// to decide whether the redirect itself requires auth.
 	DefaultSubdomainNoAuth bool
+	// WebSocketPaths lists request path prefixes whose WebSocket upgrade
+	// requests are exempted from share auth. Browsers cannot attach Basic Auth
+	// to a WebSocket handshake; this is the opt-in escape hatch. Match is
+	// segment-boundary prefix and applies only to upgrade requests.
+	WebSocketPaths []string
 }
 
 // TunnelProxyOptions holds the callbacks needed by HandleTunnelRequest to
@@ -102,7 +109,9 @@ func HandleTunnelRequest(ctx context.Context, opts TunnelProxyOptions, tunnel Tu
 		return err
 	}
 
-	if !resolved.NoAuth && !authenticated() {
+	isUpgrade := isUpgradeHTTPRequest(req)
+	authExempt := resolved.NoAuth || (isUpgrade && pathMatchesWebSocketExempt(req.URL.Path, resolved.WebSocketPaths))
+	if !authExempt && !authenticated() {
 		return writeTunnelAuthRequired(stream)
 	}
 
@@ -114,8 +123,8 @@ func HandleTunnelRequest(ctx context.Context, opts TunnelProxyOptions, tunnel Tu
 	resolved.ResolvedLocalHost = resolvedLocalHost
 	defer opts.EndProxySession(resolved.Slug, resolved.Path, resolved.Process)
 
-	if isUpgradeHTTPRequest(req) {
-		return errors.New("upgrade requests are not yet supported for direct tunnel routing")
+	if isUpgrade {
+		return forwardTunnelUpgrade(ctx, req, resolved.ProxyTarget, resolvedLocalHost, localHost, stream)
 	}
 
 	reqBody, err := snapshotRequestBody(req)
@@ -290,6 +299,80 @@ func localHostForTunnelRequest(publicHost string, tunnel TunnelStatus) string {
 		return strings.Join(append(prefix, baseLabels...), ".")
 	}
 	return localBaseHost
+}
+
+// pathMatchesWebSocketExempt reports whether reqPath falls under one of the
+// configured WebSocket exempt prefixes, using segment-boundary prefix match.
+// "/cable" matches "/cable" and "/cable/x" but not "/cablecar".
+func pathMatchesWebSocketExempt(reqPath string, exempt []string) bool {
+	if reqPath == "" {
+		reqPath = "/"
+	}
+	for _, prefix := range exempt {
+		if prefix == "" {
+			continue
+		}
+		if reqPath == prefix {
+			return true
+		}
+		if strings.HasPrefix(reqPath, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// forwardTunnelUpgrade dials the resolved process target and proxies an
+// HTTP upgrade (e.g. WebSocket) handshake bidirectionally between the gateway
+// stream and the upstream. Rewrite-mode header/body translation does not
+// apply: the handshake has no rewriteable body, and 101 carries no Location
+// or Set-Cookie. We pass headers through with the Host set to the resolved
+// local host and X-Forwarded-Proto for parity with the regular HTTP path.
+func forwardTunnelUpgrade(ctx context.Context, req *http.Request, target ProxyTarget, resolvedLocalHost, localHost string, stream net.Conn) error {
+	if target.Network == "" || target.Address == "" {
+		return errors.New("upgrade forwarding requires resolved upstream target")
+	}
+	upstream, err := net.Dial(target.Network, target.Address)
+	if err != nil {
+		return err
+	}
+	defer upstream.Close()
+
+	host := normalizeProxyHost(resolvedLocalHost)
+	if host == "" {
+		host = localHost
+	}
+
+	outReq := req.Clone(ctx)
+	outReq.Header = req.Header.Clone()
+	if outReq.URL == nil {
+		outReq.URL = &url.URL{Path: "/"}
+	}
+	outReq.URL.Scheme = "http"
+	outReq.URL.Host = "dev-tunnel-upstream"
+	outReq.RequestURI = ""
+	outReq.Host = host
+	outReq.Header.Set("X-Forwarded-Proto", "https")
+
+	if err := outReq.Write(upstream); err != nil {
+		return err
+	}
+	upstreamReader := bufio.NewReader(upstream)
+	resp, err := http.ReadResponse(upstreamReader, outReq)
+	if err != nil {
+		return err
+	}
+	if err := resp.Write(stream); err != nil {
+		_ = resp.Body.Close()
+		return err
+	}
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		defer resp.Body.Close()
+		_, err := io.Copy(stream, resp.Body)
+		return err
+	}
+	_ = resp.Body.Close()
+	return utils.ProxyBidirectional(stream, nil, upstream, upstreamReader)
 }
 
 func isUpgradeHTTPRequest(req *http.Request) bool {

@@ -26,6 +26,11 @@ type GatewayExposeRule struct {
 	// NoAuth disables share auth for this process when set via `auth = false`.
 	// The zero value keeps share auth required, so opting out is explicit.
 	NoAuth bool
+	// WebSocketPaths lists request path prefixes whose WebSocket upgrade
+	// requests are exempted from share auth. Match is segment-boundary prefix
+	// (e.g. "/cable" covers "/cable" and "/cable/x" but not "/cablecar").
+	// The exemption applies only when the request is a WebSocket upgrade.
+	WebSocketPaths []string
 }
 
 // GatewayExposeModes returns gateway-exposed process modes keyed by process name.
@@ -88,6 +93,7 @@ func parseGatewayExposeRule(raw any) GatewayExposeRule {
 		noAuth = true
 	}
 	rewritePeerSubdomains := normalizeGatewayRewritePeerSubdomains(m["rewrite_peer_subdomains"])
+	webSocketPaths := normalizeGatewayWebSocketPaths(m["websocket_paths"])
 	modeRaw, ok := m["mode"]
 	if !ok || modeRaw == nil {
 		return GatewayExposeRule{
@@ -95,6 +101,7 @@ func parseGatewayExposeRule(raw any) GatewayExposeRule {
 			DebugLog:              debugLog,
 			RewritePeerSubdomains: rewritePeerSubdomains,
 			NoAuth:                noAuth,
+			WebSocketPaths:        webSocketPaths,
 		}
 	}
 	mode, ok := normalizeGatewayModeValue(modeRaw)
@@ -106,7 +113,39 @@ func parseGatewayExposeRule(raw any) GatewayExposeRule {
 		DebugLog:              debugLog,
 		RewritePeerSubdomains: rewritePeerSubdomains,
 		NoAuth:                noAuth,
+		WebSocketPaths:        webSocketPaths,
 	}
+}
+
+func normalizeGatewayWebSocketPaths(raw any) []string {
+	if raw == nil {
+		return nil
+	}
+	val := reflect.ValueOf(raw)
+	if val.Kind() != reflect.Slice && val.Kind() != reflect.Array {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, val.Len())
+	for i := 0; i < val.Len(); i++ {
+		raw := strings.TrimSpace(fmt.Sprintf("%v", val.Index(i).Interface()))
+		if raw == "" {
+			continue
+		}
+		path := raw
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func normalizeGatewayRewritePeerSubdomains(raw any) []string {

@@ -204,3 +204,61 @@ expose = { rails = { mode = "rewrite", rewrite_peer_subdomains = [" minio ", "AP
 		}
 	}
 }
+
+func TestGatewayExposeRules_ParsesWebSocketPaths(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".dev.toml")
+	body := `
+[project]
+name = "foocorp"
+
+[gateway]
+expose = { rails = { mode = "rewrite", websocket_paths = ["/cable", "cable/v2", "  ", "/live"] }, web = { mode = "reverse_proxy" } }
+`
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := LoadProjectConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	got := GatewayExposeRules(cfg)
+	want := []string{"/cable", "/cable/v2", "/live"}
+	if len(got["rails"].WebSocketPaths) != len(want) {
+		t.Fatalf("unexpected websocket paths: got %v want %v", got["rails"].WebSocketPaths, want)
+	}
+	for i := range want {
+		if got["rails"].WebSocketPaths[i] != want[i] {
+			t.Fatalf("unexpected websocket paths: got %v want %v", got["rails"].WebSocketPaths, want)
+		}
+	}
+	if got["web"].WebSocketPaths != nil {
+		t.Fatalf("expected web WebSocketPaths nil when omitted, got %v", got["web"].WebSocketPaths)
+	}
+}
+
+func TestGatewayExposeRules_BareStringModeHasNoWebSocketPaths(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".dev.toml")
+	body := `
+[project]
+name = "foocorp"
+
+[gateway]
+expose = { rails = "rewrite" }
+`
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := LoadProjectConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if got := GatewayExposeRules(cfg)["rails"].WebSocketPaths; got != nil {
+		t.Fatalf("expected bare-string rule WebSocketPaths nil, got %v", got)
+	}
+}

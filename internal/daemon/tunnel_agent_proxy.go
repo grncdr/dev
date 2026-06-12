@@ -68,6 +68,7 @@ func (s *Server) handleTunnelAgentRequest(ctx context.Context, tunnel agent.Tunn
 			result.GatewayDebugLog = rule.DebugLog
 			result.RewritePeerSubdomains = append([]string(nil), rule.RewritePeerSubdomains...)
 			result.NoAuth = rule.NoAuth
+			result.WebSocketPaths = append([]string(nil), rule.WebSocketPaths...)
 			return result, nil
 		},
 		EnsureTarget: func(host string, _ agent.TunnelResolveResult) (agent.ProxyTarget, string, error) {

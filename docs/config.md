@@ -44,6 +44,10 @@ rewrite_peer_subdomains = ["minio"] # or ["*"] to rewrite all peer local hosts
 mode = "reverse_proxy"
 auth = false # publicly reachable with no Basic Auth, even when gateway.auth is set
 
+[gateway.expose.rails]
+mode = "rewrite"
+websocket_paths = ["/cable"] # WS upgrade requests on these paths skip share auth
+
 [process.postgres]
 singleton = true
 command = "devbox services start postgresql"
@@ -143,6 +147,7 @@ Notes:
   - `rewrite_peer_subdomains = ["*"]`: wildcard that rewrites all peer local hosts under the local apex.
   - `debug_log = "<path>"`: appends full gateway HTTP request/response transcripts to a log file. Relative paths are resolved from the matched process worktree directory. Response bodies are logged after rewrite handling.
   - `auth = false`: opts this process out of share auth, making it publicly reachable with no Basic Auth even when `gateway.auth` (or `--auth`) protects the rest of the tunnel. Defaults to `true`; requires the table form (not the bare-string `mode` shorthand). If the worktree's default-subdomain service opts out, the bare `<label>.<zone>` URL also redirects without auth.
+  - `websocket_paths = ["/cable", ...]`: WebSocket upgrade requests whose URL path falls under one of the listed prefixes skip share auth. Match is segment-boundary prefix (`"/cable"` covers `/cable` and `/cable/v2` but not `/cablecar`). The exemption applies only to upgrade requests; plain HTTP requests to the same paths still require auth. Browsers cannot attach Basic Auth to a `WebSocket` handshake, so this is the opt-in escape hatch for Action Cable, Vite HMR, Phoenix LiveView, and the like. Requires the table form.
 - `subdomain = null` matches `<slug>.<apex_zone>`. `subdomain = "app"` matches `app.<slug>.<apex_zone>`. `subdomain = "*"` matches any subdomain under `<slug>.<apex_zone>`.
 - `subdomains = [...]` is also supported in a matcher to map multiple subdomains in one block.
 - `path` defaults to `/`, `match` defaults to `prefix`, and `priority` defaults to `0`.
