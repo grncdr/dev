@@ -24,6 +24,7 @@ type processHealthCheck struct {
 	Type     string
 	Path     string
 	Port     int
+	PortName string
 	Interval time.Duration
 	Timeout  time.Duration
 }
@@ -45,8 +46,13 @@ func parseProcessHealth(raw any) *processHealthCheck {
 	if v, ok := m["path"].(string); ok && strings.TrimSpace(v) != "" {
 		check.Path = strings.TrimSpace(v)
 	}
-	if v, ok := config.ParseInt(m["port"]); ok {
-		check.Port = v
+	switch v := m["port"].(type) {
+	case string:
+		check.PortName = strings.TrimSpace(v)
+	default:
+		if p, ok := config.ParseInt(m["port"]); ok {
+			check.Port = p
+		}
 	}
 	if v, ok := config.ParseInt(m["interval_ms"]); ok && v > 0 {
 		check.Interval = time.Duration(v) * time.Millisecond
@@ -85,9 +91,20 @@ func waitForProcessReady(info *processInfo) error {
 		}
 		ch := make(chan struct{})
 		info.readyWait = ch
+		health := info.health
 		network := info.network
 		address := info.address
-		health := info.health
+		if health != nil && health.PortName != "" {
+			if t, ok := info.lookupTarget(health.PortName); ok {
+				network = t.Network
+				address = t.Address
+			}
+		} else if network == "" {
+			if t, ok := info.lookupTarget(""); ok {
+				network = t.Network
+				address = t.Address
+			}
+		}
 		startupTimeout := info.startupTimeout
 		exitedCh := info.exited
 		info.mu.Unlock()

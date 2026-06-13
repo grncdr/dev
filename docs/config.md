@@ -60,6 +60,16 @@ needs = ["postgres"]
 RAILS_ENV = "development"
 PORT = "3000"
 
+# Or, for a process that exposes multiple named listeners:
+# [process.api]
+# command = "api-server --http $PORT_HTTP --grpc $PORT_GRPC"
+# [process.api.ports]
+# http = "random"
+# grpc = 50051
+# [process.api.health]
+# type = "tcp"
+# port = "http"
+
 [commands]
 wrapper = "devbox run $COMMAND"
 
@@ -120,9 +130,17 @@ Notes:
   - `port = "random"` allocates a high localhost port and sets `PORT` / `DEV_PORT` env vars.
   - `port = 3000` uses that fixed localhost TCP port.
 - When `port = "unix"`, the daemon also injects `DEV_SOCKET` and `DEV_SOCKET_<PROCESS>` env vars (uppercase, non-alnum → `_`).
+- For a process that needs more than one listener, use `[process.<name>.ports]` instead of `port`. The two keys are mutually exclusive; mixing them is a hard error at config load.
+  - Each entry maps a name (lowercase letters/digits/underscores, must start with a letter) to a port spec: an integer, `"random"`, or `"unix"`.
+  - Inside the process: `PORT_<NAME>=<port>` for tcp/random, `SOCKET_<NAME>=<path>` for unix.
+  - Visible to dependents (`needs = [<this>]`): `DEV_PORT_<PROCESS>_<NAME>` and `DEV_SOCKET_<PROCESS>_<NAME>`. No bare `PORT` / `DEV_PORT` / `DEV_SOCKET` / `DEV_PORT_<PROCESS>` are emitted.
+  - Unix sockets land at `${WORKTREE_STATE}/<process>-<name>.sock`.
+  - Each proxy matcher must select a port via `port = "<name>"` when the process declares more than one entry; with a single entry the selector is optional.
+  - The health block must set `port = "<name>"` when more than one entry is declared; otherwise it falls back to the sole entry.
 - Health checks are optional via `process.<name>.health`:
   - `health = { type = "http", path = "/health" }` waits for HTTP 2xx/3xx before proxying traffic.
-  - `health = { type = "tcp" }` waits for a successful TCP connect (you can also set `port = <int>` inside health to probe a specific port).
+  - `health = { type = "tcp" }` waits for a successful TCP connect.
+  - `port = <int>` inside health probes a specific literal TCP port; `port = "<name>"` selects a named entry from `[process.<name>.ports]`.
 - `needs` declares dependencies that must be started before this process. It accepts a string or array of process names.
 - `idle_follow` lists proxied processes whose idle timeout lifecycle this process should follow: when any listed process is idle-stopped, this process is stopped; when that process auto-starts from new traffic, any processes previously stopped by `idle_follow` auto-start in the background.
 - `startup_timeout` is optional per process (decimal seconds) and overrides health timeout when waiting for startup readiness.

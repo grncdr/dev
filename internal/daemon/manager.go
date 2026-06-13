@@ -129,6 +129,7 @@ type processInfo struct {
 	cmd            *exec.Cmd
 	network        string
 	address        string
+	targets        []processTarget
 	health         *processHealthCheck
 	startupTimeout time.Duration
 	idleTimeout    time.Duration
@@ -289,10 +290,11 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 			continue
 		}
 
-		network, address, port, err := resolveProcessTarget(proc, name, worktreeState)
+		targets, err := resolveProcessTargets(proc, name, worktreeState)
 		if err != nil {
 			return nil, fmt.Errorf("resolve port for %s: %w", name, err)
 		}
+		primary := primaryTarget(targets)
 		depPortVars, err := m.dependencyPortEnvVars(name, needs, runtimeKey, mainRuntimeKey, isMain)
 		if err != nil {
 			return nil, err
@@ -301,8 +303,19 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 		for key, value := range depPortVars {
 			procVars[key] = value
 		}
-		if port != "" {
-			procVars["PORT"] = port
+		if primary.Port != "" {
+			procVars["PORT"] = primary.Port
+		}
+		for _, target := range targets {
+			if target.Name == "" {
+				continue
+			}
+			if target.Port != "" {
+				procVars["PORT_"+strings.ToUpper(target.Name)] = target.Port
+			}
+			if target.Network == "unix" && target.Address != "" {
+				procVars["SOCKET_"+strings.ToUpper(target.Name)] = target.Address
+			}
 		}
 
 		command, ok := proc["command"].(string)
@@ -356,18 +369,36 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 				cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", key, val))
 			}
 		}
-		if port != "" {
+		if primary.Port != "" {
 			cmd.Env = append(cmd.Env,
-				fmt.Sprintf("PORT=%s", port),
-				fmt.Sprintf("DEV_PORT=%s", port),
-				fmt.Sprintf("DEV_PORT_%s=%s", envKey(name), port),
+				fmt.Sprintf("PORT=%s", primary.Port),
+				fmt.Sprintf("DEV_PORT=%s", primary.Port),
+				fmt.Sprintf("DEV_PORT_%s=%s", envKey(name), primary.Port),
 			)
 		}
-		if network == "unix" && address != "" {
+		if primary.Network == "unix" && primary.Address != "" {
 			cmd.Env = append(cmd.Env,
-				fmt.Sprintf("DEV_SOCKET=%s", address),
-				fmt.Sprintf("DEV_SOCKET_%s=%s", envKey(name), address),
+				fmt.Sprintf("DEV_SOCKET=%s", primary.Address),
+				fmt.Sprintf("DEV_SOCKET_%s=%s", envKey(name), primary.Address),
 			)
+		}
+		for _, target := range targets {
+			if target.Name == "" {
+				continue
+			}
+			nameUpper := strings.ToUpper(target.Name)
+			if target.Port != "" {
+				cmd.Env = append(cmd.Env,
+					fmt.Sprintf("PORT_%s=%s", nameUpper, target.Port),
+					fmt.Sprintf("DEV_PORT_%s_%s=%s", envKey(name), nameUpper, target.Port),
+				)
+			}
+			if target.Network == "unix" && target.Address != "" {
+				cmd.Env = append(cmd.Env,
+					fmt.Sprintf("SOCKET_%s=%s", nameUpper, target.Address),
+					fmt.Sprintf("DEV_SOCKET_%s_%s=%s", envKey(name), nameUpper, target.Address),
+				)
+			}
 		}
 
 		logPath := filepath.Join(worktreeState, name+".log")
@@ -390,8 +421,9 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 		m.mu.Lock()
 		info := &processInfo{
 			cmd:            cmd,
-			network:        network,
-			address:        address,
+			network:        primary.Network,
+			address:        primary.Address,
+			targets:        targets,
 			health:         parseProcessHealth(proc["health"]),
 			startupTimeout: parseProcessStartupTimeout(proc["startup_timeout"]),
 			idleTimeout:    resolveProcessIdleTimeout(proc),
@@ -411,7 +443,7 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 		m.mu.Unlock()
 		m.rescheduleIdleTimer(runtimeKey, name, info)
 
-		logProcessEvent("start", projectID, slug, name, cmd.Process.Pid, network, address)
+		logProcessEvent("start", projectID, slug, name, cmd.Process.Pid, primary.Network, primary.Address)
 
 		go func(projectName, slugName, procName string, proc *exec.Cmd, meta *processInfo) {
 			err := proc.Wait()
@@ -1329,6 +1361,15 @@ func (m *Manager) EnsureProcessForTarget(slug, process string) (network string, 
 }
 
 func (m *Manager) EnsureProcessForTargetFromDir(slug, dirHint, process string) (network string, address string, err error) {
+	return m.EnsureProcessTargetForRuntimeFromDir(slug, dirHint, process, "")
+}
+
+// EnsureProcessTargetForRuntimeFromDir resolves a process's listening target
+// by port name. portName must match an entry in the process's `ports` table,
+// or be empty to request the single-port form or the sole named entry when
+// only one port is declared. Returns an error if the resolved process has no
+// target with that name.
+func (m *Manager) EnsureProcessTargetForRuntimeFromDir(slug, dirHint, process, portName string) (network, address string, err error) {
 	m.mu.Lock()
 	runtimeKey, keyErr := m.runtimeKeyForTargetLocked(slug, dirHint)
 	procs := map[string]*processInfo(nil)
@@ -1344,14 +1385,21 @@ func (m *Manager) EnsureProcessForTargetFromDir(slug, dirHint, process string) (
 	if keyErr != nil && !errors.Is(keyErr, errWorktreeNotRunning) {
 		return "", "", keyErr
 	}
-	if ok && info != nil && info.address != "" && info.network != "" && info.cmd != nil && info.cmd.Process != nil && !info.hasExited() {
+	if ok && info != nil && info.cmd != nil && info.cmd.Process != nil && !info.hasExited() {
+		target, ok := info.lookupTarget(portName)
+		if !ok {
+			if len(info.targets) == 0 {
+				return "", "", errors.New("process is running without proxy target; set port = \"unix\", \"random\", or an integer")
+			}
+			if portName == "" {
+				return "", "", fmt.Errorf("process %s has multiple ports; specify port name", process)
+			}
+			return "", "", fmt.Errorf("process %s has no port named %q", process, portName)
+		}
 		if err := waitForProcessReady(info); err != nil {
 			return "", "", err
 		}
-		return info.network, info.address, nil
-	}
-	if ok && info != nil && info.cmd != nil && info.cmd.Process != nil && (info.address == "" || info.network == "") {
-		return "", "", errors.New("process is running without proxy target; set port = \"unix\", \"random\", or an integer")
+		return target.Network, target.Address, nil
 	}
 	if strings.TrimSpace(dirHint) == "" {
 		dirHint, _ = m.WorktreePath(slug)
@@ -1361,25 +1409,37 @@ func (m *Manager) EnsureProcessForTargetFromDir(slug, dirHint, process string) (
 		return "", "", err
 	}
 	for _, proc := range status.Processes {
-		if proc.Name == process {
-			network, address, err := m.TargetForFromDir(slug, dirHint, process)
-			if err != nil {
-				return "", "", err
-			}
-			m.mu.Lock()
-			currentKey, keyErr := m.runtimeKeyForTargetLocked(slug, dirHint)
-			if keyErr != nil {
-				m.mu.Unlock()
-				return "", "", keyErr
-			}
-			current := m.processes[currentKey][process]
-			m.mu.Unlock()
-			if err := waitForProcessReady(current); err != nil {
-				return "", "", err
-			}
-			m.wakeIdleFollowersFromDir(currentKey, slug, dirHint, process)
-			return network, address, nil
+		if proc.Name != process {
+			continue
 		}
+		m.mu.Lock()
+		currentKey, keyErr := m.runtimeKeyForTargetLocked(slug, dirHint)
+		var current *processInfo
+		if keyErr == nil {
+			current = m.processes[currentKey][process]
+		}
+		m.mu.Unlock()
+		if keyErr != nil {
+			return "", "", keyErr
+		}
+		if current == nil {
+			return "", "", errors.New("socket not found for process")
+		}
+		if err := waitForProcessReady(current); err != nil {
+			return "", "", err
+		}
+		target, ok := current.lookupTarget(portName)
+		if !ok {
+			if len(current.targets) == 0 {
+				return "", "", errors.New("socket not found for process")
+			}
+			if portName == "" {
+				return "", "", fmt.Errorf("process %s has multiple ports; specify port name", process)
+			}
+			return "", "", fmt.Errorf("process %s has no port named %q", process, portName)
+		}
+		m.wakeIdleFollowersFromDir(currentKey, slug, dirHint, process)
+		return target.Network, target.Address, nil
 	}
 	return "", "", errors.New("socket not found for process")
 }
@@ -1485,7 +1545,7 @@ func (m *Manager) ensureProxyTargetForRuntime(runtimeKey string, matcher *router
 	}
 	process := matcher.Process
 	m.beginProxySessionFromDir(targetSlug, targetPath, process)
-	network, address, err := m.EnsureProcessForTargetFromDir(targetSlug, targetPath, process)
+	network, address, err := m.EnsureProcessTargetForRuntimeFromDir(targetSlug, targetPath, process, matcher.Port)
 	if err != nil {
 		m.endProxySessionFromDir(targetSlug, targetPath, process)
 		return ProxyTarget{}, err
@@ -1845,11 +1905,24 @@ func (m *Manager) dependencyPortEnvVars(process string, needs *processNeeds, run
 		if !isMain && needs.singleton[dep] {
 			depRuntimeKey = mainRuntimeKey
 		}
-		port, ok := m.runningProcessPort(depRuntimeKey, dep)
-		if !ok {
-			continue
+		for _, target := range m.runningProcessTargets(depRuntimeKey, dep) {
+			if target.Name == "" {
+				if target.Port != "" {
+					vars["DEV_PORT_"+envKey(dep)] = target.Port
+				}
+				if target.Network == "unix" && target.Address != "" {
+					vars["DEV_SOCKET_"+envKey(dep)] = target.Address
+				}
+				continue
+			}
+			nameUpper := strings.ToUpper(target.Name)
+			if target.Port != "" {
+				vars["DEV_PORT_"+envKey(dep)+"_"+nameUpper] = target.Port
+			}
+			if target.Network == "unix" && target.Address != "" {
+				vars["DEV_SOCKET_"+envKey(dep)+"_"+nameUpper] = target.Address
+			}
 		}
-		vars["DEV_PORT_"+envKey(dep)] = port
 	}
 	return vars, nil
 }
@@ -1864,45 +1937,126 @@ func (m *Manager) runningProcessPort(slug, process string) (string, bool) {
 	return targetPort(info.network, info.address)
 }
 
-func resolveProcessTarget(proc map[string]any, name, worktreeState string) (network, address, port string, err error) {
-	value, hasPort := proc["port"]
-	if !hasPort {
+func (m *Manager) runningProcessTargets(slug, process string) []processTarget {
+	m.mu.Lock()
+	info := m.processInfoLocked(slug, process)
+	m.mu.Unlock()
+	if info == nil || info.cmd == nil || info.cmd.Process == nil || info.hasExited() {
+		return nil
+	}
+	return info.targets
+}
+
+// processTarget is one allocated listening target for a process. Name is
+// the named-port label ("" for the single-port `port = ...` form).
+type processTarget struct {
+	Name    string
+	Network string
+	Address string
+	Port    string
+}
+
+func resolveProcessTargets(proc map[string]any, name, worktreeState string) ([]processTarget, error) {
+	ports, err := config.ParseProcessPorts(proc)
+	if err != nil {
+		return nil, err
+	}
+	if len(ports) == 0 {
 		if _, hasProxy := proc["proxy"]; hasProxy {
-			value = "random"
+			ports = []config.ProcessPort{{Mode: config.PortModeRandom}}
 		} else {
-			return "", "", "", nil
+			return nil, nil
 		}
 	}
-	switch typed := value.(type) {
-	case int:
-		return tcpTarget(typed)
-	case int64:
-		return tcpTarget(int(typed))
-	case float64:
-		return tcpTarget(int(typed))
-	case string:
-		mode := strings.ToLower(strings.TrimSpace(typed))
-		switch mode {
-		case "":
-			return "", "", "", nil
-		case "unix":
-			return "unix", defaultSocketPath(worktreeState, name), "", nil
-		case "random":
-			allocated, err := allocateRandomPort()
-			if err != nil {
-				return "", "", "", err
-			}
-			return "tcp", fmt.Sprintf("127.0.0.1:%s", allocated), allocated, nil
-		default:
-			parsed, parseErr := strconv.Atoi(mode)
-			if parseErr != nil {
-				return "", "", "", fmt.Errorf("unsupported port value %q", typed)
-			}
-			return tcpTarget(parsed)
+	out := make([]processTarget, 0, len(ports))
+	for _, p := range ports {
+		target, err := allocateProcessTarget(p, name, worktreeState)
+		if err != nil {
+			return nil, err
 		}
+		out = append(out, target)
+	}
+	return out, nil
+}
+
+func allocateProcessTarget(p config.ProcessPort, process, worktreeState string) (processTarget, error) {
+	switch p.Mode {
+	case config.PortModeFixed:
+		network, address, port, err := tcpTarget(p.FixedPort)
+		if err != nil {
+			return processTarget{}, err
+		}
+		return processTarget{Name: p.Name, Network: network, Address: address, Port: port}, nil
+	case config.PortModeRandom:
+		allocated, err := allocateRandomPort()
+		if err != nil {
+			return processTarget{}, err
+		}
+		return processTarget{
+			Name:    p.Name,
+			Network: "tcp",
+			Address: fmt.Sprintf("127.0.0.1:%s", allocated),
+			Port:    allocated,
+		}, nil
+	case config.PortModeUnix:
+		return processTarget{
+			Name:    p.Name,
+			Network: "unix",
+			Address: namedSocketPath(worktreeState, process, p.Name),
+		}, nil
 	default:
-		return "", "", "", fmt.Errorf("unsupported port type %T", value)
+		return processTarget{}, fmt.Errorf("unsupported port mode %v", p.Mode)
 	}
+}
+
+func namedSocketPath(worktreeState, process, portName string) string {
+	if portName == "" {
+		return defaultSocketPath(worktreeState, process)
+	}
+	return filepath.Join(worktreeState, process+"-"+portName+".sock")
+}
+
+// primaryTarget returns the single-port form's target if present, otherwise
+// the empty target. Used by legacy single-target consumers; multi-port
+// processes return the empty target here and must be routed by port name.
+func primaryTarget(targets []processTarget) processTarget {
+	if len(targets) == 1 && targets[0].Name == "" {
+		return targets[0]
+	}
+	return processTarget{}
+}
+
+// targetForName returns the named target from a list, or false if absent.
+// An empty name returns the single-port form's target when applicable, or
+// the sole entry when the process has exactly one named port (implicit
+// resolution).
+func targetForName(targets []processTarget, name string) (processTarget, bool) {
+	if name == "" {
+		if len(targets) == 1 {
+			return targets[0], true
+		}
+		return processTarget{}, false
+	}
+	for _, t := range targets {
+		if t.Name == name {
+			return t, true
+		}
+	}
+	return processTarget{}, false
+}
+
+// lookupTarget resolves a process's listening target by name. Falls back to
+// info.network/info.address when info.targets is empty (preserves
+// backwards-compatible behavior for code paths that construct processInfo
+// directly without populating targets, including older tests).
+func (info *processInfo) lookupTarget(name string) (processTarget, bool) {
+	if t, ok := targetForName(info.targets, name); ok {
+		return t, true
+	}
+	if name == "" && info.network != "" {
+		return processTarget{Network: info.network, Address: info.address}, true
+	}
+	return processTarget{}, false
 }
 
 func tcpTarget(port int) (network, address, portString string, err error) {

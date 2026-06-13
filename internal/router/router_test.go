@@ -39,6 +39,51 @@ proxy = { subdomain = "mailpit" }
 	}
 }
 
+func TestParseMatchers_NamedPort(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), ".dev.toml")
+	body := `
+[project]
+name = "demo"
+
+[process.rails]
+command = "rails"
+
+[process.rails.ports]
+http = "random"
+grpc = "random"
+
+[[process.rails.proxy]]
+path = "/"
+port = "http"
+
+[[process.rails.proxy]]
+subdomain = "grpc"
+path = "/"
+port = "grpc"
+`
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := config.LoadProjectConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	matchers := ParseMatchers(cfg)
+	if len(matchers) != 2 {
+		t.Fatalf("expected 2 matchers, got %d", len(matchers))
+	}
+	byPort := map[string]string{}
+	for _, m := range matchers {
+		byPort[m.Port] = m.Subdomain
+	}
+	if byPort["http"] != "" {
+		t.Fatalf("expected http matcher to have base subdomain, got %q", byPort["http"])
+	}
+	if byPort["grpc"] != "grpc" {
+		t.Fatalf("expected grpc matcher subdomain=grpc, got %q", byPort["grpc"])
+	}
+}
+
 func TestSelectMatcher_SubdomainPriority(t *testing.T) {
 	matchers := []Matcher{
 		{Process: "rails", Subdomain: "*", Kind: SubdomainWildcard, Path: "/deep/path", Match: "prefix"},
