@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -431,6 +432,21 @@ func ResolveDaemonConfigPath() string {
 func validateProjectConfig(cfg *ProjectConfig) error {
 	if cfg.Project.Name == "" {
 		return errors.New("project.name is required")
+	}
+	names := make([]string, 0, len(cfg.Processes))
+	for name := range cfg.Processes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		proc := cfg.Processes[name]
+		ports, err := ParseProcessPorts(proc)
+		if err != nil {
+			return fmt.Errorf("process.%s: %w", name, err)
+		}
+		if err := ValidateProcessPorts(proc, ports); err != nil {
+			return fmt.Errorf("process.%s: %w", name, err)
+		}
 	}
 	return nil
 }

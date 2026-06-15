@@ -86,6 +86,10 @@ func parseMatchersFromMap(process string, raw map[string]any, singleton bool) []
 	if val, ok := config.ParseInt(raw["tcp_listen"]); ok && val > 0 {
 		tcpListen = val
 	}
+	portName := ""
+	if val, ok := raw["port"].(string); ok {
+		portName = strings.TrimSpace(val)
+	}
 	out := make([]Matcher, 0, len(subdomains))
 	for _, sd := range subdomains {
 		out = append(out, Matcher{
@@ -97,6 +101,7 @@ func parseMatchersFromMap(process string, raw map[string]any, singleton bool) []
 			Priority:  priority,
 			TCPListen: tcpListen,
 			Singleton: singleton,
+			Port:      portName,
 		})
 	}
 	return out

@@ -44,6 +44,9 @@ type Matcher struct {
 	// When set, proxy requests for this process in non-main worktrees are
 	// redirected to the main worktree's instance.
 	Singleton bool
+	// Port is the name of the target port in the process's `ports` table.
+	// Empty for processes using the single-port `port = ...` form.
+	Port string
 }
 
 // WorktreeInput is the data needed to register a worktree with the Router.
