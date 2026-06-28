@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"dev/internal/worktree"
 )
 
 func TestResolveWorktreePathPrefersDirHint(t *testing.T) {
@@ -93,6 +95,52 @@ name = "foocorp/monorepo"
 	}
 	if _, err := m.StopWorktreeFromDir(slug, hint); err != nil {
 		t.Fatalf("stop with hint: %v", err)
+	}
+}
+
+func TestLookupRuntimeWorktreePathUsesRuntimeState(t *testing.T) {
+	m := NewManager()
+	projectName := "foocorp/monorepo"
+	projectID, err := worktree.NormalizeIdentifierSegment(projectName)
+	if err != nil {
+		t.Fatalf("normalize project: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "repo")
+	m.registerWorktreeLocked(runtimeKeyForPath(path), runtimeWorktree{
+		Slug:    "main",
+		Project: projectID,
+		Path:    path,
+	})
+
+	got, ok := m.lookupRuntimeWorktreePath(projectName, "main")
+	if !ok {
+		t.Fatalf("expected runtime worktree path lookup to succeed")
+	}
+	if got != path {
+		t.Fatalf("expected %s, got %s", path, got)
+	}
+}
+
+func TestResolveWorktreePathPrefersRuntimeStateBeforePersistedState(t *testing.T) {
+	m := NewManager()
+	projectName := "foocorp/monorepo"
+	projectID, err := worktree.NormalizeIdentifierSegment(projectName)
+	if err != nil {
+		t.Fatalf("normalize project: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "repo")
+	m.registerWorktreeLocked(runtimeKeyForPath(path), runtimeWorktree{
+		Slug:    "main",
+		Project: projectID,
+		Path:    path,
+	})
+
+	got, err := m.resolveWorktreePath("main", projectName, "")
+	if err != nil {
+		t.Fatalf("resolveWorktreePath: %v", err)
+	}
+	if got != path {
+		t.Fatalf("expected %s, got %s", path, got)
 	}
 }
 

@@ -1,16 +1,21 @@
 package daemon
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"dev/internal/agent"
 	"dev/internal/config"
 	"dev/internal/gateway"
 )
@@ -166,6 +171,80 @@ func TestOpenTunnel_RejectsIncompleteAuth(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "auth_username and auth_password") {
 		t.Fatalf("expected auth validation error, got %v", err)
+	}
+}
+
+func TestHandleTunnelAgentRequest_UsesRuntimeWorktreeBeforePersistedState(t *testing.T) {
+	repoDir := t.TempDir()
+	projectName := "tunnel-runtime-state-regression"
+	cfgBody := `
+[project]
+name = "tunnel-runtime-state-regression"
+
+[gateway]
+expose = { app = { mode = "rewrite" } }
+
+[process.app]
+command = "app"
+proxy = { path = "/" }
+`
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(cfgBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, _, err := config.LoadProjectConfig(filepath.Join(repoDir, ".dev.toml"))
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	mgr := NewManager()
+	mgr.registerWorktreeLocked(runtimeKeyForPath(repoDir), runtimeWorktree{
+		Slug:          "main",
+		Project:       projectName,
+		Path:          repoDir,
+		DNSLabel:      "main",
+		GatewayExpose: gatewayExposeRulesForConfig(cfg),
+	})
+
+	s := &Server{
+		manager:      mgr,
+		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "https://main.public.example.dev/", nil)
+	req.Host = "main.public.example.dev"
+	tunnel := agent.TunnelStatus{
+		Slug:          "main",
+		Project:       projectName,
+		Label:         "main",
+		LocalBaseHost: "main.localhost",
+		AuthUsername:  "alice",
+		AuthPassword:  "secret",
+	}
+
+	serverSide, clientSide := net.Pipe()
+	defer clientSide.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		defer serverSide.Close()
+		errCh <- s.handleTunnelAgentRequest(context.Background(), tunnel, req, serverSide)
+	}()
+
+	resp, err := http.ReadResponse(bufio.NewReader(clientSide), req)
+	if err != nil {
+		t.Fatalf("read tunneled response: %v", err)
+	}
+	defer resp.Body.Close()
+	if _, err := io.ReadAll(resp.Body); err != nil {
+		t.Fatalf("read tunneled body: %v", err)
+	}
+
+	if err := <-errCh; err != nil {
+		t.Fatalf("handle tunnel agent request: %v", err)
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", resp.StatusCode)
 	}
 }
 

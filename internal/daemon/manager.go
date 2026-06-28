@@ -492,6 +492,12 @@ func (m *Manager) resolveWorktreePath(slug, project, dirHint string) (string, er
 		// chance of finding the path. Failures are safe to ignore — resolution
 		// still falls back to runtime indexes and git metadata.
 		_, _, _ = worktree.EnsureProjectStateForDir(daemonCfg, dirHint)
+		if path, err := worktree.ResolvePathWithProjectHint(slug, project, dirHint, daemonCfg); err == nil {
+			return path, nil
+		}
+	}
+	if path, ok := m.lookupRuntimeWorktreePath(project, slug); ok {
+		return path, nil
 	}
 	return worktree.ResolvePathWithProjectHint(slug, project, dirHint, daemonCfg)
 }
@@ -1447,6 +1453,42 @@ func (m *Manager) EnsureProcessTargetForRuntimeFromDir(slug, dirHint, process, p
 
 func (m *Manager) WorktreePath(slug string) (string, bool) {
 	return m.WorktreePathFromDir(slug, "")
+}
+
+func (m *Manager) lookupRuntimeWorktreePath(project, slug string) (string, bool) {
+	normalizedSlug := normalizeRuntimeIndexValue(slug)
+	if normalizedSlug == "" {
+		return "", false
+	}
+	normalizedProject := strings.TrimSpace(project)
+	if normalizedProject != "" {
+		if projectID, err := worktree.NormalizeIdentifierSegment(normalizedProject); err == nil {
+			normalizedProject = projectID
+		} else {
+			normalizedProject = normalizeRuntimeIndexValue(normalizedProject)
+		}
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	matches := make([]string, 0, 1)
+	for _, wt := range m.worktrees {
+		if normalizeRuntimeIndexValue(wt.Slug) != normalizedSlug {
+			continue
+		}
+		if normalizedProject != "" && wt.Project != normalizedProject {
+			continue
+		}
+		if strings.TrimSpace(wt.Path) == "" {
+			continue
+		}
+		matches = append(matches, wt.Path)
+	}
+	if len(matches) != 1 {
+		return "", false
+	}
+	return matches[0], true
 }
 
 func (m *Manager) WorktreeRecords() []runtimeWorktree {
