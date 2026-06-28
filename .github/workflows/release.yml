@@ -23,21 +23,22 @@ jobs:
             goos: linux
             goarch: arm64
             suffix: ""
-          - os: macos-latest
+          - os: macos-15
             goos: darwin
             goarch: amd64
             suffix: ""
-          - os: macos-latest
+          - os: macos-15
             goos: darwin
             goarch: arm64
             suffix: ""
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.24"
+          cache: false
 
       - name: Build binary
         env:
@@ -49,12 +50,12 @@ jobs:
           go build -ldflags="-s -w -X dev/internal/version.Version=${VERSION}" -o dev-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }} ./cmd/dev
 
       - name: Generate attestation
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dev-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dev-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dev-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}
@@ -63,10 +64,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
