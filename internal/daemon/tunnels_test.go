@@ -135,7 +135,7 @@ url = "http://unused.local"
 		}
 	}
 
-	if _, err := client.TunnelClose(ctx, TunnelRequest{Slug: slug}); err != nil {
+	if _, err := client.TunnelClose(ctx, TunnelRequest{Slug: slug, Project: "demo"}); err != nil {
 		t.Fatalf("tunnel close: %v", err)
 	}
 	after, err := client.TunnelsStatus(ctx)

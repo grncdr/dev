@@ -192,20 +192,17 @@ func runTunnelClose(opts *Options, slugArg, labelArg, gatewayURLArg string) erro
 		return err
 	}
 	req := daemon.TunnelRequest{Label: strings.TrimSpace(labelArg)}
-	if req.Label == "" {
-		slug, err := resolveSlug(opts, slugArg)
+	if req.Label == "" || strings.TrimSpace(gatewayURLArg) == "" {
+		slug, _, cfg, err := resolveTunnelConfig(opts, slugArg)
 		if err != nil {
 			return err
 		}
-		req.Slug = slug
-	}
-	if strings.TrimSpace(gatewayURLArg) == "" {
-		_, _, cfg, err := resolveTunnelConfig(opts, slugArg)
-		if err != nil {
-			return err
-		}
-		if config.ProjectGatewayURL(cfg) == "" {
+		if strings.TrimSpace(gatewayURLArg) == "" && config.ProjectGatewayURL(cfg) == "" {
 			return errors.New("gateway.url is required in project config or pass --gateway-url")
+		}
+		if req.Label == "" {
+			req.Slug = slug
+			req.Project = cfg.Project.Name
 		}
 	}
 	client := daemon.NewClient(socketPath)

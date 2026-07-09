@@ -46,6 +46,19 @@ func ParseProjectSlug(input string) (ProjectSlug, error) {
 	return ProjectSlug{Project: project, Slug: slug}, nil
 }
 
+// String renders the identity as the canonical "project:slug" form.
+func (p ProjectSlug) String() string {
+	return p.Project + ":" + p.Slug
+}
+
+// Equal reports whether p and other identify the same worktree. A slug alone is
+// not unique across projects — every project has a "main" — so both segments
+// must match. Comparison is case-insensitive and whitespace-trimmed.
+func (p ProjectSlug) Equal(other ProjectSlug) bool {
+	return strings.EqualFold(strings.TrimSpace(p.Project), strings.TrimSpace(other.Project)) &&
+		strings.EqualFold(strings.TrimSpace(p.Slug), strings.TrimSpace(other.Slug))
+}
+
 // SlugDNSLabel returns the DNS label for a slug (the last path segment).
 // Example: "feature/branch" → "branch"
 func SlugDNSLabel(slug string) string {

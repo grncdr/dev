@@ -51,10 +51,13 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 		}
 		for _, status := range conn.Statuses() {
 			if status.Label == req.Label {
+				if !status.Identity().Equal(req.Identity()) {
+					return nil, fmt.Errorf("label %s already in use by %s (gateway %s)", req.Label, status.Identity(), url)
+				}
 				out := toDaemonTunnelStatus(status)
 				return &out, nil
 			}
-			if status.Slug == req.Slug && status.Label != req.Label {
+			if status.Identity().Equal(req.Identity()) {
 				return nil, fmt.Errorf("slug %s already has label %s (gateway %s)", req.Slug, status.Label, url)
 			}
 		}
@@ -86,8 +89,7 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 
 func (s *Server) closeTunnel(req TunnelRequest) (*TunnelStatus, error) {
 	label := strings.TrimSpace(req.Label)
-	slug := strings.TrimSpace(req.Slug)
-	if label == "" && slug == "" {
+	if label == "" && strings.TrimSpace(req.Slug) == "" {
 		return nil, errors.New("label or slug is required")
 	}
 
@@ -100,7 +102,7 @@ func (s *Server) closeTunnel(req TunnelRequest) (*TunnelStatus, error) {
 		if conn == nil {
 			continue
 		}
-		status, err := conn.Close(label, slug)
+		status, err := conn.Close(label, req.Identity())
 		if err != nil {
 			continue
 		}

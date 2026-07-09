@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"dev/internal/worktree"
 )
 
 // TunnelSpec describes the parameters needed to open a tunnel through a gateway.
@@ -31,6 +33,13 @@ type TunnelSpec struct {
 	AuthUsername string
 	// AuthPassword is the HTTP basic auth password for tunnel access control.
 	AuthPassword string
+}
+
+// Identity returns the fully-qualified worktree identity for this tunnel. A
+// slug alone is not unique across projects, so tunnels are matched on the
+// project:slug pair.
+func (s TunnelSpec) Identity() worktree.ProjectSlug {
+	return worktree.ProjectSlug{Project: s.Project, Slug: s.Slug}
 }
 
 // TunnelStatus is the live state of a tunnel within a Connection.
@@ -59,6 +68,11 @@ type TunnelStatus struct {
 	AuthUsername string
 	// AuthPassword is the HTTP basic auth password for tunnel access control.
 	AuthPassword string
+}
+
+// Identity returns the fully-qualified worktree identity for this tunnel.
+func (s TunnelStatus) Identity() worktree.ProjectSlug {
+	return worktree.ProjectSlug{Project: s.Project, Slug: s.Slug}
 }
 
 type tunnelRuntime struct {
@@ -95,6 +109,26 @@ func (c *Connection) GatewayURL() string {
 	return c.gatewayURL
 }
 
+// conflictForSpecLocked inspects the open tunnels for a conflict with spec.
+// It returns a non-nil status when the request is idempotent (the same worktree
+// is already open under the same label), or an error when the label or the
+// worktree is already in use by a different tunnel. Callers must hold c.mu.
+func (c *Connection) conflictForSpecLocked(spec TunnelSpec) (*TunnelStatus, error) {
+	for label, running := range c.tunnels {
+		if label == spec.Label {
+			if !running.spec.Identity().Equal(spec.Identity()) {
+				return nil, fmt.Errorf("label %s already in use by %s", spec.Label, running.spec.Identity())
+			}
+			status := c.toStatusLocked(running)
+			return &status, nil
+		}
+		if running.spec.Identity().Equal(spec.Identity()) {
+			return nil, fmt.Errorf("slug %s already has label %s", spec.Slug, label)
+		}
+	}
+	return nil, nil
+}
+
 func (c *Connection) Open(spec TunnelSpec, requestHandler TunnelRequestHandler) (TunnelStatus, error) {
 	spec.Label = strings.TrimSpace(spec.Label)
 	spec.Slug = strings.TrimSpace(spec.Slug)
@@ -115,16 +149,12 @@ func (c *Connection) Open(spec TunnelSpec, requestHandler TunnelRequestHandler) 
 	}
 
 	c.mu.Lock()
-	for label, running := range c.tunnels {
-		if label == spec.Label {
-			status := c.toStatusLocked(running)
-			c.mu.Unlock()
-			return status, nil
-		}
-		if strings.EqualFold(running.spec.Slug, spec.Slug) {
-			c.mu.Unlock()
-			return TunnelStatus{}, fmt.Errorf("slug %s already has label %s", spec.Slug, label)
-		}
+	if existing, err := c.conflictForSpecLocked(spec); err != nil {
+		c.mu.Unlock()
+		return TunnelStatus{}, err
+	} else if existing != nil {
+		c.mu.Unlock()
+		return *existing, nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	rt := &tunnelRuntime{
@@ -248,10 +278,9 @@ func (c *Connection) SeedTunnel(status TunnelStatus) {
 	}
 }
 
-func (c *Connection) Close(label, slug string) (TunnelStatus, error) {
+func (c *Connection) Close(label string, target worktree.ProjectSlug) (TunnelStatus, error) {
 	label = strings.TrimSpace(label)
-	slug = strings.TrimSpace(slug)
-	if label == "" && slug == "" {
+	if label == "" && strings.TrimSpace(target.Slug) == "" {
 		return TunnelStatus{}, errors.New("label or slug is required")
 	}
 
@@ -262,7 +291,7 @@ func (c *Connection) Close(label, slug string) (TunnelStatus, error) {
 	}
 	if label == "" {
 		for key, rt := range c.tunnels {
-			if strings.EqualFold(rt.spec.Slug, slug) {
+			if target.Equal(rt.spec.Identity()) {
 				label = key
 				break
 			}
@@ -315,12 +344,12 @@ func (c *Connection) Statuses() []TunnelStatus {
 	return out
 }
 
-func (c *Connection) StatusForSlug(slug string) *TunnelStatus {
+func (c *Connection) Status(target worktree.ProjectSlug) *TunnelStatus {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var selected *TunnelStatus
 	for _, rt := range c.tunnels {
-		if !strings.EqualFold(rt.spec.Slug, slug) {
+		if !target.Equal(rt.spec.Identity()) {
 			continue
 		}
 		cur := c.toStatusLocked(rt)

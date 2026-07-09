@@ -1,6 +1,9 @@
 package daemon
 
-import "dev/internal/agent"
+import (
+	"dev/internal/agent"
+	"dev/internal/worktree"
+)
 
 // HealthResponse is the JSON response from the /health daemon endpoint.
 type HealthResponse struct {
@@ -43,6 +46,13 @@ type TunnelRequest struct {
 	AuthUsername string `json:"auth_username,omitempty"`
 	// AuthPassword is the HTTP basic auth password for access control.
 	AuthPassword string `json:"auth_password,omitempty"`
+}
+
+// Identity returns the fully-qualified worktree identity for this request. A
+// slug alone is not unique across projects, so tunnels are matched on the
+// project:slug pair.
+func (r TunnelRequest) Identity() worktree.ProjectSlug {
+	return worktree.ProjectSlug{Project: r.Project, Slug: r.Slug}
 }
 
 // TunnelStatus is the JSON representation of a tunnel's current state,

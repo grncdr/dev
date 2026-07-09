@@ -19,7 +19,7 @@ func (s *Server) routingStatusForWorktree(slug, project, dirHint string) Worktre
 
 	routeSlug := localProxyRouteSlug(slug, cfg)
 	localByProcess := localProxyRoutesByProcess(router.ParseMatchers(cfg), routeSlug, s.projectApexZone())
-	tunnel := s.tunnelStatusForSlug(slug)
+	tunnel := s.tunnelStatusForWorktree(worktree.ProjectSlug{Project: project, Slug: slug})
 
 	gatewayURL := strings.TrimSpace(gatewayURLFromConfig(cfg))
 	gatewayStatus := ""
@@ -139,7 +139,7 @@ func gatewayRoutesByProcess(localByProcess map[string][]string, exposedByProcess
 	return out
 }
 
-func (s *Server) tunnelStatusForSlug(slug string) *TunnelStatus {
+func (s *Server) tunnelStatusForWorktree(target worktree.ProjectSlug) *TunnelStatus {
 	s.tunnelMu.Lock()
 	defer s.tunnelMu.Unlock()
 	if len(s.agents) == 0 {
@@ -150,7 +150,7 @@ func (s *Server) tunnelStatusForSlug(slug string) *TunnelStatus {
 		if conn == nil {
 			continue
 		}
-		candidate := conn.StatusForSlug(slug)
+		candidate := conn.Status(target)
 		if candidate == nil {
 			continue
 		}

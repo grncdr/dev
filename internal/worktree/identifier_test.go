@@ -51,6 +51,27 @@ func TestParseProjectSlugInvalid(t *testing.T) {
 	}
 }
 
+func TestProjectSlugEqual(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		a    ProjectSlug
+		b    ProjectSlug
+		want bool
+	}{
+		{"identical", ProjectSlug{"cabinet", "main"}, ProjectSlug{"cabinet", "main"}, true},
+		{"case insensitive", ProjectSlug{"Cabinet", "Main"}, ProjectSlug{"cabinet", "main"}, true},
+		{"same slug different project", ProjectSlug{"cabinet", "main"}, ProjectSlug{"drawer", "main"}, false},
+		{"same project different slug", ProjectSlug{"cabinet", "main"}, ProjectSlug{"cabinet", "feature"}, false},
+	}
+	for _, tc := range cases {
+		if got := tc.a.Equal(tc.b); got != tc.want {
+			t.Fatalf("%s: %+v.Equal(%+v) = %v, want %v", tc.name, tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
 func TestSlugDNSLabel(t *testing.T) {
 	t.Parallel()
 
