@@ -39,6 +39,10 @@ func RewriteRequestOriginForTunnel(header http.Header, publicHost, localHost, pu
 	rewriteRequestOriginForTunnel(header, publicHost, localHost, publicApex, localApex)
 }
 
+func RewriteRequestRefererForTunnel(header http.Header, publicHost, localHost, publicApex, localApex string) {
+	rewriteRequestRefererForTunnel(header, publicHost, localHost, publicApex, localApex)
+}
+
 func ReplaceHostLocalToPublic(hostPort, localHost, publicHost, localApex, publicApex string) (string, bool) {
 	return replaceHostLocalToPublic(hostPort, localHost, publicHost, localApex, publicApex)
 }
@@ -194,11 +198,22 @@ func rewriteRequestOrigin(header http.Header, publicApex, localApex string) {
 }
 
 func rewriteRequestOriginForTunnel(header http.Header, publicHost, localHost, publicApex, localApex string) {
-	origin := strings.TrimSpace(header.Get("Origin"))
-	if origin == "" || strings.EqualFold(origin, "null") {
+	rewriteRequestURLHeaderForTunnel(header, "Origin", publicHost, localHost, publicApex, localApex)
+}
+
+func rewriteRequestRefererForTunnel(header http.Header, publicHost, localHost, publicApex, localApex string) {
+	rewriteRequestURLHeaderForTunnel(header, "Referer", publicHost, localHost, publicApex, localApex)
+}
+
+// rewriteRequestURLHeaderForTunnel rewrites the public host in an absolute-URL
+// request header (Origin, Referer) back to the local host. The path and query
+// carried by headers like Referer are preserved untouched.
+func rewriteRequestURLHeaderForTunnel(header http.Header, name, publicHost, localHost, publicApex, localApex string) {
+	value := strings.TrimSpace(header.Get(name))
+	if value == "" || strings.EqualFold(value, "null") {
 		return
 	}
-	parsed, err := url.Parse(origin)
+	parsed, err := url.Parse(value)
 	if err != nil || !parsed.IsAbs() || parsed.Host == "" {
 		return
 	}
@@ -207,7 +222,7 @@ func rewriteRequestOriginForTunnel(header http.Header, publicHost, localHost, pu
 		return
 	}
 	parsed.Host = rewrittenHost
-	header.Set("Origin", parsed.String())
+	header.Set(name, parsed.String())
 }
 
 func rewriteRequestCookieDomainValue(value, publicApex, localApex string) string {

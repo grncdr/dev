@@ -68,6 +68,32 @@ func TestRewriteRequestOriginForTunnel_PreservesSubdomainsAndSwapsSuffix(t *test
 	}
 }
 
+func TestRewriteRequestRefererForTunnel_PreservesPathAndSwapsSuffix(t *testing.T) {
+	t.Parallel()
+
+	header := make(http.Header)
+	header.Set("Referer", "https://api.app.bobs-main-branch.public.example.com/foo/bar?q=1")
+
+	rewriteRequestRefererForTunnel(header, "app.bobs-main-branch.public.example.com", "app.foocorp.localhost", "public.example.com", ".localhost")
+
+	if got := header.Get("Referer"); got != "https://api.app.foocorp.localhost/foo/bar?q=1" {
+		t.Fatalf("unexpected Referer rewrite: %s", got)
+	}
+}
+
+func TestRewriteRequestRefererForTunnelNoMatch(t *testing.T) {
+	t.Parallel()
+
+	header := make(http.Header)
+	header.Set("Referer", "https://app.slug.example.com/foo")
+
+	rewriteRequestRefererForTunnel(header, "app.bobs-main-branch.public.example.com", "app.foocorp.localhost", "public.example.com", ".localhost")
+
+	if got := header.Get("Referer"); got != "https://app.slug.example.com/foo" {
+		t.Fatalf("expected Referer unchanged, got: %s", got)
+	}
+}
+
 func TestDerivePublicApex(t *testing.T) {
 	t.Parallel()
 

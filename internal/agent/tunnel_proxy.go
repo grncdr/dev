@@ -178,6 +178,7 @@ func HandleTunnelRequest(ctx context.Context, opts TunnelProxyOptions, tunnel Tu
 	if rewriteMode && hasPublicApex {
 		RewriteRequestCookieDomainForTunnel(outReq.Header, publicHost, resolvedLocalHost, publicApex, localApex)
 		RewriteRequestOriginForTunnel(outReq.Header, publicHost, resolvedLocalHost, publicApex, localApex)
+		RewriteRequestRefererForTunnel(outReq.Header, publicHost, resolvedLocalHost, publicApex, localApex)
 	}
 	if resolved.GatewayMode != "" {
 		outReq.Header.Set("Dev-Gateway-Mode", resolved.GatewayMode)
