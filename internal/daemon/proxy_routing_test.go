@@ -9,6 +9,7 @@ import (
 
 	"dev/internal/config"
 	"dev/internal/router"
+	"dev/internal/worktree"
 )
 
 func TestParseProxyHost(t *testing.T) {
@@ -50,15 +51,15 @@ func TestLocalProxyHostForTunnelRequest(t *testing.T) {
 		agents: seededAgentsForTunnels(map[string]*managedTunnel{
 			"xyzz": {
 				req: TunnelRequest{
-					Slug:  "feature-branch",
-					Label: "xyzz",
+					Identifier: worktree.Identifier{Slug: "feature-branch"},
+					Label:      "xyzz",
 				},
 				status: "connected",
 			},
 			"app": {
 				req: TunnelRequest{
-					Slug:  "app-slug",
-					Label: "app",
+					Identifier: worktree.Identifier{Slug: "app-slug"},
+					Label:      "app",
 				},
 				status: "connected",
 			},
@@ -87,7 +88,7 @@ func TestLocalProxyRouteForTunnelRequest_IncludesAuthCredentials(t *testing.T) {
 		agents: seededAgentsForTunnels(map[string]*managedTunnel{
 			"xyzz": {
 				req: TunnelRequest{
-					Slug:         "feature-branch",
+					Identifier:   worktree.Identifier{Slug: "feature-branch"},
 					Label:        "xyzz",
 					AuthUsername: "alice",
 					AuthPassword: "secret",
@@ -115,8 +116,8 @@ func TestLocalProxyRouteForTunnelRequest_DoesNotRewriteLocalApexHost(t *testing.
 		agents: seededAgentsForTunnels(map[string]*managedTunnel{
 			"some-other-worktree": {
 				req: TunnelRequest{
-					Slug:  "foocorp",
-					Label: "some-other-worktree",
+					Identifier: worktree.Identifier{Slug: "foocorp"},
+					Label:      "some-other-worktree",
 				},
 				status: "connected",
 			},
@@ -169,8 +170,8 @@ overrides = { main = "foocorp" }
 		agents: seededAgentsForTunnels(map[string]*managedTunnel{
 			"foocorp": {
 				req: TunnelRequest{
-					Slug:  "main",
-					Label: "foocorp",
+					Identifier: worktree.Identifier{Slug: "main"},
+					Label:      "foocorp",
 				},
 				status: "connected",
 			},
@@ -205,14 +206,14 @@ func TestLocalProxyHostForTarget_UsesTargetWorktreeDNSLabel(t *testing.T) {
 	mainKey := runtimeKeyForPath(repoMain)
 	featureKey := runtimeKeyForPath(repoFeature)
 	m.registerWorktreeLocked(mainKey, runtimeWorktree{
-		Slug:     "main",
-		Path:     repoMain,
-		DNSLabel: "main",
+		Identifier: worktree.Identifier{Slug: "main"},
+		Path:       repoMain,
+		DNSLabel:   "main",
 	})
 	m.registerWorktreeLocked(featureKey, runtimeWorktree{
-		Slug:     "my-feature",
-		Path:     repoFeature,
-		DNSLabel: "my-feature",
+		Identifier: worktree.Identifier{Slug: "my-feature"},
+		Path:       repoFeature,
+		DNSLabel:   "my-feature",
 	})
 
 	s := &Server{
@@ -439,10 +440,9 @@ proxy = { path = "/" }
 	runtimeKey := runtimeKeyForPath(dir)
 	mgr.mu.Lock()
 	mgr.registerWorktreeLocked(runtimeKey, runtimeWorktree{
-		Slug:     "main",
-		Project:  "foocorp",
-		Path:     dir,
-		DNSLabel: "main",
+		Identifier: worktree.Identifier{Project: "foocorp", Slug: "main"},
+		Path:       dir,
+		DNSLabel:   "main",
 	})
 	mgr.mu.Unlock()
 	s := &Server{manager: mgr}
@@ -504,8 +504,8 @@ port = "unix"
 	keyA := runtimeKeyForPath(repoA)
 	keyB := runtimeKeyForPath(repoB)
 	m.mu.Lock()
-	m.registerWorktreeLocked(keyA, runtimeWorktree{Slug: "main", Project: "org-repo-a", Path: repoA, DNSLabel: "www"})
-	m.registerWorktreeLocked(keyB, runtimeWorktree{Slug: "main", Project: "org-repo-b", Path: repoB, DNSLabel: "blog"})
+	m.registerWorktreeLocked(keyA, runtimeWorktree{Identifier: worktree.Identifier{Project: "org-repo-a", Slug: "main"}, Path: repoA, DNSLabel: "www"})
+	m.registerWorktreeLocked(keyB, runtimeWorktree{Identifier: worktree.Identifier{Project: "org-repo-b", Slug: "main"}, Path: repoB, DNSLabel: "blog"})
 	m.processes[keyA] = map[string]*processInfo{
 		"web": {
 			network: "tcp",
@@ -576,10 +576,9 @@ port = "unix"
 	runtimeKey := runtimeKeyForPath(repo)
 	mgr.mu.Lock()
 	mgr.registerWorktreeLocked(runtimeKey, runtimeWorktree{
-		Slug:     "primary",
-		Project:  "org-repo",
-		Path:     repo,
-		DNSLabel: "www.foocorp",
+		Identifier: worktree.Identifier{Project: "org-repo", Slug: "primary"},
+		Path:       repo,
+		DNSLabel:   "www.foocorp",
 	})
 	mgr.processes[runtimeKey] = map[string]*processInfo{
 		"web": {
@@ -664,16 +663,14 @@ port = "unix"
 	appKey := runtimeKeyForPath(appRepo)
 	mgr.mu.Lock()
 	mgr.registerWorktreeLocked(websiteKey, runtimeWorktree{
-		Slug:     "main",
-		Project:  "org-website",
-		Path:     websiteRepo,
-		DNSLabel: "www.foocorp",
+		Identifier: worktree.Identifier{Project: "org-website", Slug: "main"},
+		Path:       websiteRepo,
+		DNSLabel:   "www.foocorp",
 	})
 	mgr.registerWorktreeLocked(appKey, runtimeWorktree{
-		Slug:     "foocorp",
-		Project:  "org-app",
-		Path:     appRepo,
-		DNSLabel: "foocorp",
+		Identifier: worktree.Identifier{Project: "org-app", Slug: "foocorp"},
+		Path:       appRepo,
+		DNSLabel:   "foocorp",
 	})
 	mgr.processes[websiteKey] = map[string]*processInfo{
 		"web": {
@@ -781,16 +778,14 @@ port = "unix"
 	appKey := runtimeKeyForPath(appRepo)
 	mgr.mu.Lock()
 	mgr.registerWorktreeLocked(websiteKey, runtimeWorktree{
-		Slug:     "main",
-		Project:  "org-website",
-		Path:     websiteRepo,
-		DNSLabel: "www.foocorp",
+		Identifier: worktree.Identifier{Project: "org-website", Slug: "main"},
+		Path:       websiteRepo,
+		DNSLabel:   "www.foocorp",
 	})
 	mgr.registerWorktreeLocked(appKey, runtimeWorktree{
-		Slug:     "foocorp",
-		Project:  "org-app",
-		Path:     appRepo,
-		DNSLabel: "foocorp",
+		Identifier: worktree.Identifier{Project: "org-app", Slug: "foocorp"},
+		Path:       appRepo,
+		DNSLabel:   "foocorp",
 	})
 	mgr.processes[websiteKey] = map[string]*processInfo{
 		"web": {
@@ -904,16 +899,14 @@ port = "unix"
 	otherKey := runtimeKeyForPath(otherRepo)
 	mgr.mu.Lock()
 	mgr.registerWorktreeLocked(foocorpKey, runtimeWorktree{
-		Slug:     "main",
-		Project:  "org-foocorp",
-		Path:     foocorpRepo,
-		DNSLabel: "foocorp",
+		Identifier: worktree.Identifier{Project: "org-foocorp", Slug: "main"},
+		Path:       foocorpRepo,
+		DNSLabel:   "foocorp",
 	})
 	mgr.registerWorktreeLocked(otherKey, runtimeWorktree{
-		Slug:     "some-other-worktree",
-		Project:  "org-other",
-		Path:     otherRepo,
-		DNSLabel: "some-other-worktree",
+		Identifier: worktree.Identifier{Project: "org-other", Slug: "some-other-worktree"},
+		Path:       otherRepo,
+		DNSLabel:   "some-other-worktree",
 	})
 	mgr.processes[foocorpKey] = map[string]*processInfo{
 		"frontend": {
@@ -943,8 +936,8 @@ port = "unix"
 		agents: seededAgentsForTunnels(map[string]*managedTunnel{
 			"some-other-worktree": {
 				req: TunnelRequest{
-					Slug:  "foocorp",
-					Label: "some-other-worktree",
+					Identifier: worktree.Identifier{Slug: "foocorp"},
+					Label:      "some-other-worktree",
 				},
 				status: "connected",
 			},

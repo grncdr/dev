@@ -20,10 +20,8 @@ const (
 // Registration is a worktree entry persisted in the worktree registry file.
 // The registry tracks worktrees that have been explicitly added via "dev worktree add".
 type Registration struct {
-	// Project is the project name from the worktree's .dev.toml.
-	Project string `json:"project"`
-	// Slug is the worktree slug.
-	Slug string `json:"slug"`
+	// Identifier is the project:slug identity from the worktree's .dev.toml.
+	Identifier
 	// Path is the filesystem path of the worktree checkout.
 	Path string `json:"path"`
 	// MainPath is the path to the main worktree (set for non-main worktrees).
@@ -322,11 +320,10 @@ func flattenRegistryState(state *registryState, project string) []Registration {
 		}
 		for _, wt := range candidate.Worktrees {
 			entries = append(entries, Registration{
-				Project:  candidate.Name,
-				Slug:     wt.Slug,
-				Path:     wt.Path,
-				MainPath: candidate.MainPath,
-				Branch:   wt.Branch,
+				Identifier: Identifier{Project: candidate.Name, Slug: wt.Slug},
+				Path:       wt.Path,
+				MainPath:   candidate.MainPath,
+				Branch:     wt.Branch,
 			})
 		}
 	}

@@ -15,10 +15,9 @@ type HealthResponse struct {
 
 // WorktreeRequest is the JSON body for worktree and process start/stop/status endpoints.
 type WorktreeRequest struct {
-	// Slug identifies the worktree.
-	Slug string `json:"slug"`
-	// Project narrows resolution when multiple projects share a slug.
-	Project string `json:"project,omitempty"`
+	// Identifier is the project:slug worktree. Project narrows resolution when
+	// multiple projects share a slug.
+	worktree.Identifier
 	// Path is a directory hint for resolving the worktree on disk.
 	Path string `json:"path,omitempty"`
 	// Processes limits the operation to specific process names.
@@ -30,16 +29,15 @@ type WorktreeRequest struct {
 // TunnelRequest is the JSON body for tunnel open/close endpoints.
 // Fields map 1:1 to agent.TunnelSpec when the daemon opens a tunnel.
 type TunnelRequest struct {
-	// Slug identifies the worktree to tunnel.
-	Slug string `json:"slug,omitempty"`
+	// Identifier is the project:slug worktree to tunnel. A slug alone is not
+	// unique across projects, so tunnels are matched on the project:slug pair.
+	worktree.Identifier
 	// Path is a directory hint for resolving the worktree on disk.
 	Path string `json:"path,omitempty"`
 	// Label is the unique tunnel label registered with the gateway.
 	Label string `json:"label,omitempty"`
 	// GatewayURL is the gateway server URL to connect to.
 	GatewayURL string `json:"gateway_url,omitempty"`
-	// Project is the project name for gateway registration metadata.
-	Project string `json:"project,omitempty"`
 	// Name is a human-readable identifier sent to the gateway.
 	Name string `json:"name,omitempty"`
 	// AuthUsername is the HTTP basic auth username for access control.
@@ -48,22 +46,14 @@ type TunnelRequest struct {
 	AuthPassword string `json:"auth_password,omitempty"`
 }
 
-// Identity returns the fully-qualified worktree identity for this request. A
-// slug alone is not unique across projects, so tunnels are matched on the
-// project:slug pair.
-func (r TunnelRequest) Identity() worktree.ProjectSlug {
-	return worktree.ProjectSlug{Project: r.Project, Slug: r.Slug}
-}
-
 // TunnelStatus is the JSON representation of a tunnel's current state,
 // returned by the tunnels/status and tunnels/open endpoints.
 // It is the API projection of agent.TunnelStatus.
 type TunnelStatus struct {
-	Slug            string `json:"slug"`
+	worktree.Identifier
 	Label           string `json:"label"`
 	GatewayURL      string `json:"gateway_url"`
 	PublicHost      string `json:"public_host,omitempty"`
-	Project         string `json:"project,omitempty"`
 	Status          string `json:"status"`
 	LastError       string `json:"last_error,omitempty"`
 	RegisterStage   string `json:"register_stage,omitempty"`

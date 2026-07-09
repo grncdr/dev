@@ -19,6 +19,7 @@ import (
 	"dev/internal/gatewayproto"
 	"dev/internal/tunnelmux"
 	"dev/internal/utils"
+	"dev/internal/worktree"
 )
 
 // Agent maintains a persistent tunnel connection to a gateway server.
@@ -27,10 +28,8 @@ import (
 type Agent struct {
 	// GatewayURL is the base URL of the gateway to connect to (required).
 	GatewayURL string
-	// Project is the project name sent during registration.
-	Project string
-	// Slug is the worktree slug sent during registration.
-	Slug string
+	// Identifier is the project:slug worktree identity sent during registration.
+	worktree.Identifier
 	// Label is the unique tunnel label registered with the gateway (required).
 	Label string
 	// AgentID is a unique identifier for this agent instance.

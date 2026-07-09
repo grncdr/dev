@@ -21,10 +21,9 @@ func TestResolvePathFromProjectSlugUsesRegisteredEntry(t *testing.T) {
 
 	daemonCfg := loadDaemonConfigForTest(t, base)
 	if err := Register(daemonCfg, Registration{
-		Project:  "demo",
-		Slug:     "feature",
-		Path:     featurePath,
-		MainPath: mainPath,
+		Identifier: Identifier{Project: "demo", Slug: "feature"},
+		Path:       featurePath,
+		MainPath:   mainPath,
 	}); err != nil {
 		t.Fatalf("register feature: %v", err)
 	}
@@ -51,10 +50,9 @@ func TestResolvePathFromProjectSlugSupportsConfiguredMainSlug(t *testing.T) {
 
 	daemonCfg := loadDaemonConfigForTest(t, base)
 	if err := Register(daemonCfg, Registration{
-		Project:  "demo",
-		Slug:     "feature",
-		Path:     filepath.Join(base, "feature"),
-		MainPath: mainPath,
+		Identifier: Identifier{Project: "demo", Slug: "feature"},
+		Path:       filepath.Join(base, "feature"),
+		MainPath:   mainPath,
 	}); err != nil {
 		t.Fatalf("register feature: %v", err)
 	}

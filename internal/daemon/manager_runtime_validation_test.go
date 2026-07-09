@@ -1,6 +1,10 @@
 package daemon
 
-import "testing"
+import (
+	"testing"
+
+	"dev/internal/worktree"
+)
 
 func TestRegisterWorktreeLockedRejectsEmptySlug(t *testing.T) {
 	m := NewManager()
@@ -8,10 +12,9 @@ func TestRegisterWorktreeLockedRejectsEmptySlug(t *testing.T) {
 
 	m.mu.Lock()
 	m.registerWorktreeLocked(key, runtimeWorktree{
-		Slug:     "",
-		Project:  "demo",
-		Path:     key,
-		DNSLabel: "main",
+		Identifier: worktree.Identifier{Project: "demo", Slug: ""},
+		Path:       key,
+		DNSLabel:   "main",
 	})
 	m.mu.Unlock()
 
@@ -26,10 +29,9 @@ func TestRegisterWorktreeLockedRejectsEmptyPath(t *testing.T) {
 
 	m.mu.Lock()
 	m.registerWorktreeLocked(key, runtimeWorktree{
-		Slug:     "main",
-		Project:  "demo",
-		Path:     "",
-		DNSLabel: "main",
+		Identifier: worktree.Identifier{Project: "demo", Slug: "main"},
+		Path:       "",
+		DNSLabel:   "main",
 	})
 	m.mu.Unlock()
 

@@ -136,15 +136,15 @@ func runWorktreeRegister(opts *Options, targetArg string, out, errOut io.Writer)
 		return err
 	}
 
-	var target worktree.ProjectSlug
+	var target worktree.Identifier
 	if strings.TrimSpace(targetArg) == "" {
 		slug, err := worktree.NormalizeIdentifierSegment(filepath.Base(current.Path))
 		if err != nil {
 			return fmt.Errorf("resolve slug from current worktree path: %w", err)
 		}
-		target = worktree.ProjectSlug{Project: projectID, Slug: slug}
+		target = worktree.Identifier{Project: projectID, Slug: slug}
 	} else {
-		target, err = parseProjectSlugWithDefault(targetArg, projectID)
+		target, err = parseIdentifierWithDefault(targetArg, projectID)
 		if err != nil {
 			return err
 		}
@@ -161,11 +161,10 @@ func runWorktreeRegister(opts *Options, targetArg string, out, errOut io.Writer)
 	branch := worktree.BranchName(current.Branch)
 	hookEnv := lifecycleHookEnv(target.Project, target.Slug, current.Path, branch, "add", false, mainPath, proxyApexZone(daemonCfg))
 	if err := worktree.Register(daemonCfg, worktree.Registration{
-		Project:  target.Project,
-		Slug:     target.Slug,
-		Path:     current.Path,
-		MainPath: mainPath,
-		Branch:   branch,
+		Identifier: target,
+		Path:       current.Path,
+		MainPath:   mainPath,
+		Branch:     branch,
 	}); err != nil {
 		return err
 	}
@@ -195,7 +194,7 @@ func runWorktreeAdd(opts *Options, targetArg, branchArg string, out, errOut io.W
 	if err != nil {
 		return fmt.Errorf("resolve project identifier from repository path: %w", err)
 	}
-	target, err := parseProjectSlugWithDefault(targetArg, repoProject)
+	target, err := parseIdentifierWithDefault(targetArg, repoProject)
 	if err != nil {
 		return err
 	}
@@ -271,11 +270,10 @@ func runWorktreeAdd(opts *Options, targetArg, branchArg string, out, errOut io.W
 	}
 
 	if err := worktree.Register(daemonCfg, worktree.Registration{
-		Project:  target.Project,
-		Slug:     target.Slug,
-		Path:     targetPath,
-		MainPath: mainPath,
-		Branch:   branchName,
+		Identifier: target,
+		Path:       targetPath,
+		MainPath:   mainPath,
+		Branch:     branchName,
 	}); err != nil {
 		return fmt.Errorf("worktree created at %s, but %w", targetPath, err)
 	}
@@ -680,7 +678,7 @@ func resolveCleanupTarget(arg string, daemonCfg *config.DaemonConfig, cwd string
 	if err != nil {
 		return nil, err
 	}
-	parsed, err := parseProjectSlugWithDefault(arg, project)
+	parsed, err := parseIdentifierWithDefault(arg, project)
 	if err != nil {
 		return nil, err
 	}
@@ -735,12 +733,12 @@ func resolveCleanupTarget(arg string, daemonCfg *config.DaemonConfig, cwd string
 	}, nil
 }
 
-func parseProjectSlugWithDefault(arg, defaultProject string) (worktree.ProjectSlug, error) {
+func parseIdentifierWithDefault(arg, defaultProject string) (worktree.Identifier, error) {
 	trimmed := strings.TrimSpace(arg)
 	if strings.Contains(trimmed, ":") {
-		return worktree.ParseProjectSlug(trimmed)
+		return worktree.ParseIdentifier(trimmed)
 	}
-	return worktree.ParseProjectSlug(defaultProject + ":" + trimmed)
+	return worktree.ParseIdentifier(defaultProject + ":" + trimmed)
 }
 
 func resolveProjectFromCurrentDir(opts *Options) (string, error) {

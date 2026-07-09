@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"dev/internal/config"
+	"dev/internal/worktree"
 )
 
 func TestEnsureProcessForTargetWaitsForHTTPHealth(t *testing.T) {
@@ -142,10 +143,9 @@ path = "/"
 	slug := defaultSlugForRepo(t, repoDir)
 	s.manager.mu.Lock()
 	s.manager.registerWorktreeLocked(runtimeKeyForPath(repoDir), runtimeWorktree{
-		Slug:     slug,
-		Project:  "demo",
-		Path:     repoDir,
-		DNSLabel: slug,
+		Identifier: worktree.Identifier{Project: "demo", Slug: slug},
+		Path:       repoDir,
+		DNSLabel:   slug,
 	})
 	s.manager.mu.Unlock()
 	start := time.Now()

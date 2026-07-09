@@ -23,6 +23,7 @@ import (
 	"time"
 
 	agentpkg "dev/internal/agent"
+	"dev/internal/worktree"
 )
 
 type fakeDNSProvider struct {
@@ -276,8 +277,7 @@ func TestServer_ForwardsThroughAgentTunnel(t *testing.T) {
 		GatewayURL:   "http://" + srv.Addr(),
 		HandleStream: upstreamHandleStream(t, upstream.URL),
 		Label:        "alpha",
-		Project:      "Foo Corp",
-		Slug:         "main",
+		Identifier:   worktree.Identifier{Project: "Foo Corp", Slug: "main"},
 		AgentID:      "agent-1",
 	}
 	go func() {
@@ -339,8 +339,7 @@ func TestServer_ForwardsRedirectAndCookieHeadersWithoutFollowing(t *testing.T) {
 		GatewayURL:   "http://" + srv.Addr(),
 		HandleStream: upstreamHandleStream(t, upstream.URL),
 		Label:        "alpha",
-		Project:      "Foo Corp",
-		Slug:         "main",
+		Identifier:   worktree.Identifier{Project: "Foo Corp", Slug: "main"},
 		AgentID:      "agent-1",
 	}
 	go func() {
@@ -418,8 +417,7 @@ func TestServer_ForwardsConcurrentRequestsOverSingleTunnel(t *testing.T) {
 		GatewayURL:   "http://" + srv.Addr(),
 		HandleStream: upstreamHandleStream(t, upstream.URL),
 		Label:        "alpha",
-		Project:      "Foo Corp",
-		Slug:         "main",
+		Identifier:   worktree.Identifier{Project: "Foo Corp", Slug: "main"},
 		AgentID:      "agent-1",
 	}
 	go func() {
@@ -540,8 +538,7 @@ func TestServer_ForwardsWebsocketUpgradeOverTunnel(t *testing.T) {
 		GatewayURL:   "http://" + srv.Addr(),
 		HandleStream: upstreamHandleStream(t, upstream.URL),
 		Label:        "alpha",
-		Project:      "Foo Corp",
-		Slug:         "main",
+		Identifier:   worktree.Identifier{Project: "Foo Corp", Slug: "main"},
 		AgentID:      "agent-1",
 	}
 	go func() {
@@ -659,8 +656,7 @@ func TestServer_LogsPublicRequestMetadata(t *testing.T) {
 		GatewayURL:   "http://" + srv.Addr(),
 		HandleStream: upstreamHandleStream(t, upstream.URL),
 		Label:        "alpha",
-		Project:      "Foo Corp",
-		Slug:         "main",
+		Identifier:   worktree.Identifier{Project: "Foo Corp", Slug: "main"},
 		AgentID:      "agent-1",
 		Name:         "stephen",
 	}

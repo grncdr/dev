@@ -12,6 +12,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"dev/internal/worktree"
 )
 
 // Client talks to a running daemon over its unix socket.
@@ -123,7 +125,7 @@ func (c *Client) TunnelsStatus(ctx context.Context) (*TunnelsResponse, error) {
 
 func (c *Client) worktreeAction(ctx context.Context, path, slug, project, dirHint string) (*WorktreeStatus, error) {
 	var resp WorktreeStatus
-	req := WorktreeRequest{Slug: slug, Project: project}
+	req := WorktreeRequest{Identifier: worktree.Identifier{Project: project, Slug: slug}}
 	if dirHint != "" {
 		req.Path = dirHint
 	} else if cwd, err := os.Getwd(); err == nil {
@@ -137,7 +139,7 @@ func (c *Client) worktreeAction(ctx context.Context, path, slug, project, dirHin
 
 func (c *Client) processAction(ctx context.Context, path, slug, project, dirHint string, processes []string, all bool) (*WorktreeStatus, error) {
 	var resp WorktreeStatus
-	req := WorktreeRequest{Slug: slug, Project: project, Processes: processes, All: all}
+	req := WorktreeRequest{Identifier: worktree.Identifier{Project: project, Slug: slug}, Processes: processes, All: all}
 	if dirHint != "" {
 		req.Path = dirHint
 	} else if cwd, err := os.Getwd(); err == nil {

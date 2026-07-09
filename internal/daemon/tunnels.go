@@ -51,13 +51,13 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 		}
 		for _, status := range conn.Statuses() {
 			if status.Label == req.Label {
-				if !status.Identity().Equal(req.Identity()) {
-					return nil, fmt.Errorf("label %s already in use by %s (gateway %s)", req.Label, status.Identity(), url)
+				if !status.Identifier.Equal(req.Identifier) {
+					return nil, fmt.Errorf("label %s already in use by %s (gateway %s)", req.Label, status.Identifier, url)
 				}
 				out := toDaemonTunnelStatus(status)
 				return &out, nil
 			}
-			if status.Identity().Equal(req.Identity()) {
+			if status.Identifier.Equal(req.Identifier) {
 				return nil, fmt.Errorf("slug %s already has label %s (gateway %s)", req.Slug, status.Label, url)
 			}
 		}
@@ -68,10 +68,9 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 		s.agents[gatewayURL] = conn
 	}
 	opened, err := conn.Open(agent.TunnelSpec{
-		Slug:          req.Slug,
+		Identifier:    req.Identifier,
 		Label:         req.Label,
 		GatewayURL:    req.GatewayURL,
-		Project:       req.Project,
 		Name:          req.Name,
 		LocalBaseHost: localBaseHost,
 		AuthUsername:  req.AuthUsername,
@@ -102,7 +101,7 @@ func (s *Server) closeTunnel(req TunnelRequest) (*TunnelStatus, error) {
 		if conn == nil {
 			continue
 		}
-		status, err := conn.Close(label, req.Identity())
+		status, err := conn.Close(label, req.Identifier)
 		if err != nil {
 			continue
 		}
@@ -157,10 +156,9 @@ func (s *Server) runningTunnelsForResume() []TunnelRequest {
 			// openTunnel has already persisted the project via EnsureProjectStateForDir,
 			// so resolution on resume works without the dir hint.
 			req := TunnelRequest{
-				Slug:         spec.Slug,
+				Identifier:   spec.Identifier,
 				Label:        spec.Label,
 				GatewayURL:   spec.GatewayURL,
-				Project:      spec.Project,
 				Name:         spec.Name,
 				AuthUsername: spec.AuthUsername,
 				AuthPassword: spec.AuthPassword,
@@ -195,11 +193,10 @@ func (s *Server) resolveTunnelLocalBaseHost(slug, dirHint string) (string, error
 
 func toDaemonTunnelStatus(status agent.TunnelStatus) TunnelStatus {
 	return TunnelStatus{
-		Slug:            status.Slug,
+		Identifier:      status.Identifier,
 		Label:           status.Label,
 		GatewayURL:      status.GatewayURL,
 		PublicHost:      status.PublicHost,
-		Project:         status.Project,
 		Status:          status.Status,
 		LastError:       status.LastError,
 		RegisterStage:   status.RegisterStage,

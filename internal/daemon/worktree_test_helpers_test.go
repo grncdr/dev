@@ -31,10 +31,9 @@ func defaultSlugForRepo(t *testing.T, repoDir string) string {
 func registerWorktreeForTest(t *testing.T, daemonCfg *config.DaemonConfig, project, slug, path, mainPath string) {
 	t.Helper()
 	if err := worktree.Register(daemonCfg, worktree.Registration{
-		Project:  project,
-		Slug:     slug,
-		Path:     path,
-		MainPath: mainPath,
+		Identifier: worktree.Identifier{Project: project, Slug: slug},
+		Path:       path,
+		MainPath:   mainPath,
 	}); err != nil {
 		t.Fatalf("register worktree: %v", err)
 	}
@@ -56,11 +55,10 @@ func seededAgentsForTunnels(tunnels map[string]*managedTunnel) map[string]*agent
 			agents[gatewayURL] = conn
 		}
 		conn.SeedTunnel(agent.TunnelStatus{
-			Slug:            mt.req.Slug,
+			Identifier:      mt.req.Identifier,
 			Label:           mt.req.Label,
 			GatewayURL:      gatewayURL,
 			PublicHost:      mt.publicHost,
-			Project:         mt.req.Project,
 			Status:          mt.status,
 			LastError:       mt.lastError,
 			RegisterStage:   mt.registerStage,

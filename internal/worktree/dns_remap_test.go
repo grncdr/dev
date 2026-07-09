@@ -87,10 +87,9 @@ func TestResolveSlugForDNSLabel_RegisteredSlashSlug(t *testing.T) {
 		Project: config.ProjectBlock{Name: "foocorp"},
 	}
 	if err := Register(daemonCfg, Registration{
-		Project:  "foocorp",
-		Slug:     "feature/cloud-mailings",
-		Path:     filepath.Join(stateDir, "feature-cloud-mailings"),
-		MainPath: filepath.Join(stateDir, "main"),
+		Identifier: Identifier{Project: "foocorp", Slug: "feature/cloud-mailings"},
+		Path:       filepath.Join(stateDir, "feature-cloud-mailings"),
+		MainPath:   filepath.Join(stateDir, "main"),
 	}); err != nil {
 		t.Fatalf("register worktree: %v", err)
 	}

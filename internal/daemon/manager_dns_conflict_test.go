@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"dev/internal/config"
+	"dev/internal/worktree"
 )
 
 const longRunningTestCommand = "sleep 300"
@@ -61,10 +62,9 @@ port = 4000
 		},
 	}
 	m.registerWorktreeLocked(keyA, runtimeWorktree{
-		Slug:     "main",
-		Project:  "org-repo-a",
-		Path:     repoA,
-		DNSLabel: "main",
+		Identifier: worktree.Identifier{Project: "org-repo-a", Slug: "main"},
+		Path:       repoA,
+		DNSLabel:   "main",
 	})
 
 	conflicts := m.localDNSHostConflictsLocked(runtimeKeyForPath(repoB), cfgB, "main", map[string]bool{"web": true}, ".localhost")
@@ -130,10 +130,9 @@ port = 4000
 		},
 	}
 	m.registerWorktreeLocked(keyA, runtimeWorktree{
-		Slug:     "main",
-		Project:  "org-repo-a",
-		Path:     repoA,
-		DNSLabel: "main",
+		Identifier: worktree.Identifier{Project: "org-repo-a", Slug: "main"},
+		Path:       repoA,
+		DNSLabel:   "main",
 	})
 
 	conflicts := m.localDNSHostConflictsLocked(runtimeKeyForPath(repoB), cfgB, "main", map[string]bool{"web": true}, ".localhost")

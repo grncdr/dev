@@ -13,19 +13,19 @@ import (
 // distinct tunnel that must be allowed.
 func TestConnectionConflictForSpec(t *testing.T) {
 	conn := NewConnection("https://gw.example.dev", "")
-	conn.SeedTunnel(TunnelStatus{Project: "cabinet", Slug: "main", Label: "shared", Status: "connected"})
+	conn.SeedTunnel(TunnelStatus{Identifier: worktree.Identifier{Project: "cabinet", Slug: "main"}, Label: "shared", Status: "connected"})
 
 	conn.mu.Lock()
 	defer conn.mu.Unlock()
 
 	// Different worktree wants the same label -> hard error.
-	if _, err := conn.conflictForSpecLocked(TunnelSpec{Project: "drawer", Slug: "main", Label: "shared"}); err == nil ||
+	if _, err := conn.conflictForSpecLocked(TunnelSpec{Identifier: worktree.Identifier{Project: "drawer", Slug: "main"}, Label: "shared"}); err == nil ||
 		!strings.Contains(err.Error(), "already in use by cabinet:main") {
 		t.Fatalf("expected label-in-use error, got %v", err)
 	}
 
 	// Same worktree, same label -> idempotent.
-	existing, err := conn.conflictForSpecLocked(TunnelSpec{Project: "cabinet", Slug: "main", Label: "shared"})
+	existing, err := conn.conflictForSpecLocked(TunnelSpec{Identifier: worktree.Identifier{Project: "cabinet", Slug: "main"}, Label: "shared"})
 	if err != nil {
 		t.Fatalf("idempotent re-share errored: %v", err)
 	}
@@ -34,13 +34,13 @@ func TestConnectionConflictForSpec(t *testing.T) {
 	}
 
 	// Same worktree, different label -> already-shared error.
-	if _, err := conn.conflictForSpecLocked(TunnelSpec{Project: "cabinet", Slug: "main", Label: "other"}); err == nil ||
+	if _, err := conn.conflictForSpecLocked(TunnelSpec{Identifier: worktree.Identifier{Project: "cabinet", Slug: "main"}, Label: "other"}); err == nil ||
 		!strings.Contains(err.Error(), "already has label shared") {
 		t.Fatalf("expected already-shared error, got %v", err)
 	}
 
 	// Different worktree, different label -> no conflict.
-	if existing, err := conn.conflictForSpecLocked(TunnelSpec{Project: "drawer", Slug: "main", Label: "drawer"}); err != nil || existing != nil {
+	if existing, err := conn.conflictForSpecLocked(TunnelSpec{Identifier: worktree.Identifier{Project: "drawer", Slug: "main"}, Label: "drawer"}); err != nil || existing != nil {
 		t.Fatalf("expected no conflict for distinct worktree, got existing=%+v err=%v", existing, err)
 	}
 }
@@ -49,29 +49,29 @@ func TestConnectionConflictForSpec(t *testing.T) {
 // and must be addressable independently by their project:slug identity.
 func TestConnectionDisambiguatesSameSlugAcrossProjects(t *testing.T) {
 	conn := NewConnection("https://gw.example.dev", "")
-	conn.SeedTunnel(TunnelStatus{Project: "cabinet", Slug: "main", Label: "cabinet", Status: "connected"})
-	conn.SeedTunnel(TunnelStatus{Project: "drawer", Slug: "main", Label: "drawer", Status: "connected"})
+	conn.SeedTunnel(TunnelStatus{Identifier: worktree.Identifier{Project: "cabinet", Slug: "main"}, Label: "cabinet", Status: "connected"})
+	conn.SeedTunnel(TunnelStatus{Identifier: worktree.Identifier{Project: "drawer", Slug: "main"}, Label: "drawer", Status: "connected"})
 
-	drawer := conn.Status(worktree.ProjectSlug{Project: "drawer", Slug: "main"})
+	drawer := conn.Status(worktree.Identifier{Project: "drawer", Slug: "main"})
 	if drawer == nil || drawer.Label != "drawer" {
 		t.Fatalf("expected drawer tunnel, got %+v", drawer)
 	}
-	cabinet := conn.Status(worktree.ProjectSlug{Project: "cabinet", Slug: "main"})
+	cabinet := conn.Status(worktree.Identifier{Project: "cabinet", Slug: "main"})
 	if cabinet == nil || cabinet.Label != "cabinet" {
 		t.Fatalf("expected cabinet tunnel, got %+v", cabinet)
 	}
 
-	closed, err := conn.Close("", worktree.ProjectSlug{Project: "cabinet", Slug: "main"})
+	closed, err := conn.Close("", worktree.Identifier{Project: "cabinet", Slug: "main"})
 	if err != nil {
 		t.Fatalf("close cabinet: %v", err)
 	}
 	if closed.Label != "cabinet" {
 		t.Fatalf("closed wrong tunnel: %+v", closed)
 	}
-	if remaining := conn.Status(worktree.ProjectSlug{Project: "drawer", Slug: "main"}); remaining == nil {
+	if remaining := conn.Status(worktree.Identifier{Project: "drawer", Slug: "main"}); remaining == nil {
 		t.Fatalf("drawer tunnel should still be open after closing cabinet")
 	}
-	if gone := conn.Status(worktree.ProjectSlug{Project: "cabinet", Slug: "main"}); gone != nil {
+	if gone := conn.Status(worktree.Identifier{Project: "cabinet", Slug: "main"}); gone != nil {
 		t.Fatalf("cabinet tunnel should be closed, got %+v", gone)
 	}
 }

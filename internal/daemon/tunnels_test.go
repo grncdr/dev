@@ -18,6 +18,7 @@ import (
 	"dev/internal/agent"
 	"dev/internal/config"
 	"dev/internal/gateway"
+	"dev/internal/worktree"
 )
 
 func TestTunnelLifecycle(t *testing.T) {
@@ -107,11 +108,10 @@ url = "http://unused.local"
 	defer cancel()
 	slug := defaultSlugForRepo(t, repoDir)
 	_, err = client.TunnelOpen(ctx, TunnelRequest{
-		Slug:       slug,
+		Identifier: worktree.Identifier{Project: "demo", Slug: slug},
 		Path:       repoDir,
 		Label:      slug,
 		GatewayURL: "http://" + gw.Addr(),
-		Project:    "demo",
 	})
 	if err != nil {
 		t.Fatalf("tunnel open: %v", err)
@@ -135,7 +135,7 @@ url = "http://unused.local"
 		}
 	}
 
-	if _, err := client.TunnelClose(ctx, TunnelRequest{Slug: slug, Project: "demo"}); err != nil {
+	if _, err := client.TunnelClose(ctx, TunnelRequest{Identifier: worktree.Identifier{Project: "demo", Slug: slug}}); err != nil {
 		t.Fatalf("tunnel close: %v", err)
 	}
 	after, err := client.TunnelsStatus(ctx)
@@ -164,7 +164,7 @@ func TestOpenTunnel_RejectsIncompleteAuth(t *testing.T) {
 		daemonConfig: &config.DaemonConfig{},
 	}
 	_, err := s.openTunnel(TunnelRequest{
-		Slug:         "main",
+		Identifier:   worktree.Identifier{Slug: "main"},
 		Label:        "alpha",
 		GatewayURL:   "https://gw.example.test",
 		AuthUsername: "alice",
@@ -199,8 +199,7 @@ proxy = { path = "/" }
 
 	mgr := NewManager()
 	mgr.registerWorktreeLocked(runtimeKeyForPath(repoDir), runtimeWorktree{
-		Slug:          "main",
-		Project:       projectName,
+		Identifier:    worktree.Identifier{Project: projectName, Slug: "main"},
 		Path:          repoDir,
 		DNSLabel:      "main",
 		GatewayExpose: gatewayExposeRulesForConfig(cfg),
@@ -214,8 +213,7 @@ proxy = { path = "/" }
 	req := httptest.NewRequest(http.MethodGet, "https://main.public.example.dev/", nil)
 	req.Host = "main.public.example.dev"
 	tunnel := agent.TunnelStatus{
-		Slug:          "main",
-		Project:       projectName,
+		Identifier:    worktree.Identifier{Project: projectName, Slug: "main"},
 		Label:         "main",
 		LocalBaseHost: "main.localhost",
 		AuthUsername:  "alice",
@@ -338,11 +336,10 @@ url = "http://unused.local"
 	defer cancel()
 	slug := defaultSlugForRepo(t, repoDir)
 	if _, err := client.TunnelOpen(ctx, TunnelRequest{
-		Slug:       slug,
+		Identifier: worktree.Identifier{Project: "demo", Slug: slug},
 		Path:       repoDir,
 		Label:      slug,
 		GatewayURL: "http://" + gw.Addr(),
-		Project:    "demo",
 	}); err != nil {
 		t.Fatalf("tunnel open: %v", err)
 	}

@@ -2,12 +2,12 @@ package worktree
 
 import "testing"
 
-func TestParseProjectSlug(t *testing.T) {
+func TestParseIdentifier(t *testing.T) {
 	t.Parallel()
 
-	target, err := ParseProjectSlug("Foo_Bar:Feature/Branch-1")
+	target, err := ParseIdentifier("Foo_Bar:Feature/Branch-1")
 	if err != nil {
-		t.Fatalf("ParseProjectSlug: %v", err)
+		t.Fatalf("ParseIdentifier: %v", err)
 	}
 	if target.Project != "foo_bar" {
 		t.Fatalf("expected normalized project, got %q", target.Project)
@@ -17,12 +17,12 @@ func TestParseProjectSlug(t *testing.T) {
 	}
 }
 
-func TestParseProjectSlug_ProjectWithSlash(t *testing.T) {
+func TestParseIdentifier_ProjectWithSlash(t *testing.T) {
 	t.Parallel()
 
-	target, err := ParseProjectSlug("FooCorp/Monorepo:Feature/Branch-1")
+	target, err := ParseIdentifier("FooCorp/Monorepo:Feature/Branch-1")
 	if err != nil {
-		t.Fatalf("ParseProjectSlug: %v", err)
+		t.Fatalf("ParseIdentifier: %v", err)
 	}
 	if target.Project != "foocorp/monorepo" {
 		t.Fatalf("expected normalized project, got %q", target.Project)
@@ -32,7 +32,7 @@ func TestParseProjectSlug_ProjectWithSlash(t *testing.T) {
 	}
 }
 
-func TestParseProjectSlugInvalid(t *testing.T) {
+func TestParseIdentifierInvalid(t *testing.T) {
 	t.Parallel()
 
 	cases := []string{
@@ -45,25 +45,25 @@ func TestParseProjectSlugInvalid(t *testing.T) {
 		"ok:white space",
 	}
 	for _, tc := range cases {
-		if _, err := ParseProjectSlug(tc); err == nil {
+		if _, err := ParseIdentifier(tc); err == nil {
 			t.Fatalf("expected error for %q", tc)
 		}
 	}
 }
 
-func TestProjectSlugEqual(t *testing.T) {
+func TestIdentifierEqual(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
 		name string
-		a    ProjectSlug
-		b    ProjectSlug
+		a    Identifier
+		b    Identifier
 		want bool
 	}{
-		{"identical", ProjectSlug{"cabinet", "main"}, ProjectSlug{"cabinet", "main"}, true},
-		{"case insensitive", ProjectSlug{"Cabinet", "Main"}, ProjectSlug{"cabinet", "main"}, true},
-		{"same slug different project", ProjectSlug{"cabinet", "main"}, ProjectSlug{"drawer", "main"}, false},
-		{"same project different slug", ProjectSlug{"cabinet", "main"}, ProjectSlug{"cabinet", "feature"}, false},
+		{"identical", Identifier{"cabinet", "main"}, Identifier{"cabinet", "main"}, true},
+		{"case insensitive", Identifier{"Cabinet", "Main"}, Identifier{"cabinet", "main"}, true},
+		{"same slug different project", Identifier{"cabinet", "main"}, Identifier{"drawer", "main"}, false},
+		{"same project different slug", Identifier{"cabinet", "main"}, Identifier{"cabinet", "feature"}, false},
 	}
 	for _, tc := range cases {
 		if got := tc.a.Equal(tc.b); got != tc.want {

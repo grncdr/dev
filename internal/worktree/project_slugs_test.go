@@ -22,10 +22,9 @@ func TestListProjectSlugsFromRegistryIncludesConfiguredMainSlug(t *testing.T) {
 
 	daemonCfg := loadDaemonConfigForTest(t, base)
 	if err := Register(daemonCfg, Registration{
-		Project:  "demo",
-		Slug:     "feature",
-		Path:     featurePath,
-		MainPath: mainPath,
+		Identifier: Identifier{Project: "demo", Slug: "feature"},
+		Path:       featurePath,
+		MainPath:   mainPath,
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}

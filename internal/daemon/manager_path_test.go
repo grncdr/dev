@@ -107,9 +107,8 @@ func TestLookupRuntimeWorktreePathUsesRuntimeState(t *testing.T) {
 	}
 	path := filepath.Join(t.TempDir(), "repo")
 	m.registerWorktreeLocked(runtimeKeyForPath(path), runtimeWorktree{
-		Slug:    "main",
-		Project: projectID,
-		Path:    path,
+		Identifier: worktree.Identifier{Project: projectID, Slug: "main"},
+		Path:       path,
 	})
 
 	got, ok := m.lookupRuntimeWorktreePath(projectName, "main")
@@ -130,9 +129,8 @@ func TestResolveWorktreePathPrefersRuntimeStateBeforePersistedState(t *testing.T
 	}
 	path := filepath.Join(t.TempDir(), "repo")
 	m.registerWorktreeLocked(runtimeKeyForPath(path), runtimeWorktree{
-		Slug:    "main",
-		Project: projectID,
-		Path:    path,
+		Identifier: worktree.Identifier{Project: projectID, Slug: "main"},
+		Path:       path,
 	})
 
 	got, err := m.resolveWorktreePath("main", projectName, "")

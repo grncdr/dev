@@ -200,11 +200,10 @@ func filterWorktreeStatus(status *daemon.WorktreeStatus, target *processTarget) 
 		GatewayStatus: status.Routing.GatewayStatus,
 	}
 	return &daemon.WorktreeStatus{
-		Project:   status.Project,
-		Slug:      status.Slug,
-		Path:      status.Path,
-		Processes: filtered,
-		Routing:   filteredRouting,
+		Identifier: status.Identifier,
+		Path:       status.Path,
+		Processes:  filtered,
+		Routing:    filteredRouting,
 	}
 }
 
@@ -523,7 +522,7 @@ func resolveSlug(opts *Options, arg string) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			target, err := parseProjectSlugWithDefault(arg, currentProject)
+			target, err := parseIdentifierWithDefault(arg, currentProject)
 			if err != nil {
 				return "", err
 			}

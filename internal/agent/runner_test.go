@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"dev/internal/worktree"
 )
 
 func TestDoUpstreamRequest_DoesNotFollowRedirects(t *testing.T) {
@@ -83,8 +85,7 @@ func TestAgentRegister_StreamsProgressAndExtendsClientTimeout(t *testing.T) {
 	agent := &Agent{
 		GatewayURL: gateway.URL,
 		Label:      "alpha",
-		Project:    "demo",
-		Slug:       "main",
+		Identifier: worktree.Identifier{Project: "demo", Slug: "main"},
 		GatewayClient: &http.Client{
 			Timeout: 1 * time.Millisecond,
 		},

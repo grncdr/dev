@@ -15,14 +15,13 @@ import (
 
 // TunnelSpec describes the parameters needed to open a tunnel through a gateway.
 type TunnelSpec struct {
-	// Slug is the worktree slug being tunneled.
-	Slug string
+	// Identifier is the project:slug worktree being tunneled. A slug alone is
+	// not unique across projects, so tunnels are matched on the project:slug pair.
+	worktree.Identifier
 	// Label is the unique tunnel label registered with the gateway.
 	Label string
 	// GatewayURL is the gateway server URL to connect to.
 	GatewayURL string
-	// Project is the project name for gateway registration.
-	Project string
 	// Name is a human-readable identifier sent to the gateway.
 	Name string
 	// LocalBaseHost is the local proxy hostname used to translate public
@@ -35,25 +34,16 @@ type TunnelSpec struct {
 	AuthPassword string
 }
 
-// Identity returns the fully-qualified worktree identity for this tunnel. A
-// slug alone is not unique across projects, so tunnels are matched on the
-// project:slug pair.
-func (s TunnelSpec) Identity() worktree.ProjectSlug {
-	return worktree.ProjectSlug{Project: s.Project, Slug: s.Slug}
-}
-
 // TunnelStatus is the live state of a tunnel within a Connection.
 type TunnelStatus struct {
-	// Slug is the worktree slug being tunneled.
-	Slug string
+	// Identifier is the project:slug worktree being tunneled.
+	worktree.Identifier
 	// Label is the tunnel label registered with the gateway.
 	Label string
 	// GatewayURL is the gateway server this tunnel connects to.
 	GatewayURL string
 	// PublicHost is the gateway-assigned public hostname (set after registration).
 	PublicHost string
-	// Project is the project name.
-	Project string
 	// Status is the tunnel state: "connecting", "connected", "error", or "stopped".
 	Status string
 	// LastError holds the most recent connection or registration error.
@@ -68,11 +58,6 @@ type TunnelStatus struct {
 	AuthUsername string
 	// AuthPassword is the HTTP basic auth password for tunnel access control.
 	AuthPassword string
-}
-
-// Identity returns the fully-qualified worktree identity for this tunnel.
-func (s TunnelStatus) Identity() worktree.ProjectSlug {
-	return worktree.ProjectSlug{Project: s.Project, Slug: s.Slug}
 }
 
 type tunnelRuntime struct {
@@ -116,13 +101,13 @@ func (c *Connection) GatewayURL() string {
 func (c *Connection) conflictForSpecLocked(spec TunnelSpec) (*TunnelStatus, error) {
 	for label, running := range c.tunnels {
 		if label == spec.Label {
-			if !running.spec.Identity().Equal(spec.Identity()) {
-				return nil, fmt.Errorf("label %s already in use by %s", spec.Label, running.spec.Identity())
+			if !running.spec.Equal(spec.Identifier) {
+				return nil, fmt.Errorf("label %s already in use by %s", spec.Label, running.spec.Identifier)
 			}
 			status := c.toStatusLocked(running)
 			return &status, nil
 		}
-		if running.spec.Identity().Equal(spec.Identity()) {
+		if running.spec.Equal(spec.Identifier) {
 			return nil, fmt.Errorf("slug %s already has label %s", spec.Slug, label)
 		}
 	}
@@ -167,8 +152,7 @@ func (c *Connection) Open(spec TunnelSpec, requestHandler TunnelRequestHandler) 
 
 	runner := &Agent{
 		GatewayURL:    spec.GatewayURL,
-		Project:       spec.Project,
-		Slug:          spec.Slug,
+		Identifier:    spec.Identifier,
 		Label:         spec.Label,
 		AgentID:       fmt.Sprintf("dev-%d", time.Now().UnixNano()),
 		Name:          spec.Name,
@@ -261,10 +245,9 @@ func (c *Connection) SeedTunnel(status TunnelStatus) {
 	}
 	c.tunnels[label] = &tunnelRuntime{
 		spec: TunnelSpec{
-			Slug:          strings.TrimSpace(status.Slug),
+			Identifier:    worktree.Identifier{Project: strings.TrimSpace(status.Project), Slug: strings.TrimSpace(status.Slug)},
 			Label:         label,
 			GatewayURL:    gatewayURL,
-			Project:       strings.TrimSpace(status.Project),
 			LocalBaseHost: strings.TrimSpace(strings.ToLower(status.LocalBaseHost)),
 			AuthUsername:  strings.TrimSpace(status.AuthUsername),
 			AuthPassword:  status.AuthPassword,
@@ -278,7 +261,7 @@ func (c *Connection) SeedTunnel(status TunnelStatus) {
 	}
 }
 
-func (c *Connection) Close(label string, target worktree.ProjectSlug) (TunnelStatus, error) {
+func (c *Connection) Close(label string, target worktree.Identifier) (TunnelStatus, error) {
 	label = strings.TrimSpace(label)
 	if label == "" && strings.TrimSpace(target.Slug) == "" {
 		return TunnelStatus{}, errors.New("label or slug is required")
@@ -291,7 +274,7 @@ func (c *Connection) Close(label string, target worktree.ProjectSlug) (TunnelSta
 	}
 	if label == "" {
 		for key, rt := range c.tunnels {
-			if target.Equal(rt.spec.Identity()) {
+			if target.Equal(rt.spec.Identifier) {
 				label = key
 				break
 			}
@@ -344,12 +327,12 @@ func (c *Connection) Statuses() []TunnelStatus {
 	return out
 }
 
-func (c *Connection) Status(target worktree.ProjectSlug) *TunnelStatus {
+func (c *Connection) Status(target worktree.Identifier) *TunnelStatus {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var selected *TunnelStatus
 	for _, rt := range c.tunnels {
-		if !target.Equal(rt.spec.Identity()) {
+		if !target.Equal(rt.spec.Identifier) {
 			continue
 		}
 		cur := c.toStatusLocked(rt)
@@ -382,11 +365,10 @@ func (c *Connection) toStatusLocked(rt *tunnelRuntime) TunnelStatus {
 		return TunnelStatus{}
 	}
 	return TunnelStatus{
-		Slug:            rt.spec.Slug,
+		Identifier:      rt.spec.Identifier,
 		Label:           rt.spec.Label,
 		GatewayURL:      rt.spec.GatewayURL,
 		PublicHost:      rt.publicHost,
-		Project:         rt.spec.Project,
 		Status:          rt.status,
 		LastError:       rt.lastError,
 		RegisterStage:   rt.registerStage,

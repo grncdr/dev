@@ -100,18 +100,16 @@ func TestResolveStopProcessTargetsProjectWildcardSlug(t *testing.T) {
 	}
 
 	if err := worktree.Register(daemonCfg, worktree.Registration{
-		Project:  "demo",
-		Slug:     "feature",
-		Path:     featurePath,
-		MainPath: mainPath,
+		Identifier: worktree.Identifier{Project: "demo", Slug: "feature"},
+		Path:       featurePath,
+		MainPath:   mainPath,
 	}); err != nil {
 		t.Fatalf("register feature: %v", err)
 	}
 	if err := worktree.Register(daemonCfg, worktree.Registration{
-		Project:  "demo",
-		Slug:     "bugfix",
-		Path:     bugfixPath,
-		MainPath: mainPath,
+		Identifier: worktree.Identifier{Project: "demo", Slug: "bugfix"},
+		Path:       bugfixPath,
+		MainPath:   mainPath,
 	}); err != nil {
 		t.Fatalf("register bugfix: %v", err)
 	}
@@ -165,10 +163,9 @@ func TestResolveStopProcessTargetsProjectWildcardSlugSpecificProcess(t *testing.
 		t.Fatalf("load daemon config: %v", err)
 	}
 	if err := worktree.Register(daemonCfg, worktree.Registration{
-		Project:  "demo",
-		Slug:     "feature",
-		Path:     featurePath,
-		MainPath: mainPath,
+		Identifier: worktree.Identifier{Project: "demo", Slug: "feature"},
+		Path:       featurePath,
+		MainPath:   mainPath,
 	}); err != nil {
 		t.Fatalf("register feature: %v", err)
 	}
@@ -296,9 +293,8 @@ func TestResolveSlugUsesRegisteredSlugForCurrentWorktree(t *testing.T) {
 		t.Fatalf("load daemon config: %v", err)
 	}
 	if err := worktree.Register(daemonCfg, worktree.Registration{
-		Project: "demo",
-		Slug:    "feature/something",
-		Path:    worktreePath,
+		Identifier: worktree.Identifier{Project: "demo", Slug: "feature/something"},
+		Path:       worktreePath,
 	}); err != nil {
 		t.Fatalf("register worktree in state: %v", err)
 	}

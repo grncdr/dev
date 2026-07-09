@@ -91,11 +91,10 @@ func runTunnelOpen(opts *Options, slugArg, labelArg, gatewayURLArg, authArg stri
 	}
 
 	req := daemon.TunnelRequest{
-		Slug:         slug,
+		Identifier:   worktree.Identifier{Project: cfg.Project.Name, Slug: slug},
 		Path:         path,
 		Label:        label,
 		GatewayURL:   gatewayURL,
-		Project:      cfg.Project.Name,
 		Name:         os.Getenv("USER"),
 		AuthUsername: authUsername,
 		AuthPassword: authPassword,

@@ -19,7 +19,7 @@ func (s *Server) routingStatusForWorktree(slug, project, dirHint string) Worktre
 
 	routeSlug := localProxyRouteSlug(slug, cfg)
 	localByProcess := localProxyRoutesByProcess(router.ParseMatchers(cfg), routeSlug, s.projectApexZone())
-	tunnel := s.tunnelStatusForWorktree(worktree.ProjectSlug{Project: project, Slug: slug})
+	tunnel := s.tunnelStatusForWorktree(worktree.Identifier{Project: project, Slug: slug})
 
 	gatewayURL := strings.TrimSpace(gatewayURLFromConfig(cfg))
 	gatewayStatus := ""
@@ -139,7 +139,7 @@ func gatewayRoutesByProcess(localByProcess map[string][]string, exposedByProcess
 	return out
 }
 
-func (s *Server) tunnelStatusForWorktree(target worktree.ProjectSlug) *TunnelStatus {
+func (s *Server) tunnelStatusForWorktree(target worktree.Identifier) *TunnelStatus {
 	s.tunnelMu.Lock()
 	defer s.tunnelMu.Unlock()
 	if len(s.agents) == 0 {
@@ -155,11 +155,10 @@ func (s *Server) tunnelStatusForWorktree(target worktree.ProjectSlug) *TunnelSta
 			continue
 		}
 		daemonCandidate := &TunnelStatus{
-			Slug:       candidate.Slug,
+			Identifier: candidate.Identifier,
 			Label:      candidate.Label,
 			GatewayURL: candidate.GatewayURL,
 			PublicHost: candidate.PublicHost,
-			Project:    candidate.Project,
 			Status:     candidate.Status,
 			LastError:  candidate.LastError,
 		}

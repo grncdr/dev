@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"dev/internal/config"
+	"dev/internal/worktree"
 )
 
 type webSocketEchoServer struct {
@@ -132,7 +133,7 @@ func TestHandleTunnelRequest_RewriteMode_RewritesSingletonPeerHostToMainLabel(t 
 	req.Host = "minio.my-feature.wip.example.com"
 
 	tunnel := TunnelStatus{
-		Slug:          "my-feature",
+		Identifier:    worktree.Identifier{Slug: "my-feature"},
 		Label:         "my-feature",
 		LocalBaseHost: "my-feature.localhost",
 	}
@@ -216,7 +217,7 @@ func TestHandleTunnelRequest_ReverseProxyMode_SetsGatewayModeHeader(t *testing.T
 	req.Host = "app.feature.public.example.com"
 
 	tunnel := TunnelStatus{
-		Slug:          "feature",
+		Identifier:    worktree.Identifier{Slug: "feature"},
 		Label:         "feature",
 		LocalBaseHost: "feature.localhost",
 	}
@@ -273,7 +274,7 @@ func TestHandleTunnelRequest_RedirectsBaseHostToDefaultSubdomain(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "https://my-feature.public.example.com/foo?bar=1", nil)
 	req.Host = "my-feature.public.example.com"
 
-	tunnel := TunnelStatus{Slug: "my-feature", Label: "my-feature", LocalBaseHost: "my-feature.localhost"}
+	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "my-feature"}, Label: "my-feature", LocalBaseHost: "my-feature.localhost"}
 
 	serverSide, clientSide := net.Pipe()
 	defer clientSide.Close()
@@ -335,7 +336,7 @@ func TestHandleTunnelRequest_ServesOptedOutServiceWithoutCredentials(t *testing.
 	req := httptest.NewRequest(http.MethodGet, "https://webhooks.feature.public.example.com/", nil)
 	req.Host = "webhooks.feature.public.example.com"
 	// No Authorization header, but the tunnel carries credentials.
-	tunnel := TunnelStatus{Slug: "feature", Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
+	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "feature"}, Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
 
 	serverSide, clientSide := net.Pipe()
 	defer clientSide.Close()
@@ -380,7 +381,7 @@ func TestHandleTunnelRequest_ProtectedSiblingRequiresAuthAndDoesNotStartProcess(
 
 	req := httptest.NewRequest(http.MethodGet, "https://admin.feature.public.example.com/", nil)
 	req.Host = "admin.feature.public.example.com"
-	tunnel := TunnelStatus{Slug: "feature", Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
+	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "feature"}, Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
 
 	serverSide, clientSide := net.Pipe()
 	defer clientSide.Close()
@@ -420,7 +421,7 @@ func TestHandleTunnelRequest_BaseHostRedirectRequiresAuthWhenDefaultProtected(t 
 
 	req := httptest.NewRequest(http.MethodGet, "https://feature.public.example.com/", nil)
 	req.Host = "feature.public.example.com"
-	tunnel := TunnelStatus{Slug: "feature", Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
+	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "feature"}, Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
 
 	serverSide, clientSide := net.Pipe()
 	defer clientSide.Close()
@@ -460,7 +461,7 @@ func TestHandleTunnelRequest_BaseHostRedirectSkipsAuthWhenDefaultPublic(t *testi
 
 	req := httptest.NewRequest(http.MethodGet, "https://feature.public.example.com/foo?bar=1", nil)
 	req.Host = "feature.public.example.com"
-	tunnel := TunnelStatus{Slug: "feature", Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
+	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "feature"}, Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
 
 	serverSide, clientSide := net.Pipe()
 	defer clientSide.Close()
@@ -508,7 +509,7 @@ func TestHandleTunnelRequest_WebSocketUpgradeOnExemptPathSkipsAuth(t *testing.T)
 	}
 
 	req := newWebSocketUpgradeRequest("https://rails.feature.public.example.com/cable/v1")
-	tunnel := TunnelStatus{Slug: "feature", Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
+	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "feature"}, Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
 
 	resp, _ := runTunnelUpgrade(t, opts, tunnel, req)
 	defer resp.Body.Close()
@@ -538,7 +539,7 @@ func TestHandleTunnelRequest_WebSocketUpgradeOnNonExemptPathRequiresAuth(t *test
 	}
 
 	req := newWebSocketUpgradeRequest("https://rails.feature.public.example.com/admin")
-	tunnel := TunnelStatus{Slug: "feature", Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
+	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "feature"}, Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
 
 	resp, _ := runTunnelUpgrade(t, opts, tunnel, req)
 	defer resp.Body.Close()
@@ -571,7 +572,7 @@ func TestHandleTunnelRequest_LogsUpgradeAndAuthDecisions(t *testing.T) {
 	}
 
 	req := newWebSocketUpgradeRequest("https://rails.feature.public.example.com/admin")
-	tunnel := TunnelStatus{Slug: "feature", Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
+	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "feature"}, Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
 
 	resp, _ := runTunnelUpgrade(t, opts, tunnel, req)
 	defer resp.Body.Close()
@@ -617,7 +618,7 @@ func TestHandleTunnelRequest_PlainHTTPOnWebSocketPathStillRequiresAuth(t *testin
 
 	req := httptest.NewRequest(http.MethodGet, "https://rails.feature.public.example.com/cable", nil)
 	req.Host = "rails.feature.public.example.com"
-	tunnel := TunnelStatus{Slug: "feature", Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
+	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "feature"}, Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
 
 	serverSide, clientSide := net.Pipe()
 	defer clientSide.Close()
@@ -661,7 +662,7 @@ func TestHandleTunnelRequest_AuthenticatedWebSocketUpgradeWithoutExemptList(t *t
 
 	req := newWebSocketUpgradeRequest("https://rails.feature.public.example.com/any/path")
 	req.SetBasicAuth("alice", "secret")
-	tunnel := TunnelStatus{Slug: "feature", Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
+	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "feature"}, Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
 
 	resp, _ := runTunnelUpgrade(t, opts, tunnel, req)
 	defer resp.Body.Close()
@@ -686,7 +687,7 @@ func TestHandleTunnelRequest_AnonymousWebSocketUpgradeOnUnmatchedHost(t *testing
 	}
 
 	req := newWebSocketUpgradeRequest("https://feature.public.example.com/anything")
-	tunnel := TunnelStatus{Slug: "feature", Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
+	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "feature"}, Label: "feature", LocalBaseHost: "feature.localhost", AuthUsername: "alice", AuthPassword: "secret"}
 
 	resp, _ := runTunnelUpgrade(t, opts, tunnel, req)
 	defer resp.Body.Close()
@@ -713,7 +714,7 @@ func TestHandleTunnelRequest_DoesNotRedirectWhenSubdomainPresent(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "https://missing.my-feature.public.example.com/", nil)
 	req.Host = "missing.my-feature.public.example.com"
 
-	tunnel := TunnelStatus{Slug: "my-feature", Label: "my-feature", LocalBaseHost: "my-feature.localhost"}
+	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "my-feature"}, Label: "my-feature", LocalBaseHost: "my-feature.localhost"}
 
 	serverSide, clientSide := net.Pipe()
 	defer clientSide.Close()

@@ -72,8 +72,7 @@ func NewManager() *Manager {
 }
 
 type runtimeWorktree struct {
-	Slug          string
-	Project       string
+	worktree.Identifier
 	Path          string
 	DNSLabel      string
 	GatewayExpose map[string]config.GatewayExposeRule
@@ -97,8 +96,7 @@ func (m *Manager) SetDaemonConfig(cfg *config.DaemonConfig) {
 
 // WorktreeStatus is the JSON response for worktree start/stop/status operations.
 type WorktreeStatus struct {
-	Project       string          `json:"project,omitempty"`
-	Slug          string          `json:"slug"`
+	worktree.Identifier
 	Path          string          `json:"path,omitempty"`
 	DaemonVersion string          `json:"daemon_version,omitempty"`
 	Processes     []ProcessStatus `json:"processes"`
@@ -261,8 +259,7 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 		m.idleFollowStopped[runtimeKey] = make(map[string]bool)
 	}
 	m.registerWorktreeLocked(runtimeKey, runtimeWorktree{
-		Slug:          slug,
-		Project:       projectID,
+		Identifier:    worktree.Identifier{Project: projectID, Slug: slug},
 		Path:          path,
 		DNSLabel:      dnsLabel,
 		GatewayExpose: gatewayExposeRulesForConfig(cfg),
@@ -479,7 +476,7 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 		return nil, err
 	}
 
-	return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses, DaemonVersion: version.String()}, nil
+	return &WorktreeStatus{Identifier: worktree.Identifier{Project: projectID, Slug: slug}, Path: path, Processes: statuses, DaemonVersion: version.String()}, nil
 }
 
 func (m *Manager) resolveWorktreePath(slug, project, dirHint string) (string, error) {
@@ -588,9 +585,8 @@ func (m *Manager) rebuildRouterLocked() {
 			continue
 		}
 		wt := runtimeWorktree{
-			Slug:    entry.Slug,
-			Project: entry.Project,
-			Path:    entry.Path,
+			Identifier: entry.Identifier,
+			Path:       entry.Path,
 		}
 		if cfg, _, err := config.LoadProjectConfig(filepath.Join(entry.Path, config.DefaultProjectConfig)); err == nil {
 			wt.GatewayExpose = gatewayExposeRulesForConfig(cfg)
@@ -1129,8 +1125,7 @@ func (m *Manager) stopWorktreeFromRef(slug, project, dirHint string, processes [
 	dnsLabel := worktree.ProxyDNSLabelForSlug(cfg, slug)
 	m.mu.Lock()
 	m.registerWorktreeLocked(runtimeKey, runtimeWorktree{
-		Slug:          slug,
-		Project:       projectID,
+		Identifier:    worktree.Identifier{Project: projectID, Slug: slug},
 		Path:          path,
 		DNSLabel:      dnsLabel,
 		GatewayExpose: gatewayExposeRulesForConfig(cfg),
@@ -1143,7 +1138,7 @@ func (m *Manager) stopWorktreeFromRef(slug, project, dirHint string, processes [
 
 	statuses := []ProcessStatus{}
 	if !ok {
-		return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses, DaemonVersion: version.String()}, nil
+		return &WorktreeStatus{Identifier: worktree.Identifier{Project: projectID, Slug: slug}, Path: path, Processes: statuses, DaemonVersion: version.String()}, nil
 	}
 
 	selected := selectProcesses(cfg.Processes, processes, all)
@@ -1199,7 +1194,7 @@ func (m *Manager) stopWorktreeFromRef(slug, project, dirHint string, processes [
 		return nil, err
 	}
 
-	return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses, DaemonVersion: version.String()}, nil
+	return &WorktreeStatus{Identifier: worktree.Identifier{Project: projectID, Slug: slug}, Path: path, Processes: statuses, DaemonVersion: version.String()}, nil
 }
 
 func (m *Manager) StatusWorktree(slug string) (*WorktreeStatus, error) {
@@ -1233,8 +1228,7 @@ func (m *Manager) StatusWorktreeFromRef(slug, project, dirHint string) (*Worktre
 	dnsLabel := worktree.ProxyDNSLabelForSlug(cfg, slug)
 	m.mu.Lock()
 	m.registerWorktreeLocked(runtimeKey, runtimeWorktree{
-		Slug:          slug,
-		Project:       projectID,
+		Identifier:    worktree.Identifier{Project: projectID, Slug: slug},
 		Path:          path,
 		DNSLabel:      dnsLabel,
 		GatewayExpose: gatewayExposeRulesForConfig(cfg),
@@ -1257,7 +1251,7 @@ func (m *Manager) StatusWorktreeFromRef(slug, project, dirHint string) (*Worktre
 
 	statuses := []ProcessStatus{}
 	if !ok {
-		return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses, DaemonVersion: version.String()}, nil
+		return &WorktreeStatus{Identifier: worktree.Identifier{Project: projectID, Slug: slug}, Path: path, Processes: statuses, DaemonVersion: version.String()}, nil
 	}
 
 	for _, e := range entries {
@@ -1275,7 +1269,7 @@ func (m *Manager) StatusWorktreeFromRef(slug, project, dirHint string) (*Worktre
 		statuses = append(statuses, ProcessStatus{Name: name, PID: pid, Status: status})
 	}
 
-	return &WorktreeStatus{Project: projectID, Slug: slug, Path: path, Processes: statuses, DaemonVersion: version.String()}, nil
+	return &WorktreeStatus{Identifier: worktree.Identifier{Project: projectID, Slug: slug}, Path: path, Processes: statuses, DaemonVersion: version.String()}, nil
 }
 
 func resolveWorktreeState(project, slug string) (string, error) {

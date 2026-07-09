@@ -16,45 +16,47 @@ var (
 	validSlugPattern2   = regexp.MustCompile(`^[a-z0-9/_-]+$`)
 )
 
-// ProjectSlug is a parsed "project:slug" identifier.
-type ProjectSlug struct {
-	Project string
-	Slug    string
+// Identifier is a parsed "project:slug" worktree identifier. It is the single
+// representation of worktree identity: other identifier structs (e.g.
+// ProcessIdentifier) embed it rather than repeating Project/Slug fields.
+type Identifier struct {
+	Project string `json:"project,omitempty"`
+	Slug    string `json:"slug,omitempty"`
 }
 
-func ParseProjectSlug(input string) (ProjectSlug, error) {
+func ParseIdentifier(input string) (Identifier, error) {
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" {
-		return ProjectSlug{}, fmt.Errorf("identifier is required")
+		return Identifier{}, fmt.Errorf("identifier is required")
 	}
 	parts := strings.SplitN(trimmed, ":", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return ProjectSlug{}, fmt.Errorf("invalid identifier %q: expected project:slug", input)
+		return Identifier{}, fmt.Errorf("invalid identifier %q: expected project:slug", input)
 	}
 	project, err := normalizeProject(parts[0])
 	if err != nil {
-		return ProjectSlug{}, err
+		return Identifier{}, err
 	}
 	slug, err := normalizeSlug(parts[1])
 	if err != nil {
-		return ProjectSlug{}, err
+		return Identifier{}, err
 	}
 	full := project + ":" + slug
 	if len(full) > maxIdentifierLen {
-		return ProjectSlug{}, fmt.Errorf("invalid identifier %q: max length is %d", input, maxIdentifierLen)
+		return Identifier{}, fmt.Errorf("invalid identifier %q: max length is %d", input, maxIdentifierLen)
 	}
-	return ProjectSlug{Project: project, Slug: slug}, nil
+	return Identifier{Project: project, Slug: slug}, nil
 }
 
 // String renders the identity as the canonical "project:slug" form.
-func (p ProjectSlug) String() string {
+func (p Identifier) String() string {
 	return p.Project + ":" + p.Slug
 }
 
 // Equal reports whether p and other identify the same worktree. A slug alone is
 // not unique across projects — every project has a "main" — so both segments
 // must match. Comparison is case-insensitive and whitespace-trimmed.
-func (p ProjectSlug) Equal(other ProjectSlug) bool {
+func (p Identifier) Equal(other Identifier) bool {
 	return strings.EqualFold(strings.TrimSpace(p.Project), strings.TrimSpace(other.Project)) &&
 		strings.EqualFold(strings.TrimSpace(p.Slug), strings.TrimSpace(other.Slug))
 }
@@ -68,11 +70,18 @@ func SlugDNSLabel(slug string) string {
 	return slug
 }
 
-// ProcessIdentifier represents a parsed process identifier.
+// ProcessIdentifier represents a parsed process identifier: a worktree
+// Identifier plus a process name.
 type ProcessIdentifier struct {
-	Project string
-	Slug    string
+	Identifier
 	Process string
+}
+
+// String renders the fully-qualified "project:slug:process" form, omitting any
+// empty leading segments. It shadows the embedded Identifier.String so the
+// process segment is not dropped.
+func (p ProcessIdentifier) String() string {
+	return FormatProcessIdentifier(p.Project, p.Slug, p.Process)
 }
 
 // FormatProcessIdentifier formats a fully-qualified process identifier.
@@ -119,7 +128,7 @@ func ParseProcessIdentifier(input string) (ProcessIdentifier, error) {
 	firstColon := strings.Index(left, ":")
 	if firstColon == -1 {
 		// slug:process
-		return ProcessIdentifier{Slug: left, Process: process}, nil
+		return ProcessIdentifier{Identifier: Identifier{Slug: left}, Process: process}, nil
 	}
 	if firstColon == 0 {
 		return ProcessIdentifier{}, fmt.Errorf("project is required before ':'")
@@ -129,7 +138,7 @@ func ParseProcessIdentifier(input string) (ProcessIdentifier, error) {
 	}
 	project := left[:firstColon]
 	slug := left[firstColon+1:]
-	return ProcessIdentifier{Project: project, Slug: slug, Process: process}, nil
+	return ProcessIdentifier{Identifier: Identifier{Project: project, Slug: slug}, Process: process}, nil
 }
 
 func normalizeProject(segment string) (string, error) {
