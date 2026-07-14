@@ -75,9 +75,14 @@ Lift this. After the auth decision and `EnsureTarget`, branch:
   dialable target). After the 101 response is written back to the client,
   proxy bidirectionally between client stream and upstream conn.
 
-`rewrite` mode for upgrade requests: pass headers through unchanged. Body
-rewrite does not apply (the handshake has no body to rewrite, and the upgraded
-connection is opaque). `Location` / `Set-Cookie` are irrelevant on a 101.
+`rewrite` mode for upgrade requests: the handshake gets the same request-side
+header translation as the regular HTTP path (Host, forwarded headers, and
+public→local `Cookie`-domain / `Origin` / `Referer` translation) — upstreams
+like Action Cable validate `Origin` on the handshake, so passing the public
+host through would break them. A failed handshake (non-101) gets rewrite-mode
+`Location` / `Set-Cookie` translation on the way back. Body rewrite does not
+apply (the handshake has no body to rewrite, and the upgraded connection is
+opaque); a 101 has no translatable headers.
 
 ## Module changes
 

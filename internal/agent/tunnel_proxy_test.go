@@ -696,6 +696,196 @@ func TestHandleTunnelRequest_AnonymousWebSocketUpgradeOnUnmatchedHost(t *testing
 	}
 }
 
+// startCapturingWebSocketServer is startWebSocketEchoServer plus a channel
+// carrying the handshake request (Host and headers) the upstream received.
+func startCapturingWebSocketServer(t *testing.T) (webSocketEchoServer, <-chan *http.Request) {
+	t.Helper()
+	handshakes := make(chan *http.Request, 1)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			captured := r.Clone(context.Background())
+			captured.Header = r.Header.Clone()
+			select {
+			case handshakes <- captured:
+			default:
+			}
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				http.Error(w, "hijack unsupported", http.StatusInternalServerError)
+				return
+			}
+			conn, rw, err := hijacker.Hijack()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n")
+			_ = rw.Flush()
+		}),
+		ReadHeaderTimeout: 2 * time.Second,
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	})
+	go func() { _ = srv.Serve(ln) }()
+	return webSocketEchoServer{Addr: ln.Addr().String()}, handshakes
+}
+
+func TestHandleTunnelRequest_RewriteMode_TranslatesUpgradeRequestHeaders(t *testing.T) {
+	t.Parallel()
+
+	upstream, handshakes := startCapturingWebSocketServer(t)
+	opts := TunnelProxyOptions{
+		ResolveRouting: func(host, path string) (TunnelResolveResult, error) {
+			return TunnelResolveResult{
+				ProxyTarget: ProxyTarget{Slug: "main", Path: "/repo/main", Process: "rails"},
+				GatewayMode: config.GatewayModeRewrite,
+			}, nil
+		},
+		EnsureTarget: func(host string, resolved TunnelResolveResult) (ProxyTarget, string, error) {
+			return ProxyTarget{Network: "tcp", Address: upstream.Addr, Slug: "main", Path: "/repo/main", Process: "rails"}, "rails.main.localhost", nil
+		},
+		EndProxySession: func(targetSlug, targetPath, process string) {},
+		ProjectApexZone: func() string { return ".localhost" },
+	}
+
+	req := newWebSocketUpgradeRequest("https://rails.my-feature.wip.example.com/cable")
+	req.Header.Set("Origin", "https://rails.my-feature.wip.example.com")
+	req.Header.Set("Referer", "https://rails.my-feature.wip.example.com/chat?room=1")
+	req.Header.Set("Cookie", "session=abc; $Domain=rails.my-feature.wip.example.com")
+	req.Header.Set("X-Forwarded-Host", "rails.my-feature.wip.example.com")
+	req.Header.Set("X-Forwarded-For", "203.0.113.7")
+	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "my-feature"}, Label: "my-feature", LocalBaseHost: "my-feature.localhost"}
+
+	resp, _ := runTunnelUpgrade(t, opts, tunnel, req)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 101, got %d body=%q", resp.StatusCode, string(body))
+	}
+
+	handshake := <-handshakes
+	if handshake.Host != "rails.main.localhost" {
+		t.Fatalf("expected upstream Host rails.main.localhost, got %q", handshake.Host)
+	}
+	if got := handshake.Header.Get("Origin"); got != "https://rails.main.localhost" {
+		t.Fatalf("expected translated Origin, got %q", got)
+	}
+	if got := handshake.Header.Get("Referer"); got != "https://rails.main.localhost/chat?room=1" {
+		t.Fatalf("expected translated Referer, got %q", got)
+	}
+	if got := handshake.Header.Get("Cookie"); got != "session=abc; $Domain=rails.main.localhost" {
+		t.Fatalf("expected translated Cookie domain, got %q", got)
+	}
+	if got := handshake.Header.Get("X-Forwarded-Host"); got != "" {
+		t.Fatalf("expected X-Forwarded-Host stripped in rewrite mode, got %q", got)
+	}
+	if got := handshake.Header.Get("X-Forwarded-For"); got != "" {
+		t.Fatalf("expected X-Forwarded-For stripped in rewrite mode, got %q", got)
+	}
+	if got := handshake.Header.Get("X-Forwarded-Proto"); got != "https" {
+		t.Fatalf("expected X-Forwarded-Proto https, got %q", got)
+	}
+	if got := handshake.Header.Get("Dev-Gateway-Mode"); got != config.GatewayModeRewrite {
+		t.Fatalf("expected Dev-Gateway-Mode %q, got %q", config.GatewayModeRewrite, got)
+	}
+}
+
+func TestHandleTunnelRequest_ReverseProxyMode_LeavesUpgradeRequestHeadersUntouched(t *testing.T) {
+	t.Parallel()
+
+	upstream, handshakes := startCapturingWebSocketServer(t)
+	opts := TunnelProxyOptions{
+		ResolveRouting: func(host, path string) (TunnelResolveResult, error) {
+			return TunnelResolveResult{
+				ProxyTarget: ProxyTarget{Slug: "main", Path: "/repo/main", Process: "rails"},
+				GatewayMode: config.GatewayModeReverseProxy,
+			}, nil
+		},
+		EnsureTarget: func(host string, resolved TunnelResolveResult) (ProxyTarget, string, error) {
+			return ProxyTarget{Network: "tcp", Address: upstream.Addr, Slug: "main", Path: "/repo/main", Process: "rails"}, "rails.main.localhost", nil
+		},
+		EndProxySession: func(targetSlug, targetPath, process string) {},
+		ProjectApexZone: func() string { return ".localhost" },
+	}
+
+	req := newWebSocketUpgradeRequest("https://rails.my-feature.wip.example.com/cable")
+	req.Header.Set("Origin", "https://rails.my-feature.wip.example.com")
+	req.Header.Set("Referer", "https://rails.my-feature.wip.example.com/chat")
+	req.Header.Set("X-Forwarded-Host", "rails.my-feature.wip.example.com")
+	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "my-feature"}, Label: "my-feature", LocalBaseHost: "my-feature.localhost"}
+
+	resp, _ := runTunnelUpgrade(t, opts, tunnel, req)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("expected 101, got %d", resp.StatusCode)
+	}
+
+	handshake := <-handshakes
+	if got := handshake.Header.Get("Origin"); got != "https://rails.my-feature.wip.example.com" {
+		t.Fatalf("expected Origin untouched in reverse-proxy mode, got %q", got)
+	}
+	if got := handshake.Header.Get("Referer"); got != "https://rails.my-feature.wip.example.com/chat" {
+		t.Fatalf("expected Referer untouched in reverse-proxy mode, got %q", got)
+	}
+	if got := handshake.Header.Get("X-Forwarded-Host"); got != "rails.my-feature.wip.example.com" {
+		t.Fatalf("expected X-Forwarded-Host preserved in reverse-proxy mode, got %q", got)
+	}
+	if got := handshake.Header.Get("Dev-Gateway-Mode"); got != config.GatewayModeReverseProxy {
+		t.Fatalf("expected Dev-Gateway-Mode %q, got %q", config.GatewayModeReverseProxy, got)
+	}
+}
+
+func TestHandleTunnelRequest_RewriteMode_TranslatesFailedUpgradeResponse(t *testing.T) {
+	t.Parallel()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://rails.main.localhost/login")
+		w.Header().Add("Set-Cookie", "session=abc; Domain=rails.main.localhost; Path=/")
+		w.WriteHeader(http.StatusFound)
+	}))
+	t.Cleanup(upstream.Close)
+	upstreamURL, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatalf("parse upstream url: %v", err)
+	}
+
+	opts := TunnelProxyOptions{
+		ResolveRouting: func(host, path string) (TunnelResolveResult, error) {
+			return TunnelResolveResult{
+				ProxyTarget: ProxyTarget{Slug: "main", Path: "/repo/main", Process: "rails"},
+				GatewayMode: config.GatewayModeRewrite,
+			}, nil
+		},
+		EnsureTarget: func(host string, resolved TunnelResolveResult) (ProxyTarget, string, error) {
+			return ProxyTarget{Network: "tcp", Address: upstreamURL.Host, Slug: "main", Path: "/repo/main", Process: "rails"}, "rails.main.localhost", nil
+		},
+		EndProxySession: func(targetSlug, targetPath, process string) {},
+		ProjectApexZone: func() string { return ".localhost" },
+	}
+
+	req := newWebSocketUpgradeRequest("https://rails.my-feature.wip.example.com/cable")
+	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "my-feature"}, Label: "my-feature", LocalBaseHost: "my-feature.localhost"}
+
+	resp, _ := runTunnelUpgrade(t, opts, tunnel, req)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("expected 302 from failed handshake, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Location"); got != "https://rails.my-feature.wip.example.com/login" {
+		t.Fatalf("expected translated Location, got %q", got)
+	}
+	if got := resp.Header.Get("Set-Cookie"); got != "session=abc; Domain=rails.my-feature.wip.example.com; Path=/" {
+		t.Fatalf("expected translated Set-Cookie domain, got %q", got)
+	}
+}
+
 func TestHandleTunnelRequest_DoesNotRedirectWhenSubdomainPresent(t *testing.T) {
 	t.Parallel()
 

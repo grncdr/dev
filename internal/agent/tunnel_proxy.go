@@ -138,50 +138,33 @@ func HandleTunnelRequest(ctx context.Context, opts TunnelProxyOptions, tunnel Tu
 	if err != nil {
 		return err
 	}
+	resolvedLocalHost = normalizeProxyHost(resolvedLocalHost)
+	if resolvedLocalHost == "" {
+		resolvedLocalHost = localHost
+	}
 	resolved.ProxyTarget = target
 	resolved.ResolvedLocalHost = resolvedLocalHost
 	defer opts.EndProxySession(resolved.Slug, resolved.Path, resolved.Process)
 
+	rewriteMode := resolved.GatewayMode == config.GatewayModeRewrite
+	localApex := opts.ProjectApexZone()
+	publicApex, hasPublicApex := DerivePublicApex(resolvedLocalHost, publicHost, localApex)
+	outReq := buildTunnelUpstreamRequest(ctx, req, resolved, publicHost, resolvedLocalHost, publicApex, localApex, hasPublicApex)
+
 	if isUpgrade {
-		return forwardTunnelUpgrade(ctx, req, resolved.ProxyTarget, resolvedLocalHost, localHost, stream)
+		return forwardTunnelUpgrade(outReq, resolved, publicHost, resolvedLocalHost, publicApex, localApex, hasPublicApex, stream)
 	}
 
 	reqBody, err := snapshotRequestBody(req)
 	if err != nil {
 		return err
 	}
-	outReq := req.Clone(ctx)
-	outReq.Header = req.Header.Clone()
-	if outReq.URL == nil {
-		outReq.URL = &url.URL{Path: "/"}
-	}
-	outReq.URL.Scheme = "http"
-	outReq.URL.Host = "dev-tunnel-upstream"
-	outReq.RequestURI = ""
-	resolvedLocalHost = normalizeProxyHost(resolvedLocalHost)
-	if resolvedLocalHost == "" {
-		resolvedLocalHost = localHost
-	}
-	outReq.Host = resolvedLocalHost
 	if reqBody != nil {
 		outReq.Body = io.NopCloser(bytes.NewReader(reqBody))
 		outReq.ContentLength = int64(len(reqBody))
 		outReq.GetBody = func() (io.ReadCloser, error) {
 			return io.NopCloser(bytes.NewReader(reqBody)), nil
 		}
-	}
-
-	rewriteMode := resolved.GatewayMode == config.GatewayModeRewrite
-	localApex := opts.ProjectApexZone()
-	publicApex, hasPublicApex := DerivePublicApex(resolvedLocalHost, publicHost, localApex)
-	applyForwardedHeaders(outReq, rewriteMode)
-	if rewriteMode && hasPublicApex {
-		RewriteRequestCookieDomainForTunnel(outReq.Header, publicHost, resolvedLocalHost, publicApex, localApex)
-		RewriteRequestOriginForTunnel(outReq.Header, publicHost, resolvedLocalHost, publicApex, localApex)
-		RewriteRequestRefererForTunnel(outReq.Header, publicHost, resolvedLocalHost, publicApex, localApex)
-	}
-	if resolved.GatewayMode != "" {
-		outReq.Header.Set("Dev-Gateway-Mode", resolved.GatewayMode)
 	}
 
 	transport := &http.Transport{
@@ -342,13 +325,44 @@ func pathMatchesWebSocketExempt(reqPath string, exempt []string) bool {
 	return false
 }
 
+// buildTunnelUpstreamRequest clones an inbound tunnel request for the local
+// upstream, applying the request-side header translation shared by the regular
+// HTTP path and upgrade handshakes: Host, forwarded headers, and (in rewrite
+// mode with a derivable public apex) Cookie-domain, Origin, and Referer
+// translation from public to local hostnames.
+func buildTunnelUpstreamRequest(ctx context.Context, req *http.Request, resolved TunnelResolveResult, publicHost, resolvedLocalHost, publicApex, localApex string, hasPublicApex bool) *http.Request {
+	outReq := req.Clone(ctx)
+	outReq.Header = req.Header.Clone()
+	if outReq.URL == nil {
+		outReq.URL = &url.URL{Path: "/"}
+	}
+	outReq.URL.Scheme = "http"
+	outReq.URL.Host = "dev-tunnel-upstream"
+	outReq.RequestURI = ""
+	outReq.Host = resolvedLocalHost
+
+	rewriteMode := resolved.GatewayMode == config.GatewayModeRewrite
+	applyForwardedHeaders(outReq, rewriteMode)
+	if rewriteMode && hasPublicApex {
+		RewriteRequestCookieDomainForTunnel(outReq.Header, publicHost, resolvedLocalHost, publicApex, localApex)
+		RewriteRequestOriginForTunnel(outReq.Header, publicHost, resolvedLocalHost, publicApex, localApex)
+		RewriteRequestRefererForTunnel(outReq.Header, publicHost, resolvedLocalHost, publicApex, localApex)
+	}
+	if resolved.GatewayMode != "" {
+		outReq.Header.Set("Dev-Gateway-Mode", resolved.GatewayMode)
+	}
+	return outReq
+}
+
 // forwardTunnelUpgrade dials the resolved process target and proxies an
 // HTTP upgrade (e.g. WebSocket) handshake bidirectionally between the gateway
-// stream and the upstream. Rewrite-mode header/body translation does not
-// apply: the handshake has no rewriteable body, and 101 carries no Location
-// or Set-Cookie. We pass headers through with the Host set to the resolved
-// local host and X-Forwarded-Proto for parity with the regular HTTP path.
-func forwardTunnelUpgrade(ctx context.Context, req *http.Request, target ProxyTarget, resolvedLocalHost, localHost string, stream net.Conn) error {
+// stream and the upstream. The handshake request carries the same rewrite-mode
+// header translation as the regular HTTP path (applied by
+// buildTunnelUpstreamRequest). A failed handshake (non-101) gets rewrite-mode
+// Location/Set-Cookie translation before being written back; a 101 has no
+// translatable headers and passes through untouched.
+func forwardTunnelUpgrade(outReq *http.Request, resolved TunnelResolveResult, publicHost, resolvedLocalHost, publicApex, localApex string, hasPublicApex bool, stream net.Conn) error {
+	target := resolved.ProxyTarget
 	if target.Network == "" || target.Address == "" {
 		return errors.New("upgrade forwarding requires resolved upstream target")
 	}
@@ -358,22 +372,6 @@ func forwardTunnelUpgrade(ctx context.Context, req *http.Request, target ProxyTa
 	}
 	defer upstream.Close()
 
-	host := normalizeProxyHost(resolvedLocalHost)
-	if host == "" {
-		host = localHost
-	}
-
-	outReq := req.Clone(ctx)
-	outReq.Header = req.Header.Clone()
-	if outReq.URL == nil {
-		outReq.URL = &url.URL{Path: "/"}
-	}
-	outReq.URL.Scheme = "http"
-	outReq.URL.Host = "dev-tunnel-upstream"
-	outReq.RequestURI = ""
-	outReq.Host = host
-	outReq.Header.Set("X-Forwarded-Proto", "https")
-
 	if err := outReq.Write(upstream); err != nil {
 		return err
 	}
@@ -382,13 +380,22 @@ func forwardTunnelUpgrade(ctx context.Context, req *http.Request, target ProxyTa
 	if err != nil {
 		return err
 	}
-	if err := resp.Write(stream); err != nil {
-		_ = resp.Body.Close()
-		return err
-	}
 	if resp.StatusCode != http.StatusSwitchingProtocols {
 		defer resp.Body.Close()
-		_, err := io.Copy(stream, resp.Body)
+		if resolved.GatewayMode == config.GatewayModeRewrite {
+			if loc := resp.Header.Get("Location"); loc != "" {
+				if rewritten, ok := RewriteLocationForTunnelWithPeerSubdomains(loc, resolvedLocalHost, publicHost, localApex, publicApex, resolved.RewritePeerSubdomains); ok {
+					resp.Header.Set("Location", rewritten)
+				}
+			}
+			if localApex != "" && hasPublicApex {
+				RewriteSetCookieDomainForTunnelWithPeerSubdomains(resp.Header, resolvedLocalHost, publicHost, localApex, publicApex, resolved.RewritePeerSubdomains)
+			}
+		}
+		return resp.Write(stream)
+	}
+	if err := resp.Write(stream); err != nil {
+		_ = resp.Body.Close()
 		return err
 	}
 	_ = resp.Body.Close()
