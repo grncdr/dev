@@ -41,7 +41,7 @@ type logFollowState struct {
 	Anchor  []byte
 }
 
-func newLogsCmd(opts *Options) *cobra.Command {
+func newLogsCmd(opts *config.GlobalFlags) *cobra.Command {
 	view := &logViewOptions{}
 	cmd := &cobra.Command{
 		Use:   "logs [process|slug:process|project:slug:process]...",
@@ -91,7 +91,7 @@ func effectiveFollow(view *logViewOptions) bool {
 	return view.FollowFlag
 }
 
-func runLogs(opts *Options, targets []string, view *logViewOptions) error {
+func runLogs(opts *config.GlobalFlags, targets []string, view *logViewOptions) error {
 	projectFromTarget, slug, processes, err := selectLogsTargets(targets)
 	if err != nil {
 		return err

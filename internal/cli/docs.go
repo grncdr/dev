@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	docstore "dev/docs"
+	"dev/internal/config"
 )
 
 type pagerCommand struct {
@@ -20,7 +21,7 @@ type pagerCommand struct {
 	args []string
 }
 
-func newDocsCmd(opts *Options) *cobra.Command {
+func newDocsCmd(opts *config.GlobalFlags) *cobra.Command {
 	_ = opts
 	available := docstore.Available()
 	long := "show embedded docs markdown"

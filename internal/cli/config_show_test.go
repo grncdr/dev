@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"dev/internal/config"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -42,7 +43,7 @@ apex_zone = ".localhost"
 		t.Fatal(err)
 	}
 
-	opts := &Options{}
+	opts := &config.GlobalFlags{}
 	opts.ResolvedPaths.ProjectConfig = projectPath
 	opts.ResolvedPaths.DaemonConfig = daemonPath
 
@@ -73,7 +74,7 @@ apex_zone = ".localhost"
 }
 
 func TestRunConfigShow_InvalidOutput(t *testing.T) {
-	opts := &Options{}
+	opts := &config.GlobalFlags{}
 	var buf bytes.Buffer
 	if err := runConfigShow(opts, "yaml", &buf); err == nil {
 		t.Fatalf("expected error for invalid output format")

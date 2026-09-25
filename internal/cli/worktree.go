@@ -17,7 +17,7 @@ import (
 	"dev/internal/worktree"
 )
 
-func newWorktreeStartCmd(opts *Options) *cobra.Command {
+func newWorktreeStartCmd(opts *config.GlobalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start [process_identifier...]",
 		Short: "start processes",
@@ -28,7 +28,7 @@ func newWorktreeStartCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func newWorktreeStopCmd(opts *Options) *cobra.Command {
+func newWorktreeStopCmd(opts *config.GlobalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "stop [process_identifier...]",
 		Short: "stop processes",
@@ -39,7 +39,7 @@ func newWorktreeStopCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func newWorktreeRestartCmd(opts *Options) *cobra.Command {
+func newWorktreeRestartCmd(opts *config.GlobalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "restart [process_identifier...]",
 		Short: "restart processes",
@@ -50,7 +50,7 @@ func newWorktreeRestartCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func newWorktreeStatusCmd(opts *Options) *cobra.Command {
+func newWorktreeStatusCmd(opts *config.GlobalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status [process_identifier...]",
 		Short: "show process status",
@@ -62,17 +62,15 @@ func newWorktreeStatusCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func runWorktreeStart(targetArgs []string, opts *Options) error {
-	socketPath, err := daemon.ResolveSocketPath()
+func runWorktreeStart(targetArgs []string, opts *config.GlobalFlags) error {
+	client, err := daemon.DefaultClient(opts)
 	if err != nil {
 		return err
 	}
 
-	if err := ensureDaemonRunning(opts, socketPath); err != nil {
+	if err := client.EnsureDaemonRunning(opts); err != nil {
 		return err
 	}
-
-	client := daemon.NewClient(socketPath)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	cwd := workingDir(opts)
@@ -95,17 +93,15 @@ func runWorktreeStart(targetArgs []string, opts *Options) error {
 	return nil
 }
 
-func runWorktreeStop(targetArgs []string, opts *Options) error {
-	socketPath, err := daemon.ResolveSocketPath()
+func runWorktreeStop(targetArgs []string, opts *config.GlobalFlags) error {
+	client, err := daemon.DefaultClient(opts)
 	if err != nil {
 		return err
 	}
-
-	if err := ensureDaemonRunning(opts, socketPath); err != nil {
-		return err
+	if !client.IsRunning() {
+		fmt.Println("daemon not running")
+		return nil
 	}
-
-	client := daemon.NewClient(socketPath)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	cwd := workingDir(opts)
@@ -128,8 +124,8 @@ func runWorktreeStop(targetArgs []string, opts *Options) error {
 	return nil
 }
 
-func runWorktreeStatus(targetArgs []string, opts *Options) error {
-	socketPath, err := daemon.ResolveSocketPath()
+func runWorktreeStatus(targetArgs []string, opts *config.GlobalFlags) error {
+	client, err := daemon.DefaultClient(opts)
 	if err != nil {
 		return err
 	}
@@ -139,11 +135,8 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 		return err
 	}
 
-	client := daemon.NewClient(socketPath)
-	daemonUp, err := daemonRunning(socketPath)
-	if err != nil {
-		return err
-	}
+	daemonUp := client.IsRunning()
+
 	renderTargets := make([]worktreeStatusRenderTarget, 0, len(targets))
 	cwd := workingDir(opts)
 	for _, slug := range sortedTargetSlugs(targets) {
@@ -158,7 +151,7 @@ func runWorktreeStatus(targetArgs []string, opts *Options) error {
 	return renderWorktreeDetailedStatuses(client, opts, daemonUp, resolveDaemonVersion(client, daemonUp), renderTargets)
 }
 
-func runWorktreeRestart(targetArgs []string, opts *Options) error {
+func runWorktreeRestart(targetArgs []string, opts *config.GlobalFlags) error {
 	if err := runWorktreeStop(targetArgs, opts); err != nil {
 		return err
 	}
@@ -515,7 +508,7 @@ func dedupeStrings(values []string) []string {
 	return out
 }
 
-func resolveSlug(opts *Options, arg string) (string, error) {
+func resolveSlug(opts *config.GlobalFlags, arg string) (string, error) {
 	if arg != "" {
 		if strings.Contains(arg, ":") {
 			currentProject, err := resolveProjectFromCurrentDir(opts)
@@ -570,7 +563,7 @@ func (t *processTarget) processList() []string {
 	return out
 }
 
-func resolveProcessTargets(args []string, opts *Options) (map[string]*processTarget, error) {
+func resolveProcessTargets(args []string, opts *config.GlobalFlags) (map[string]*processTarget, error) {
 	targets := map[string]*processTarget{}
 	if len(args) == 0 {
 		slug, err := resolveSlug(opts, "")
@@ -610,7 +603,7 @@ func resolveProcessTargets(args []string, opts *Options) (map[string]*processTar
 	return targets, nil
 }
 
-func resolveStopProcessTargets(args []string, opts *Options) (map[string]*processTarget, error) {
+func resolveStopProcessTargets(args []string, opts *config.GlobalFlags) (map[string]*processTarget, error) {
 	if len(args) == 0 {
 		return resolveProcessTargets(args, opts)
 	}
@@ -720,7 +713,7 @@ func resolveDaemonVersion(client *daemon.Client, daemonUp bool) string {
 	return "(unknown)"
 }
 
-func renderWorktreeDetailedStatuses(client *daemon.Client, opts *Options, daemonUp bool, daemonVersion string, targets []worktreeStatusRenderTarget) error {
+func renderWorktreeDetailedStatuses(client *daemon.Client, opts *config.GlobalFlags, daemonUp bool, daemonVersion string, targets []worktreeStatusRenderTarget) error {
 	fmt.Printf("Client version: %s\n", version.String())
 	fmt.Printf("Daemon version: %s\n\n", daemonVersion)
 

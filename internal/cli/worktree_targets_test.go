@@ -114,9 +114,9 @@ func TestResolveStopProcessTargetsProjectWildcardSlug(t *testing.T) {
 		t.Fatalf("register bugfix: %v", err)
 	}
 
-	opts := &Options{
+	opts := &config.GlobalFlags{
 		WorkingDir: base,
-		ResolvedPaths: ResolvedPaths{
+		ResolvedPaths: config.ResolvedPaths{
 			DaemonConfig: daemonConfigPath,
 		},
 	}
@@ -170,9 +170,9 @@ func TestResolveStopProcessTargetsProjectWildcardSlugSpecificProcess(t *testing.
 		t.Fatalf("register feature: %v", err)
 	}
 
-	opts := &Options{
+	opts := &config.GlobalFlags{
 		WorkingDir: base,
-		ResolvedPaths: ResolvedPaths{
+		ResolvedPaths: config.ResolvedPaths{
 			DaemonConfig: daemonConfigPath,
 		},
 	}
@@ -202,9 +202,9 @@ func TestResolveStopProcessTargetsProjectWildcardNoMatches(t *testing.T) {
 	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
 		t.Fatalf("write daemon config: %v", err)
 	}
-	opts := &Options{
+	opts := &config.GlobalFlags{
 		WorkingDir: base,
-		ResolvedPaths: ResolvedPaths{
+		ResolvedPaths: config.ResolvedPaths{
 			DaemonConfig: daemonConfigPath,
 		},
 	}
@@ -242,7 +242,7 @@ func TestResolveSlugProjectQualified(t *testing.T) {
 		t.Fatalf("chdir: %v", err)
 	}
 
-	slug, err := resolveSlug(&Options{WorkingDir: repoDir}, "demo:feature/x")
+	slug, err := resolveSlug(&config.GlobalFlags{WorkingDir: repoDir}, "demo:feature/x")
 	if err != nil {
 		t.Fatalf("resolveSlug: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestResolveSlugUsesRegisteredSlugForCurrentWorktree(t *testing.T) {
 		t.Fatalf("register worktree in state: %v", err)
 	}
 
-	slug, err := resolveSlug(&Options{WorkingDir: worktreePath, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}, "")
+	slug, err := resolveSlug(&config.GlobalFlags{WorkingDir: worktreePath, ResolvedPaths: config.ResolvedPaths{DaemonConfig: daemonConfigPath}}, "")
 	if err != nil {
 		t.Fatalf("resolveSlug: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestResolveSlugDefaultsToMainForMainWorktree(t *testing.T) {
 		t.Fatalf("write daemon config: %v", err)
 	}
 
-	slug, err := resolveSlug(&Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}, "")
+	slug, err := resolveSlug(&config.GlobalFlags{WorkingDir: repoDir, ResolvedPaths: config.ResolvedPaths{DaemonConfig: daemonConfigPath}}, "")
 	if err != nil {
 		t.Fatalf("resolveSlug: %v", err)
 	}
@@ -374,7 +374,7 @@ func TestResolveSlugUsesConfiguredMainSlugForMainWorktree(t *testing.T) {
 		t.Fatalf("write daemon config: %v", err)
 	}
 
-	slug, err := resolveSlug(&Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}, "")
+	slug, err := resolveSlug(&config.GlobalFlags{WorkingDir: repoDir, ResolvedPaths: config.ResolvedPaths{DaemonConfig: daemonConfigPath}}, "")
 	if err != nil {
 		t.Fatalf("resolveSlug: %v", err)
 	}

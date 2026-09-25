@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/url"
 	"os"
 	"runtime"
@@ -15,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"dev/internal/config"
 	"dev/internal/daemon"
 	"dev/internal/worktree"
 )
@@ -27,7 +27,7 @@ const (
 
 var errDetachRequested = errors.New("detach requested")
 
-func newAttachCmd(opts *Options) *cobra.Command {
+func newAttachCmd(opts *config.GlobalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "attach <process|slug:process|project:slug:process>",
 		Short: "attach to a process PTY",
@@ -46,7 +46,7 @@ func newAttachCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func runAttach(opts *Options, process, slug string) error {
+func runAttach(opts *config.GlobalFlags, process, slug string) error {
 	if process == "" {
 		return errors.New("process is required")
 	}
@@ -57,15 +57,15 @@ func runAttach(opts *Options, process, slug string) error {
 		}
 		slug = resolved
 	}
-	socketPath, err := daemon.ResolveSocketPath()
+	client, err := daemon.DefaultClient(opts)
 	if err != nil {
 		return err
 	}
-	if err := ensureDaemonRunning(opts, socketPath); err != nil {
+	if err := client.EnsureDaemonRunning(opts); err != nil {
 		return err
 	}
 
-	conn, err := net.Dial("unix", socketPath)
+	conn, err := client.Dial()
 	if err != nil {
 		return err
 	}

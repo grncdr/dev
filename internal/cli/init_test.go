@@ -24,9 +24,9 @@ func TestRunInit_WritesConfig(t *testing.T) {
 		}
 	}()
 
-	opts := &Options{
+	opts := &config.GlobalFlags{
 		WorkingDir: dir,
-		ResolvedPaths: ResolvedPaths{
+		ResolvedPaths: config.ResolvedPaths{
 			ProjectConfig: filepath.Join(dir, config.DefaultProjectConfig),
 		},
 	}
@@ -72,9 +72,9 @@ func TestRunInit_UsesOriginRemoteOwnerRepo(t *testing.T) {
 		_ = os.Chdir(orig)
 	}()
 
-	opts := &Options{
+	opts := &config.GlobalFlags{
 		WorkingDir: dir,
-		ResolvedPaths: ResolvedPaths{
+		ResolvedPaths: config.ResolvedPaths{
 			ProjectConfig: filepath.Join(dir, config.DefaultProjectConfig),
 		},
 	}
@@ -126,9 +126,9 @@ func TestRunInit_RefusesExistingConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	opts := &Options{
+	opts := &config.GlobalFlags{
 		WorkingDir: dir,
-		ResolvedPaths: ResolvedPaths{
+		ResolvedPaths: config.ResolvedPaths{
 			ProjectConfig: path,
 		},
 	}

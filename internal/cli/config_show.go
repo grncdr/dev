@@ -12,7 +12,7 @@ import (
 	"dev/internal/config"
 )
 
-func newConfigCmd(opts *Options) *cobra.Command {
+func newConfigCmd(opts *config.GlobalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "inspect config",
@@ -22,7 +22,7 @@ func newConfigCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func newConfigShowCmd(opts *Options) *cobra.Command {
+func newConfigShowCmd(opts *config.GlobalFlags) *cobra.Command {
 	var output string
 	cmd := &cobra.Command{
 		Use:   "show",
@@ -49,7 +49,7 @@ type showPaths struct {
 	DaemonConfigFound bool   `json:"daemon_config_found"`
 }
 
-func runConfigShow(opts *Options, output string, out io.Writer) error {
+func runConfigShow(opts *config.GlobalFlags, output string, out io.Writer) error {
 	if output != "text" && output != "json" {
 		return fmt.Errorf("unknown output format: %s", output)
 	}

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"dev/internal/config"
 	"errors"
 	"net/http"
 	"os"
@@ -12,25 +13,10 @@ import (
 )
 
 func TestRunDaemonStop(t *testing.T) {
-	homeDir, err := os.MkdirTemp("/tmp", "dmhome")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Setenv("HOME", homeDir); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Setenv("DEV_PROXY_LISTEN_HTTP", "off"); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Setenv("DEV_PROXY_LISTEN_HTTPS", "off"); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = os.Unsetenv("HOME")
-		_ = os.Unsetenv("DEV_PROXY_LISTEN_HTTP")
-		_ = os.Unsetenv("DEV_PROXY_LISTEN_HTTPS")
-		_ = os.RemoveAll(homeDir)
-	}()
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("DEV_PROXY_LISTEN_HTTP", "off")
+	t.Setenv("DEV_PROXY_LISTEN_HTTPS", "off")
 
 	socketPath, err := daemon.ResolveSocketPath()
 	if err != nil {
@@ -49,11 +35,16 @@ func TestRunDaemonStop(t *testing.T) {
 		errCh <- srv.Serve()
 	}()
 
-	if err := waitForDaemon(socketPath, "", nil, 2*time.Second); err != nil {
-		t.Fatalf("daemon not healthy: %v", err)
+	client := daemon.NewClient(socketPath)
+	deadline := time.Now().Add(2 * time.Second)
+	for !client.IsRunning() {
+		if time.Now().After(deadline) {
+			t.Fatal("daemon not healthy")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 
-	if err := runDaemonStop(&Options{}); err != nil {
+	if err := runDaemonStop(&config.GlobalFlags{}); err != nil {
 		t.Fatalf("runDaemonStop: %v", err)
 	}
 
@@ -68,27 +59,11 @@ func TestRunDaemonStop(t *testing.T) {
 }
 
 func TestRunDaemonStopWhenNotRunning(t *testing.T) {
-	homeDir, err := os.MkdirTemp("/tmp", "dmhome")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Setenv("HOME", homeDir); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Setenv("DEV_PROXY_LISTEN_HTTP", "off"); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Setenv("DEV_PROXY_LISTEN_HTTPS", "off"); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = os.Unsetenv("HOME")
-		_ = os.Unsetenv("DEV_PROXY_LISTEN_HTTP")
-		_ = os.Unsetenv("DEV_PROXY_LISTEN_HTTPS")
-		_ = os.RemoveAll(homeDir)
-	}()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("DEV_PROXY_LISTEN_HTTP", "off")
+	t.Setenv("DEV_PROXY_LISTEN_HTTPS", "off")
 
-	if err := runDaemonStop(&Options{}); err != nil {
+	if err := runDaemonStop(&config.GlobalFlags{}); err != nil {
 		t.Fatalf("expected no error when daemon not running: %v", err)
 	}
 }

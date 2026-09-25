@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"dev/internal/config"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -37,7 +38,7 @@ func TestRunInviteCreate_UsesProjectGatewayURL(t *testing.T) {
 	if err := os.WriteFile(projectPath, []byte(projectConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	opts := &Options{ResolvedPaths: ResolvedPaths{
+	opts := &config.GlobalFlags{ResolvedPaths: config.ResolvedPaths{
 		ProjectConfig: projectPath,
 		DaemonConfig:  filepath.Join(dir, "daemon.toml"),
 	}}
@@ -53,7 +54,7 @@ func TestRunInviteCreate_UsesProjectGatewayURL(t *testing.T) {
 }
 
 func TestRunInviteCreate_RequiresGatewayURL(t *testing.T) {
-	opts := &Options{ResolvedPaths: ResolvedPaths{
+	opts := &config.GlobalFlags{ResolvedPaths: config.ResolvedPaths{
 		DaemonConfig: filepath.Join(t.TempDir(), "daemon.toml"),
 	}}
 	err := runInviteCreate(opts, "", 5*time.Minute, 1)
@@ -70,7 +71,7 @@ func TestRunGatewayInit_CreatesBootstrapInvite(t *testing.T) {
 	if err := os.WriteFile(daemonPath, []byte(daemonConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	opts := &Options{ResolvedPaths: ResolvedPaths{
+	opts := &config.GlobalFlags{ResolvedPaths: config.ResolvedPaths{
 		DaemonConfig: daemonPath,
 	}}
 	if err := runGatewayInit(opts, 5*time.Minute, 1); err != nil {

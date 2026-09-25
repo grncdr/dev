@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -10,11 +11,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/mattn/go-shellwords"
 	"github.com/spf13/cobra"
 
 	"dev/internal/config"
+	"dev/internal/daemon"
 	"dev/internal/procenv"
 	"dev/internal/worktree"
 )
@@ -29,7 +32,7 @@ type worktreeListOptions struct {
 	AllProjects bool
 }
 
-func newWorktreeCmd(opts *Options) *cobra.Command {
+func newWorktreeCmd(opts *config.GlobalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "worktree",
 		Short: "manage worktree lifecycle",
@@ -41,7 +44,7 @@ func newWorktreeCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func newWorktreeAddCmd(opts *Options) *cobra.Command {
+func newWorktreeAddCmd(opts *config.GlobalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add <slug> [branch]",
 		Short: "create a managed worktree",
@@ -58,7 +61,7 @@ func newWorktreeAddCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func newWorktreeCleanupCmd(opts *Options) *cobra.Command {
+func newWorktreeCleanupCmd(opts *config.GlobalFlags) *cobra.Command {
 	cleanup := &worktreeCleanupOptions{}
 	cmd := &cobra.Command{
 		Use:   "cleanup [slug]",
@@ -79,7 +82,7 @@ func newWorktreeCleanupCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func newWorktreeRegisterCmd(opts *Options) *cobra.Command {
+func newWorktreeRegisterCmd(opts *config.GlobalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "register [slug]",
 		Short: "register current git worktree in dev state",
@@ -96,7 +99,7 @@ func newWorktreeRegisterCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func newWorktreeListCmd(opts *Options) *cobra.Command {
+func newWorktreeListCmd(opts *config.GlobalFlags) *cobra.Command {
 	list := &worktreeListOptions{}
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -109,7 +112,7 @@ func newWorktreeListCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func runWorktreeRegister(opts *Options, targetArg string, out, errOut io.Writer) error {
+func runWorktreeRegister(opts *config.GlobalFlags, targetArg string, out, errOut io.Writer) error {
 	cwd := workingDir(opts)
 	entries, err := worktree.ListWorktreesInDir(cwd)
 	if err != nil {
@@ -179,7 +182,7 @@ func runWorktreeRegister(opts *Options, targetArg string, out, errOut io.Writer)
 	return nil
 }
 
-func runWorktreeAdd(opts *Options, targetArg, branchArg string, out, errOut io.Writer) error {
+func runWorktreeAdd(opts *config.GlobalFlags, targetArg, branchArg string, out, errOut io.Writer) error {
 	cwd := workingDir(opts)
 	var err error
 	entries, err := worktree.ListWorktreesInDir(cwd)
@@ -289,7 +292,7 @@ func runWorktreeAdd(opts *Options, targetArg, branchArg string, out, errOut io.W
 	return nil
 }
 
-func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanupOptions, out, errOut io.Writer) error {
+func runWorktreeCleanup(opts *config.GlobalFlags, targetArg string, cleanup *worktreeCleanupOptions, out, errOut io.Writer) error {
 	if cleanup == nil {
 		cleanup = &worktreeCleanupOptions{}
 	}
@@ -356,6 +359,10 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 		return nil
 	}
 
+	if err := stopDaemonManagedWorktree(opts, resolved); err != nil {
+		return fmt.Errorf("stop worktree before cleanup: %w", err)
+	}
+
 	if err := runLifecycleHooks(daemonHooks.PreWorktreeCleanup, "", "pre_worktree_cleanup", resolved.path, hookEnv, out, errOut); err != nil {
 		return err
 	}
@@ -397,6 +404,30 @@ func runWorktreeCleanup(opts *Options, targetArg string, cleanup *worktreeCleanu
 	return nil
 }
 
+func stopDaemonManagedWorktree(opts *config.GlobalFlags, target *cleanupTarget) error {
+	client, err := daemon.DefaultClient(opts)
+	if err != nil {
+		return err
+	}
+	if !client.IsRunning() {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	runningWorktrees, err := client.RunningWorktrees(ctx)
+	if err != nil {
+		return err
+	}
+	for _, runningWorktree := range runningWorktrees.Worktrees {
+		if samePath(runningWorktree.Path, target.path) {
+			_, err = client.WorktreeStopForTarget(ctx, target.slug, target.project, target.path)
+			return err
+		}
+	}
+	return nil
+}
+
 type worktreeListRow struct {
 	id     string
 	path   string
@@ -404,7 +435,7 @@ type worktreeListRow struct {
 	flags  []string
 }
 
-func runWorktreeList(opts *Options, list *worktreeListOptions, out io.Writer) error {
+func runWorktreeList(opts *config.GlobalFlags, list *worktreeListOptions, out io.Writer) error {
 	if list == nil {
 		list = &worktreeListOptions{}
 	}
@@ -634,7 +665,7 @@ type cleanupTarget struct {
 	exists   bool
 }
 
-func resolveCleanupTarget(arg string, daemonCfg *config.DaemonConfig, cwd string, opts *Options) (*cleanupTarget, error) {
+func resolveCleanupTarget(arg string, daemonCfg *config.DaemonConfig, cwd string, opts *config.GlobalFlags) (*cleanupTarget, error) {
 	if strings.TrimSpace(arg) == "" {
 		entries, err := worktree.ListWorktreesInDir(cwd)
 		if err != nil {
@@ -741,7 +772,7 @@ func parseIdentifierWithDefault(arg, defaultProject string) (worktree.Identifier
 	return worktree.ParseIdentifier(defaultProject + ":" + trimmed)
 }
 
-func resolveProjectFromCurrentDir(opts *Options) (string, error) {
+func resolveProjectFromCurrentDir(opts *config.GlobalFlags) (string, error) {
 	cwd := workingDir(opts)
 	var err error
 	entries, err := worktree.ListWorktreesInDir(cwd)
@@ -762,7 +793,7 @@ func resolveProjectIdentifierFromMainPath(mainPath string) (string, error) {
 	return worktree.NormalizeIdentifierSegment(cfg.Project.Name)
 }
 
-func loadDaemonConfig(opts *Options) (*config.DaemonConfig, error) {
+func loadDaemonConfig(opts *config.GlobalFlags) (*config.DaemonConfig, error) {
 	if opts == nil {
 		return nil, errors.New("missing options")
 	}

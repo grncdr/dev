@@ -17,7 +17,7 @@ import (
 	"dev/internal/worktree"
 )
 
-func newShareCmd(opts *Options) *cobra.Command {
+func newShareCmd(opts *config.GlobalFlags) *cobra.Command {
 	var label string
 	var gatewayURL string
 	var auth string
@@ -41,7 +41,7 @@ func newShareCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func newUnshareCmd(opts *Options) *cobra.Command {
+func newUnshareCmd(opts *config.GlobalFlags) *cobra.Command {
 	var label string
 	var gatewayURL string
 	cmd := &cobra.Command{
@@ -61,12 +61,12 @@ func newUnshareCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func runTunnelOpen(opts *Options, slugArg, labelArg, gatewayURLArg, authArg string, noAuth bool) error {
-	socketPath, err := daemon.ResolveSocketPath()
+func runTunnelOpen(opts *config.GlobalFlags, slugArg, labelArg, gatewayURLArg, authArg string, noAuth bool) error {
+	client, err := daemon.DefaultClient(opts)
 	if err != nil {
 		return err
 	}
-	if err := ensureDaemonRunning(opts, socketPath); err != nil {
+	if err := client.EnsureDaemonRunning(opts); err != nil {
 		return err
 	}
 
@@ -100,7 +100,6 @@ func runTunnelOpen(opts *Options, slugArg, labelArg, gatewayURLArg, authArg stri
 		AuthPassword: authPassword,
 	}
 
-	client := daemon.NewClient(socketPath)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	initial, err := client.TunnelOpen(ctx, req)
@@ -182,12 +181,12 @@ func parseShareAuthArg(raw string) (username string, password string, err error)
 	return user, pass, nil
 }
 
-func runTunnelClose(opts *Options, slugArg, labelArg, gatewayURLArg string) error {
-	socketPath, err := daemon.ResolveSocketPath()
+func runTunnelClose(opts *config.GlobalFlags, slugArg, labelArg, gatewayURLArg string) error {
+	client, err := daemon.DefaultClient(opts)
 	if err != nil {
 		return err
 	}
-	if err := ensureDaemonRunning(opts, socketPath); err != nil {
+	if err := client.EnsureDaemonRunning(opts); err != nil {
 		return err
 	}
 	req := daemon.TunnelRequest{Label: strings.TrimSpace(labelArg)}
@@ -204,7 +203,6 @@ func runTunnelClose(opts *Options, slugArg, labelArg, gatewayURLArg string) erro
 			req.Project = cfg.Project.Name
 		}
 	}
-	client := daemon.NewClient(socketPath)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	status, err := client.TunnelClose(ctx, req)
@@ -215,7 +213,7 @@ func runTunnelClose(opts *Options, slugArg, labelArg, gatewayURLArg string) erro
 	return nil
 }
 
-func resolveTunnelConfig(opts *Options, slugArg string) (string, string, *config.ProjectConfig, error) {
+func resolveTunnelConfig(opts *config.GlobalFlags, slugArg string) (string, string, *config.ProjectConfig, error) {
 	slug, err := resolveSlug(opts, slugArg)
 	if err != nil {
 		return "", "", nil, err

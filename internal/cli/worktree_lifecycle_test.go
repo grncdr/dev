@@ -2,13 +2,18 @@ package cli
 
 import (
 	"bytes"
+	"dev/internal/config"
+	"encoding/json"
 	"errors"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"dev/internal/daemon"
 	"dev/internal/worktree"
 )
 
@@ -74,6 +79,86 @@ func TestWorktreeLifecycleAddListCleanupDryRun(t *testing.T) {
 	}
 }
 
+func TestWorktreeCleanupStopsDaemonBeforeCleanupHooks(t *testing.T) {
+	repoDir, daemonConfigPath, opts := setupWorktreeLifecycleRepo(t)
+	base := t.TempDir()
+	orderLog := filepath.Join(base, "cleanup-order.log")
+	projectConfig := `[project]
+name = "demo"
+
+[hooks]
+pre_worktree_cleanup = "sh -c 'echo hook >> ` + orderLog + `'"
+`
+	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(projectConfig), 0o600); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+	if err := runGitForTest(repoDir, "add", ".dev.toml"); err != nil {
+		t.Fatalf("git add project config: %v", err)
+	}
+	if err := runGitForTest(repoDir, "commit", "-m", "add cleanup hook"); err != nil {
+		t.Fatalf("git commit project config: %v", err)
+	}
+	if err := runGitForTest(repoDir, "branch", "feature"); err != nil {
+		t.Fatalf("create branch: %v", err)
+	}
+
+	homeDir := filepath.Join(base, "home")
+	t.Setenv("HOME", homeDir)
+	socketPath, err := daemon.ResolveSocketPath()
+	if err != nil {
+		t.Fatalf("resolve socket path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
+		t.Fatalf("create socket directory: %v", err)
+	}
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen on daemon socket: %v", err)
+	}
+	worktreePath := filepath.Join(filepath.Dir(daemonConfigPath), "managed", "demo", "feature")
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/worktrees/running":
+			_ = json.NewEncoder(w).Encode(daemon.RunningWorktreesResponse{Worktrees: []daemon.RunningWorktree{{Slug: "feature", Path: worktreePath}}})
+		case "/worktrees/stop":
+			file, err := os.OpenFile(orderLog, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			_, err = file.WriteString("stop\n")
+			_ = file.Close()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			_, _ = w.Write([]byte("{}"))
+		default:
+			_, _ = w.Write([]byte("{}"))
+		}
+	})}
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() { _ = server.Close() })
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	if err := runWorktreeAdd(opts, "feature", "", &out, &errOut); err != nil {
+		t.Fatalf("runWorktreeAdd: %v", err)
+	}
+	if err := runWorktreeCleanup(opts, "feature", &worktreeCleanupOptions{}, &out, &errOut); err != nil {
+		t.Fatalf("runWorktreeCleanup: %v", err)
+	}
+
+	got, err := os.ReadFile(orderLog)
+	if err != nil {
+		t.Fatalf("read cleanup order: %v", err)
+	}
+	if string(got) != "stop\nhook\n" {
+		t.Fatalf("expected daemon stop before cleanup hook, got %q", got)
+	}
+}
+
 func TestWorktreeListUsesConfiguredMainSlug(t *testing.T) {
 	base := t.TempDir()
 	repoDir := filepath.Join(base, "repo")
@@ -102,7 +187,7 @@ func TestWorktreeListUsesConfiguredMainSlug(t *testing.T) {
 	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
 		t.Fatalf("write daemon config: %v", err)
 	}
-	opts := &Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+	opts := &config.GlobalFlags{WorkingDir: repoDir, ResolvedPaths: config.ResolvedPaths{DaemonConfig: daemonConfigPath}}
 
 	var out bytes.Buffer
 	if err := runWorktreeList(opts, nil, &out); err != nil {
@@ -143,7 +228,7 @@ func TestWorktreeListCollapsesHomePrefixInPaths(t *testing.T) {
 	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
 		t.Fatalf("write daemon config: %v", err)
 	}
-	opts := &Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+	opts := &config.GlobalFlags{WorkingDir: repoDir, ResolvedPaths: config.ResolvedPaths{DaemonConfig: daemonConfigPath}}
 
 	var out bytes.Buffer
 	if err := runWorktreeList(opts, nil, &out); err != nil {
@@ -192,8 +277,8 @@ func TestWorktreeListAllProjectsIncludesOtherProjects(t *testing.T) {
 
 	repoOne := makeRepo("demo-one")
 	repoTwo := makeRepo("demo-two")
-	optsOne := &Options{WorkingDir: repoOne, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
-	optsTwo := &Options{WorkingDir: repoTwo, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+	optsOne := &config.GlobalFlags{WorkingDir: repoOne, ResolvedPaths: config.ResolvedPaths{DaemonConfig: daemonConfigPath}}
+	optsTwo := &config.GlobalFlags{WorkingDir: repoTwo, ResolvedPaths: config.ResolvedPaths{DaemonConfig: daemonConfigPath}}
 
 	origWD := rememberCWD()
 	t.Cleanup(func() {
@@ -377,7 +462,7 @@ post_worktree_cleanup = "sh -c \"echo ${DEV_WRAPPED}:${DEV_WORKTREE_DNS_NAME}:${
 	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
 		t.Fatalf("write daemon config: %v", err)
 	}
-	opts := &Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+	opts := &config.GlobalFlags{WorkingDir: repoDir, ResolvedPaths: config.ResolvedPaths{DaemonConfig: daemonConfigPath}}
 
 	origWD := rememberCWD()
 	t.Cleanup(func() {
@@ -488,7 +573,7 @@ post_worktree_cleanup = "sh -c \"echo daemon-project-post-cleanup >> ` + orderLo
 	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
 		t.Fatalf("write daemon config: %v", err)
 	}
-	opts := &Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+	opts := &config.GlobalFlags{WorkingDir: repoDir, ResolvedPaths: config.ResolvedPaths{DaemonConfig: daemonConfigPath}}
 
 	var out bytes.Buffer
 	var errOut bytes.Buffer
@@ -569,7 +654,7 @@ post_worktree_cleanup = "sh -c \"echo ${DEV_WRAPPED} > ` + mainHookLog + `\""
 	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
 		t.Fatalf("write daemon config: %v", err)
 	}
-	opts := &Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+	opts := &config.GlobalFlags{WorkingDir: repoDir, ResolvedPaths: config.ResolvedPaths{DaemonConfig: daemonConfigPath}}
 
 	var out bytes.Buffer
 	var errOut bytes.Buffer
@@ -661,7 +746,7 @@ pre_worktree_add = "~/bin/global-pre-add ` + hookLog + `"
 		t.Fatalf("write daemon config: %v", err)
 	}
 
-	opts := &Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+	opts := &config.GlobalFlags{WorkingDir: repoDir, ResolvedPaths: config.ResolvedPaths{DaemonConfig: daemonConfigPath}}
 	var out bytes.Buffer
 	var errOut bytes.Buffer
 	if err := runWorktreeAdd(opts, "feature", "", &out, &errOut); err != nil {
@@ -709,7 +794,7 @@ name = "foocorp/monorepo"
 	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
 		t.Fatalf("write daemon config: %v", err)
 	}
-	opts := &Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+	opts := &config.GlobalFlags{WorkingDir: repoDir, ResolvedPaths: config.ResolvedPaths{DaemonConfig: daemonConfigPath}}
 	origWD := rememberCWD()
 	t.Cleanup(func() {
 		_ = os.Chdir(origWD)
@@ -783,7 +868,7 @@ post_worktree_add = "sh -c \"echo ${DEV_WORKTREE_DNS_NAME}:${DEV_MAIN_WORKTREE} 
 		t.Fatalf("git worktree add: %v", err)
 	}
 
-	opts := &Options{WorkingDir: externalPath, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+	opts := &config.GlobalFlags{WorkingDir: externalPath, ResolvedPaths: config.ResolvedPaths{DaemonConfig: daemonConfigPath}}
 	var out bytes.Buffer
 	var errOut bytes.Buffer
 	if err := runWorktreeRegister(opts, "feature/something", &out, &errOut); err != nil {
@@ -820,7 +905,7 @@ post_worktree_add = "sh -c \"echo ${DEV_WORKTREE_DNS_NAME}:${DEV_MAIN_WORKTREE} 
 	}
 }
 
-func setupWorktreeLifecycleRepo(t *testing.T) (string, string, *Options) {
+func setupWorktreeLifecycleRepo(t *testing.T) (string, string, *config.GlobalFlags) {
 	t.Helper()
 	base := t.TempDir()
 	repoDir := filepath.Join(base, "repo")
@@ -854,7 +939,7 @@ name = "demo"
 	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0o600); err != nil {
 		t.Fatalf("write daemon config: %v", err)
 	}
-	return repoDir, daemonConfigPath, &Options{WorkingDir: repoDir, ResolvedPaths: ResolvedPaths{DaemonConfig: daemonConfigPath}}
+	return repoDir, daemonConfigPath, &config.GlobalFlags{WorkingDir: repoDir, ResolvedPaths: config.ResolvedPaths{DaemonConfig: daemonConfigPath}}
 }
 
 func runGitForTest(dir string, args ...string) error {

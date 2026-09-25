@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"dev/internal/config"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,7 +19,7 @@ url = "https://gw.example.test"
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	opts := &Options{}
+	opts := &config.GlobalFlags{}
 	opts.ResolvedPaths.ProjectConfig = projectPath
 	got := resolveGatewayURLForLogin(opts, "")
 	if got != "https://gw.example.test" {

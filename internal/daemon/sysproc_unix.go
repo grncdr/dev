@@ -1,6 +1,6 @@
 //go:build darwin || linux
 
-package cli
+package daemon
 
 import "syscall"
 

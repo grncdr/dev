@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"dev/internal/config"
 	"fmt"
 	"io"
 	"net/url"
@@ -15,7 +16,7 @@ import (
 
 var validInitProjectPattern = regexp.MustCompile(`^[a-z0-9/_-]+$`)
 
-func newInitCmd(opts *Options) *cobra.Command {
+func newInitCmd(opts *config.GlobalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "initialize project config",
@@ -26,7 +27,7 @@ func newInitCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func runInit(opts *Options, out io.Writer) error {
+func runInit(opts *config.GlobalFlags, out io.Writer) error {
 	if opts == nil {
 		return fmt.Errorf("missing options")
 	}

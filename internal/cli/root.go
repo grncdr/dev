@@ -13,35 +13,12 @@ import (
 	"dev/internal/version"
 )
 
-// Options holds the global CLI flags and resolved state shared across all commands.
-type Options struct {
-	// ConfigPath is the --config flag value (defaults to ".dev.toml").
-	ConfigPath string
-	// DaemonConfig is the --daemon-config flag value.
-	DaemonConfig string
-	// Debug enables verbose logging when true.
-	Debug bool
-	// WorkingDir is the process working directory at startup.
-	WorkingDir string
-	// ResolvedPaths holds the absolute paths computed from the flag values.
-	ResolvedPaths ResolvedPaths
-}
-
-// ResolvedPaths holds absolute filesystem paths for the project and daemon configs,
-// resolved from the CLI flag values during PersistentPreRunE.
-type ResolvedPaths struct {
-	// ProjectConfig is the absolute path to .dev.toml.
-	ProjectConfig string
-	// DaemonConfig is the absolute path to daemon.toml.
-	DaemonConfig string
-}
-
 func Execute() error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("resolve working directory: %w", err)
 	}
-	opts := &Options{WorkingDir: cwd}
+	opts := &config.GlobalFlags{WorkingDir: cwd}
 	var showVersion bool
 
 	root := &cobra.Command{
@@ -65,7 +42,7 @@ func Execute() error {
 	root.SilenceUsage = true
 
 	root.PersistentFlags().StringVar(&opts.ConfigPath, "config", config.DefaultProjectConfig, "override project config path")
-	root.PersistentFlags().StringVar(&opts.DaemonConfig, "daemon-config", config.ResolveDaemonConfigPath(), "override daemon config path")
+	root.PersistentFlags().StringVar(&opts.DaemonConfigPath, "daemon-config", config.ResolveDaemonConfigPath(), "override daemon config path")
 	root.PersistentFlags().BoolVar(&opts.Debug, "debug", false, "enable debug logging")
 	root.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "show dev version")
 
@@ -91,7 +68,7 @@ func Execute() error {
 	return root.Execute()
 }
 
-func resolvePaths(opts *Options) error {
+func resolvePaths(opts *config.GlobalFlags) error {
 	if opts == nil {
 		return errors.New("missing options")
 	}
@@ -106,7 +83,7 @@ func resolvePaths(opts *Options) error {
 	projectPath = filepath.Clean(projectPath)
 	opts.ResolvedPaths.ProjectConfig = projectPath
 
-	daemonPath, err := config.ExpandUserPath(opts.DaemonConfig)
+	daemonPath, err := config.ExpandUserPath(opts.DaemonConfigPath)
 	if err != nil {
 		return fmt.Errorf("resolve daemon config path: %w", err)
 	}
@@ -115,7 +92,7 @@ func resolvePaths(opts *Options) error {
 	return nil
 }
 
-func workingDir(opts *Options) string {
+func workingDir(opts *config.GlobalFlags) string {
 	if opts == nil {
 		return ""
 	}

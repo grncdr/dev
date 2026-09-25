@@ -24,7 +24,7 @@ import (
 	"dev/internal/gateway"
 )
 
-func newGatewayCmd(opts *Options) *cobra.Command {
+func newGatewayCmd(opts *config.GlobalFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "gateway",
 		Short: "manage the gateway",
@@ -42,7 +42,7 @@ func newGatewayCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func newGatewayInitCmd(opts *Options) *cobra.Command {
+func newGatewayInitCmd(opts *config.GlobalFlags) *cobra.Command {
 	var ttl time.Duration
 	var uses int
 	cmd := &cobra.Command{
@@ -57,7 +57,7 @@ func newGatewayInitCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func newGatewayLoginCmd(opts *Options) *cobra.Command {
+func newGatewayLoginCmd(opts *config.GlobalFlags) *cobra.Command {
 	var name string
 	var gatewayURL string
 	cmd := &cobra.Command{
@@ -73,7 +73,7 @@ func newGatewayLoginCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func runGateway(opts *Options) error {
+func runGateway(opts *config.GlobalFlags) error {
 	daemonCfg, _, err := config.LoadDaemonConfig(opts.ResolvedPaths.DaemonConfig)
 	if err != nil {
 		return err
@@ -217,7 +217,7 @@ func buildGatewayACME(ctx context.Context, daemonCfg *config.DaemonConfig, dataD
 	return manager, tlsConfig, nil
 }
 
-func runGatewayInit(opts *Options, ttl time.Duration, uses int) error {
+func runGatewayInit(opts *config.GlobalFlags, ttl time.Duration, uses int) error {
 	daemonCfg, err := loadDaemonConfig(opts)
 	if err != nil {
 		return err
@@ -241,7 +241,7 @@ func runGatewayInit(opts *Options, ttl time.Duration, uses int) error {
 	return nil
 }
 
-func runGatewayLogin(opts *Options, inviteCode, name, gatewayURL string) error {
+func runGatewayLogin(opts *config.GlobalFlags, inviteCode, name, gatewayURL string) error {
 	if strings.TrimSpace(name) == "" {
 		name = os.Getenv("USER")
 		if name == "" {
@@ -313,7 +313,7 @@ func runGatewayLogin(opts *Options, inviteCode, name, gatewayURL string) error {
 	return nil
 }
 
-func resolveGatewayURLForLogin(opts *Options, explicit string) string {
+func resolveGatewayURLForLogin(opts *config.GlobalFlags, explicit string) string {
 	explicit = strings.TrimSpace(explicit)
 	if explicit != "" {
 		return explicit

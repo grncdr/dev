@@ -17,7 +17,7 @@ import (
 	"dev/internal/config"
 )
 
-func newGatewayInviteCmd(opts *Options) *cobra.Command {
+func newGatewayInviteCmd(opts *config.GlobalFlags) *cobra.Command {
 	var ttl time.Duration
 	var uses int
 	var gatewayURL string
@@ -34,7 +34,7 @@ func newGatewayInviteCmd(opts *Options) *cobra.Command {
 	return cmd
 }
 
-func runInviteCreate(opts *Options, gatewayURL string, ttl time.Duration, uses int) error {
+func runInviteCreate(opts *config.GlobalFlags, gatewayURL string, ttl time.Duration, uses int) error {
 	gatewayURL = resolveGatewayURLForLogin(opts, gatewayURL)
 	if gatewayURL == "" {
 		return errors.New("gateway URL is required (use --gateway-url or set gateway.url in project config)")
