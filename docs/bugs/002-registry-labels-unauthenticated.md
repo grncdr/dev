@@ -1,7 +1,7 @@
 # BUG-002: Registry Labels Endpoint Exposes Tunnels Without Authentication
 
 **Severity**: Medium
-**Status**: Open
+**Status**: Fixed
 **Found**: 2026-02-02 (security audit)
 
 ## Summary
@@ -70,3 +70,7 @@ Option C: Return only labels without full lease details for unauthenticated requ
 ## Related Files
 
 - `internal/gateway/server.go` - Endpoint handler and auth exemption
+
+## Resolution
+
+Option B: `handleRegistryLabels` now calls `ensureAgentAuth`. When the gateway enforces mTLS, a request without a verified client certificate gets `401 agent_auth_required`. Agents with a certificate can still list labels.

@@ -1080,6 +1080,27 @@ func TestServer_InviteCreateRequiresClientCert(t *testing.T) {
 	}
 }
 
+func TestServer_RegistryLabelsRequiresClientCert(t *testing.T) {
+	dir := t.TempDir()
+	srv, err := NewServer(ServerOptions{
+		ListenAddr: "127.0.0.1:0",
+		DataDir:    dir,
+		DNSZone:    "tunnels.example.test",
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	defer srv.listener.Close()
+	srv.enforceAgentMTLS = true
+
+	req := httptest.NewRequest(http.MethodGet, "/_registry/labels", nil)
+	rr := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d (%s)", rr.Code, rr.Body.String())
+	}
+}
+
 func TestNewServer_RequiresDNSZone(t *testing.T) {
 	_, err := NewServer(ServerOptions{
 		ListenAddr: "127.0.0.1:0",

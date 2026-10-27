@@ -409,6 +409,9 @@ func (s *Server) writeClientCertificateResponse(w http.ResponseWriter, certPEM, 
 }
 
 func (s *Server) handleRegistryLabels(w http.ResponseWriter, r *http.Request) {
+	if !s.ensureAgentAuth(w, r) {
+		return
+	}
 	if r.Method != http.MethodGet {
 		writeMethodNotAllowed(w)
 		return
