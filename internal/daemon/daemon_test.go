@@ -9,23 +9,25 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"dev/internal/config"
 )
 
-func TestServerSkipsDisabledLocalProxy(t *testing.T) {
+func TestServerSkipsDisabledLocalProxyWithoutProjectConfig(t *testing.T) {
 	occupied, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("occupy proxy address: %v", err)
 	}
 	defer occupied.Close()
 
-	t.Setenv("DEV_PROXY_LISTEN_HTTP", "")
+	t.Setenv("DEV_PROXY_LISTEN_HTTP", occupied.Addr().String())
 	t.Setenv("DEV_PROXY_LISTEN_HTTPS", "off")
 
-	disabled := false
 	baseDir := t.TempDir()
 	t.Setenv("HOME", baseDir)
+	daemonConfigPath := filepath.Join(baseDir, "daemon.toml")
+	if err := os.WriteFile(daemonConfigPath, []byte("[local-proxy]\nenabled = false\n"), 0o600); err != nil {
+		t.Fatalf("write daemon config: %v", err)
+	}
+	t.Setenv("DEV_DAEMON_CONFIG", daemonConfigPath)
 	oldCwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("get working directory: %v", err)
@@ -39,13 +41,6 @@ func TestServerSkipsDisabledLocalProxy(t *testing.T) {
 	srv, err := NewServer(socketPath)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
-	}
-	srv.daemonConfig = &config.DaemonConfig{
-		StateDir: baseDir,
-		LocalProxy: config.DaemonLocalProxyBlock{
-			Enabled:    &disabled,
-			ListenHTTP: occupied.Addr().String(),
-		},
 	}
 
 	errCh := make(chan error, 1)

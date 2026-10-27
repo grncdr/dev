@@ -391,6 +391,22 @@ func (s *Server) runningWorktreesForResume() []RunningWorktree {
 }
 
 func (s *Server) loadConfig() error {
+	// Skip loading the user's daemon config during tests unless the test
+	// explicitly provides one.
+	if !runningUnderGoTest() || os.Getenv("DEV_DAEMON_CONFIG") != "" {
+		daemonPath, err := config.ExpandUserPath(config.ResolveDaemonConfigPath())
+		if err == nil {
+			daemonCfg, _, err := config.LoadDaemonConfig(daemonPath)
+			if err == nil {
+				s.daemonConfig = daemonCfg
+			}
+		}
+	}
+	if s.manager != nil {
+		s.manager.SetApexZone(s.projectApexZone())
+		s.manager.SetDaemonConfig(s.daemonConfig)
+	}
+
 	mainPath, err := worktree.ResolveMainPathInDir(".")
 	if err != nil {
 		return nil
@@ -405,17 +421,6 @@ func (s *Server) loadConfig() error {
 	}
 	s.config = cfg
 	s.mainPath = mainPath
-	// Skip loading user's daemon config during tests to avoid conflicts
-	// with a locally running daemon.
-	if !runningUnderGoTest() {
-		daemonPath, err := config.ExpandUserPath(config.ResolveDaemonConfigPath())
-		if err == nil {
-			daemonCfg, _, err := config.LoadDaemonConfig(daemonPath)
-			if err == nil {
-				s.daemonConfig = daemonCfg
-			}
-		}
-	}
 	if s.manager != nil && s.config != nil && s.mainPath != "" {
 		if projectID, err := resolveProjectIdentifier(s.config); err == nil {
 			if mainSlug, err := resolveMainWorktreeSlug(s.mainPath); err == nil {
@@ -432,8 +437,6 @@ func (s *Server) loadConfig() error {
 			}
 		}
 	}
-	s.manager.SetApexZone(s.projectApexZone())
-	s.manager.SetDaemonConfig(s.daemonConfig)
 	return nil
 }
 
