@@ -153,7 +153,6 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	mux.HandleFunc("/_agent/cert/issue", s.handleAgentCertIssue)
 	mux.HandleFunc("/_agent/cert/renew", s.handleAgentCertRenew)
 	mux.HandleFunc("/_agent/tunnel/", s.handleAgentTunnel)
-	mux.HandleFunc("/_admin/invites/create", s.handleAdminInviteCreate)
 	mux.HandleFunc("/_registry/labels", s.handleRegistryLabels)
 	mux.HandleFunc("/", s.handlePublic)
 
@@ -317,38 +316,20 @@ func (s *Server) handleAgentUnregister(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) handleAdminInviteCreate(w http.ResponseWriter, r *http.Request) {
-	s.handleInviteCreate(w, r)
-}
-
 func (s *Server) handleAgentInviteCreate(w http.ResponseWriter, r *http.Request) {
 	if !s.ensureAgentAuth(w, r) {
 		return
 	}
-	s.handleInviteCreate(w, r)
-}
-
-func (s *Server) handleInviteCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeMethodNotAllowed(w)
 		return
 	}
 	var req InviteCreateRequest
-	if r.Body != nil {
-		if err := decodeJSON(r, &req); err != nil && !errors.Is(err, io.EOF) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"code": "invalid_body", "error": err.Error()})
-			return
-		}
+	if err := decodeJSON(r, &req); err != nil && !errors.Is(err, io.EOF) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"code": "invalid_body", "error": err.Error()})
+		return
 	}
-	ttl := 5 * time.Minute
-	if req.TTLSeconds > 0 {
-		ttl = time.Duration(req.TTLSeconds) * time.Second
-	}
-	uses := req.Uses
-	if uses <= 0 {
-		uses = 1
-	}
-	invite, err := s.invites.Create(ttl, uses)
+	invite, err := s.invites.Create(time.Duration(req.TTLSeconds)*time.Second, req.Uses)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"code": "invite_create_failed", "error": err.Error()})
 		return

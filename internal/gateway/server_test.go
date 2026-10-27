@@ -1051,6 +1051,35 @@ func TestEnsureAgentAuth_RequiresClientCertWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestServer_InviteCreateRequiresClientCert(t *testing.T) {
+	dir := t.TempDir()
+	srv, err := NewServer(ServerOptions{
+		ListenAddr: "127.0.0.1:0",
+		DataDir:    dir,
+		DNSZone:    "tunnels.example.test",
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	defer srv.listener.Close()
+	srv.enforceAgentMTLS = true
+
+	for path, want := range map[string]int{
+		"/_agent/invites/create": http.StatusUnauthorized,
+		"/_admin/invites/create": http.StatusBadGateway, // falls through to public routing
+	} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
+		rr := httptest.NewRecorder()
+		srv.httpServer.Handler.ServeHTTP(rr, req)
+		if rr.Code != want {
+			t.Fatalf("POST %s: expected %d, got %d (%s)", path, want, rr.Code, rr.Body.String())
+		}
+	}
+	if len(srv.invites.invites) != 0 {
+		t.Fatalf("expected no invites, got %d", len(srv.invites.invites))
+	}
+}
+
 func TestNewServer_RequiresDNSZone(t *testing.T) {
 	_, err := NewServer(ServerOptions{
 		ListenAddr: "127.0.0.1:0",
