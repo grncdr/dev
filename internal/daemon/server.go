@@ -134,8 +134,10 @@ func (s *Server) Serve() error {
 		return err
 	}
 	defer s.stopGatewayCredentialTracking()
-	if err := s.startProxy(); err != nil {
-		return err
+	if s.daemonConfig == nil || s.daemonConfig.LocalProxy.IsEnabled() {
+		if err := s.startProxy(); err != nil {
+			return err
+		}
 	}
 	if err := s.restoreFromResume(); err != nil {
 		logError(http.StatusInternalServerError, "resume_restore_failed", err)
