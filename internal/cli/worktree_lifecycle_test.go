@@ -102,7 +102,13 @@ pre_worktree_cleanup = "sh -c 'echo hook >> ` + orderLog + `'"
 		t.Fatalf("create branch: %v", err)
 	}
 
-	homeDir := filepath.Join(base, "home")
+	// HOME holds the daemon socket, so keep it under the 104-byte Unix
+	// socket path limit on macOS, where t.TempDir() paths are often too long.
+	homeDir, err := os.MkdirTemp("", "home")
+	if err != nil {
+		t.Fatalf("create home dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(homeDir) })
 	t.Setenv("HOME", homeDir)
 	socketPath, err := daemon.ResolveSocketPath()
 	if err != nil {

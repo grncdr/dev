@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -88,10 +87,7 @@ url = "http://unused.local"
 		_ = gw.Shutdown(ctx)
 	})
 
-	socketPath := filepath.Join(baseDir, "devd.sock")
-	if len(socketPath) > 80 {
-		socketPath = filepath.Join(os.TempDir(), fmt.Sprintf("devd-tunnel-%d.sock", time.Now().UnixNano()))
-	}
+	socketPath := testSocketPath(t)
 	srv, err := NewServer(socketPath)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
@@ -313,10 +309,7 @@ url = "http://unused.local"
 		_ = gw.Shutdown(ctx)
 	})
 
-	socketPath := filepath.Join(baseDir, "devd-implicit.sock")
-	if len(socketPath) > 80 {
-		socketPath = filepath.Join(os.TempDir(), fmt.Sprintf("devd-implicit-%d.sock", time.Now().UnixNano()))
-	}
+	socketPath := testSocketPath(t)
 	srv, err := NewServer(socketPath)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)

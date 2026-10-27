@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -79,10 +78,7 @@ command = "sh -c \"trap 'exit 0' INT TERM; while :; do sleep 1; done\""
 		t.Fatal(err)
 	}
 
-	socketPath := filepath.Join(baseDir, "devd.sock")
-	if len(socketPath) > 80 {
-		socketPath = filepath.Join(os.TempDir(), fmt.Sprintf("devd-shared-%d.sock", time.Now().UnixNano()))
-	}
+	socketPath := testSocketPath(t)
 	srv, err := NewServer(socketPath)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)

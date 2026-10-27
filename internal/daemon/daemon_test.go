@@ -37,7 +37,7 @@ func TestServerSkipsDisabledLocalProxyWithoutProjectConfig(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldCwd) })
 
-	socketPath := filepath.Join(baseDir, "devd.sock")
+	socketPath := testSocketPath(t)
 	srv, err := NewServer(socketPath)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
@@ -118,4 +118,16 @@ func TestServerHealthAndWorktree(t *testing.T) {
 			t.Fatalf("server error: %v", err)
 		}
 	}
+}
+
+// testSocketPath returns a daemon socket path that fits the 104-byte Unix
+// socket limit on macOS, where t.TempDir() paths are often too long.
+func testSocketPath(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "devd")
+	if err != nil {
+		t.Fatalf("create socket dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return filepath.Join(dir, "devd.sock")
 }
