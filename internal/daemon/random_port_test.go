@@ -167,7 +167,7 @@ func TestProxyProcessDefaultsToRandomPortWhenSocketUnset(t *testing.T) {
 	}
 
 	configPath := filepath.Join(repoDir, ".dev.toml")
-	configBody := `
+	configBody := fmt.Sprintf(`
 [project]
 name = "demo"
 
@@ -176,9 +176,12 @@ apex_zone = ".localhost"
 
 [process.mailpit]
 singleton = false
-command = "sh -c \"python3 -m http.server ${PORT}\""
+command = "%s -test.run=^$ -test.timeout=30s"
 proxy = { subdomain = "mailpit" }
-`
+
+[process.mailpit.env]
+DEV_TEST_HTTP_LISTEN = "1"
+`, os.Args[0])
 	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -291,8 +294,11 @@ name = "demo"
 [process.http]
 singleton = false
 port = %d
-command = "sh -c \"python3 -m http.server ${PORT}\""
-`, port)
+command = "%s -test.run=^$ -test.timeout=30s"
+
+[process.http.env]
+DEV_TEST_HTTP_LISTEN = "1"
+`, port, os.Args[0])
 	if err := os.WriteFile(configPath, []byte(configBody), 0o600); err != nil {
 		t.Fatal(err)
 	}

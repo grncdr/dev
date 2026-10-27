@@ -40,13 +40,16 @@ apex_zone = ".localhost"
 
 [process.db]
 singleton = true
-command = "sh -c \"python3 -m http.server ${PORT}\""
+command = "%s -test.run=^$ -test.timeout=30s"
 port = "random"
 health = { type = "http", path = "/" }
 
+[process.db.env]
+DEV_TEST_HTTP_LISTEN = "1"
+
 [[process.db.proxy]]
 tcp_listen = %d
-`, tcpListenPort)
+`, os.Args[0], tcpListenPort)
 	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(configBody), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,15 +23,19 @@ func TestEnsureProcessForTargetWaitsForHTTPHealth(t *testing.T) {
 		t.Fatalf("git init: %v", err)
 	}
 
-	cfg := `
+	cfg := fmt.Sprintf(`
 [project]
 name = "demo"
 
 [process.web]
-command = "sh -c \"sleep 1; python3 -m http.server ${PORT}\""
+command = "%s -test.run=^$ -test.timeout=30s"
 port = "random"
 health = { type = "http", path = "/" }
-`
+
+[process.web.env]
+DEV_TEST_HTTP_LISTEN = "1"
+DEV_TEST_LISTEN_DELAY = "1s"
+`, os.Args[0])
 	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +97,7 @@ func TestResolveProxyTargetAutoStartsAndWaitsForHealth(t *testing.T) {
 		t.Fatalf("git init: %v", err)
 	}
 
-	cfgText := `
+	cfgText := fmt.Sprintf(`
 [project]
 name = "demo"
 
@@ -100,13 +105,17 @@ name = "demo"
 apex_zone = ".localhost"
 
 [process.server]
-command = "sh -c \"sleep 1; python3 -m http.server ${PORT}\""
+command = "%s -test.run=^$ -test.timeout=30s"
 port = "random"
 health = { type = "http", path = "/" }
 
+[process.server.env]
+DEV_TEST_HTTP_LISTEN = "1"
+DEV_TEST_LISTEN_DELAY = "1s"
+
 [[process.server.proxy]]
 path = "/"
-`
+`, os.Args[0])
 	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(cfgText), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -180,16 +189,20 @@ func TestEnsureProcessForTargetHonorsStartupTimeout(t *testing.T) {
 		t.Fatalf("git init: %v", err)
 	}
 
-	cfg := `
+	cfg := fmt.Sprintf(`
 [project]
 name = "demo"
 
 [process.web]
-command = "sh -c \"sleep 2; python3 -m http.server ${PORT}\""
+command = "%s -test.run=^$ -test.timeout=30s"
 port = "random"
 health = { type = "http", path = "/" }
 startup_timeout = 0.3
-`
+
+[process.web.env]
+DEV_TEST_HTTP_LISTEN = "1"
+DEV_TEST_LISTEN_DELAY = "2s"
+`, os.Args[0])
 	if err := os.WriteFile(filepath.Join(repoDir, ".dev.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}

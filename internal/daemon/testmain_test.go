@@ -3,26 +3,35 @@ package daemon
 import (
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestMain(m *testing.M) {
-	// When re-executed as a subprocess with DEV_TEST_TCP_LISTEN=1, act as a
-	// simple TCP listener on $PORT. This replaces "python3 -m http.server"
-	// in integration tests so they don't depend on Python.
-	if os.Getenv("DEV_TEST_TCP_LISTEN") == "1" {
-		port := os.Getenv("PORT")
-		ln, err := net.Listen("tcp", "127.0.0.1:"+port)
+	// When re-executed as a subprocess with DEV_TEST_HTTP_LISTEN=1, serve
+	// HTTP 200 on 127.0.0.1:$PORT, after DEV_TEST_LISTEN_DELAY if it is set.
+	// Integration tests use this instead of "python3 -m http.server" so they
+	// don't depend on Python.
+	if os.Getenv("DEV_TEST_HTTP_LISTEN") == "1" {
+		if delay, err := time.ParseDuration(os.Getenv("DEV_TEST_LISTEN_DELAY")); err == nil {
+			time.Sleep(delay)
+		}
+		ln, err := net.Listen("tcp", "127.0.0.1:"+os.Getenv("PORT"))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "listen: %v\n", err)
 			os.Exit(1)
 		}
-		defer ln.Close()
+		go func() {
+			_ = http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte("ok"))
+			}))
+		}()
 		ch := make(chan os.Signal, 1)
 		signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 		<-ch

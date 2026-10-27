@@ -85,7 +85,7 @@ health = { type = "tcp" }
 idle_timeout = 1.0
 
 [process.web.env]
-DEV_TEST_TCP_LISTEN = "1"
+DEV_TEST_HTTP_LISTEN = "1"
 
 [[process.web.proxy]]
 path = "/"
