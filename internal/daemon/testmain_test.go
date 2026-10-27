@@ -96,20 +96,25 @@ func signalHelperParent(graceful, childIgnoreINT bool) {
 		os.Exit(1)
 	}
 
+	// Set our SIGINT disposition before writing the PID file: tests send
+	// SIGINT as soon as the file appears.
+	ch := make(chan os.Signal, 1)
+	if graceful {
+		signal.Notify(ch, syscall.SIGINT)
+	} else {
+		signal.Ignore(syscall.SIGINT)
+	}
+
 	pidFile := os.Getenv("CHILD_PID_FILE")
 	if pidFile != "" {
 		_ = os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", child.Process.Pid)), 0644)
 	}
 
 	if graceful {
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, syscall.SIGINT)
 		<-ch
 		_ = child.Process.Kill()
 		_ = child.Wait()
 		os.Exit(0)
 	}
-
-	signal.Ignore(syscall.SIGINT)
 	_ = child.Wait()
 }
