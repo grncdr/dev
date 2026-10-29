@@ -4,7 +4,22 @@ import (
 	"testing"
 
 	mdns "github.com/miekg/dns"
+
+	"dev/internal/config"
 )
+
+func TestLocalDNSEnabled(t *testing.T) {
+	if !localDNSEnabled(nil) {
+		t.Fatal("expected local DNS enabled without daemon config")
+	}
+	if !localDNSEnabled(&config.DaemonConfig{}) {
+		t.Fatal("expected local DNS enabled when setting is absent")
+	}
+	disabled := false
+	if localDNSEnabled(&config.DaemonConfig{LocalDNS: config.DaemonLocalDNSBlock{Enabled: &disabled}}) {
+		t.Fatal("expected local DNS disabled by daemon config")
+	}
+}
 
 func TestLocalDNSMatchesName(t *testing.T) {
 	t.Parallel()

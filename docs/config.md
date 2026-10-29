@@ -214,6 +214,9 @@ ttl = 60
 
 worktree_dir = "~/.local/state/dev/worktrees"
 
+[local-dns]
+enabled = true
+
 [local-proxy]
 enabled = true
 apex_zone = ".localhost"
@@ -235,6 +238,7 @@ post_worktree_cleanup = "bin/project-post-worktree-cleanup-user"
 ```
 
 Notes:
+- `local-dns.enabled` defaults to `true`; set to `false` to prevent the daemon from starting its DNS listener on `127.0.0.1:15353`. Other daemon features continue to run.
 - `local-proxy.enabled` defaults to `true`; set to `false` to disable the local proxy.
 - `local-proxy.apex_zone` is daemon-level and defaults to `.localhost`.
 - `worktree_dir` is daemon-level and controls where managed worktrees are created.

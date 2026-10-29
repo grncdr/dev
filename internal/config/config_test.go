@@ -84,6 +84,30 @@ func TestLoadDaemonConfig_MissingFile(t *testing.T) {
 	}
 }
 
+func TestLoadDaemonConfig_LocalDNSDefaultsEnabledAndParsesDisabled(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "daemon.toml")
+
+	cfg, _, err := LoadDaemonConfig(filepath.Join(dir, "missing.toml"))
+	if err != nil {
+		t.Fatalf("load missing daemon config: %v", err)
+	}
+	if !cfg.LocalDNS.IsEnabled() {
+		t.Fatal("expected local DNS to default to enabled")
+	}
+
+	if err := os.WriteFile(path, []byte("[local-dns]\nenabled = false\n"), 0o600); err != nil {
+		t.Fatalf("write daemon config: %v", err)
+	}
+	cfg, _, err = LoadDaemonConfig(path)
+	if err != nil {
+		t.Fatalf("load daemon config: %v", err)
+	}
+	if cfg.LocalDNS.IsEnabled() {
+		t.Fatal("expected local DNS to be disabled")
+	}
+}
+
 func TestLoadDaemonConfig_GatewayFields(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "daemon.toml")

@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	mdns "github.com/miekg/dns"
+
+	"dev/internal/config"
 )
 
 const (
@@ -18,6 +20,9 @@ const (
 )
 
 func (s *Server) startLocalDNS() error {
+	if !localDNSEnabled(s.daemonConfig) {
+		return nil
+	}
 	if runningUnderGoTest() {
 		return nil
 	}
@@ -50,6 +55,10 @@ func (s *Server) startLocalDNS() error {
 	}()
 
 	return nil
+}
+
+func localDNSEnabled(cfg *config.DaemonConfig) bool {
+	return cfg == nil || cfg.LocalDNS.IsEnabled()
 }
 
 func runningUnderGoTest() bool {

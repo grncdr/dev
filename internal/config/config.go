@@ -58,6 +58,8 @@ type DaemonConfig struct {
 	Gateway DaemonGatewayBlock `toml:"gateway" json:"gateway,omitempty"`
 	// LocalProxy holds the [local-proxy] table for the local HTTPS proxy.
 	LocalProxy DaemonLocalProxyBlock `toml:"local-proxy" json:"local_proxy,omitempty"`
+	// LocalDNS holds the [local-dns] table for the built-in DNS server.
+	LocalDNS DaemonLocalDNSBlock `toml:"local-dns" json:"local_dns,omitempty"`
 	// WorktreeDir overrides the default worktree checkout directory.
 	WorktreeDir string `toml:"worktree_dir" json:"worktree_dir,omitempty"`
 	// GlobalHooks holds lifecycle hooks that apply to all projects.
@@ -135,6 +137,20 @@ type ProjectProxyBlock struct {
 type ProjectLocalDNSBlock struct {
 	// Overrides maps worktree slugs to custom DNS labels for the local proxy.
 	Overrides map[string]string `toml:"overrides" json:"overrides,omitempty"`
+}
+
+// DaemonLocalDNSBlock holds the [local-dns] table in daemon.toml for the
+// built-in DNS server that resolves local proxy hostnames.
+type DaemonLocalDNSBlock struct {
+	// Enabled controls whether the local DNS server starts (defaults to true).
+	Enabled *bool `toml:"enabled" json:"enabled,omitempty"`
+}
+
+func (b *DaemonLocalDNSBlock) IsEnabled() bool {
+	if b.Enabled == nil {
+		return true // default enabled
+	}
+	return *b.Enabled
 }
 
 // DaemonLocalProxyBlock holds the [local-proxy] table in daemon.toml for the
