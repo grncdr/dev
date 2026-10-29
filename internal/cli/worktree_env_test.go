@@ -42,12 +42,16 @@ apex_zone = ".stephen.test"
 		t.Fatalf("runWorktreeEnv: %v", err)
 	}
 
+	resolvedRepoDir, err := filepath.EvalSymlinks(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	got := out.String()
 	for _, want := range []string{
 		"export DEV_PROJECT='demo'\n",
 		"export DEV_WORKTREE_SLUG='primary'\n",
 		"export DEV_WORKTREE_DNS_NAME='demo.stephen.test'\n",
-		"export DEV_WORKTREE_PATH='" + repoDir + "'\n",
+		"export DEV_WORKTREE_PATH='" + resolvedRepoDir + "'\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected shell output to contain %q, got:\n%s", want, got)
@@ -88,7 +92,11 @@ func TestRunWorktreeEnv_LinkedWorktreeUsesRegisteredSlug(t *testing.T) {
 	if got["DEV_WORKTREE_DNS_NAME"] != "auth.localhost" {
 		t.Fatalf("expected linked worktree DNS name, got %q", got["DEV_WORKTREE_DNS_NAME"])
 	}
-	if got["DEV_WORKTREE_PATH"] != linkedDir {
+	resolvedLinkedDir, err := filepath.EvalSymlinks(linkedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["DEV_WORKTREE_PATH"] != resolvedLinkedDir {
 		t.Fatalf("expected linked worktree path, got %q", got["DEV_WORKTREE_PATH"])
 	}
 	if got["DEV_WORKTREE_BRANCH"] != "feature/auth" {
