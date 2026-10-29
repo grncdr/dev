@@ -41,6 +41,7 @@ func newWorktreeCmd(opts *config.GlobalFlags) *cobra.Command {
 	cmd.AddCommand(newWorktreeRegisterCmd(opts))
 	cmd.AddCommand(newWorktreeCleanupCmd(opts))
 	cmd.AddCommand(newWorktreeListCmd(opts))
+	cmd.AddCommand(newWorktreeEnvCmd(opts))
 	return cmd
 }
 

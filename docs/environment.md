@@ -68,6 +68,20 @@ Provided variables:
 - `DEV_WORKTREE_BRANCH`
 - `DEV_HOOK_NAME`
 
+## Loading the current worktree environment in a shell
+
+Use `dev worktree env` when an interactive command or shell initialization hook
+needs the same resolved worktree identity as a dev-managed process:
+
+```sh
+eval "$(dev worktree env)"
+```
+
+The command prints shell-safe `export` statements for the core variables listed
+above. It resolves the current main or registered linked worktree and reads local
+project and daemon configuration directly; the daemon does not need to be
+running. For structured output, use `dev worktree env --output json`.
+
 ## Adding more runtime variables for managed processes
 
 Use process config env blocks:

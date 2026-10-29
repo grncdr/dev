@@ -194,7 +194,7 @@ func (m *Manager) startWorktreeFromRef(slug, project, dirHint string, processes 
 	}
 	runtimeKey := runtimeKeyForPath(path)
 	dnsLabel := worktree.ProxyDNSLabelForSlug(cfg, slug)
-	branch, err := resolveWorktreeBranch(path)
+	branch, err := worktree.ResolveBranch(path)
 	if err != nil {
 		return nil, err
 	}
@@ -1108,7 +1108,7 @@ func (m *Manager) stopWorktreeFromRef(slug, project, dirHint string, processes [
 	if err != nil {
 		return nil, fmt.Errorf("resolve project identifier: %w", err)
 	}
-	branch, err := resolveWorktreeBranch(path)
+	branch, err := worktree.ResolveBranch(path)
 	if err != nil {
 		return nil, err
 	}
@@ -1902,18 +1902,7 @@ func (m *Manager) Connect(slug, process string, conn net.Conn) error {
 }
 
 func buildRuntimeVars(cfg *config.ProjectConfig, project, envSlug, worktreePath, branch, apexZone string) map[string]string {
-	dnsLabel := worktree.ProxyDNSLabelForSlug(cfg, envSlug)
-	zone := strings.TrimPrefix(apexZone, ".")
-	if zone == "" {
-		zone = "localhost"
-	}
-	return map[string]string{
-		"DEV_PROJECT":           project,
-		"DEV_WORKTREE_SLUG":     envSlug,
-		"DEV_WORKTREE_DNS_NAME": dnsLabel + "." + zone,
-		"DEV_WORKTREE_PATH":     worktreePath,
-		"DEV_WORKTREE_BRANCH":   branch,
-	}
+	return worktree.RuntimeEnvironment(cfg, project, envSlug, worktreePath, branch, apexZone)
 }
 
 func buildTemplateVars(runtimeVars map[string]string, mainPath, worktreeState string) map[string]string {
@@ -2297,17 +2286,4 @@ func runHook(command, wrapper, hookName, dir string, vars map[string]string) err
 		return fmt.Errorf("hook failed: %w", err)
 	}
 	return nil
-}
-
-func resolveWorktreeBranch(path string) (string, error) {
-	cmd := exec.Command("git", "-C", path, "rev-parse", "--abbrev-ref", "HEAD")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// Repos without commits do not have a resolvable HEAD; use a stable placeholder.
-		if strings.Contains(string(output), "ambiguous argument 'HEAD'") {
-			return "HEAD", nil
-		}
-		return "", fmt.Errorf("resolve worktree branch: %s", strings.TrimSpace(string(output)))
-	}
-	return strings.TrimSpace(string(output)), nil
 }
