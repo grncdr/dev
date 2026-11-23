@@ -34,7 +34,7 @@ func TestConnectionConflictForSpec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("idempotent re-share errored: %v", err)
 	}
-	if existing == nil || existing.Label != "shared" {
+	if existing == nil || existing.spec.Label != "shared" {
 		t.Fatalf("expected existing tunnel returned, got %+v", existing)
 	}
 

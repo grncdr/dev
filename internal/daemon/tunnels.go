@@ -54,6 +54,10 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 				if !status.Identifier.Equal(req.Identifier) {
 					return nil, fmt.Errorf("label %s already in use by %s (gateway %s)", req.Label, status.Identifier, url)
 				}
+				if url == gatewayURL {
+					// conn.Open re-shares the open tunnel with the new settings.
+					continue
+				}
 				out := toDaemonTunnelStatus(status)
 				return &out, nil
 			}

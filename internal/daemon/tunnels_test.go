@@ -358,3 +358,54 @@ url = "http://unused.local"
 		t.Fatalf("daemon did not stop")
 	}
 }
+
+// `dev share --no-auth` on a worktree that is already shared with basic auth
+// must remove the basic auth from the public host.
+func TestOpenTunnel_ReshareReplacesAuth(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repo := t.TempDir()
+	if err := runGit(repo, "init"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".dev.toml"), []byte("[project]\nname = \"org/app\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	slug := defaultSlugForRepo(t, repo)
+	gatewayURL := "http://127.0.0.1:1"
+	id := worktree.Identifier{Project: "org/app", Slug: slug}
+
+	s := &Server{
+		manager:      NewManager(),
+		mainPath:     repo,
+		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
+		agents: seededAgentsForTunnels(map[string]*managedTunnel{
+			"app": {
+				req: TunnelRequest{
+					Identifier:   id,
+					Label:        "app",
+					GatewayURL:   gatewayURL,
+					AuthUsername: "alice",
+					AuthPassword: "secret",
+				},
+				status: "connected",
+			},
+		}),
+	}
+	t.Cleanup(s.stopAllTunnels)
+
+	if route, ok := s.localProxyRouteForTunnelRequest("app.example.dev"); !ok || route.AuthUsername != "alice" {
+		t.Fatalf("expected seeded share with basic auth, got %+v ok=%v", route, ok)
+	}
+
+	if _, err := s.openTunnel(TunnelRequest{Identifier: id, Path: repo, Label: "app", GatewayURL: gatewayURL}); err != nil {
+		t.Fatalf("reshare: %v", err)
+	}
+
+	route, ok := s.localProxyRouteForTunnelRequest("app.example.dev")
+	if !ok {
+		t.Fatalf("expected route for reshared tunnel")
+	}
+	if route.AuthUsername != "" || route.AuthPassword != "" {
+		t.Fatalf("expected no basic auth after --no-auth reshare, got user=%q", route.AuthUsername)
+	}
+}

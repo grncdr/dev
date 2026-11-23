@@ -95,17 +95,16 @@ func (c *Connection) GatewayURL() string {
 }
 
 // conflictForSpecLocked inspects the open tunnels for a conflict with spec.
-// It returns a non-nil status when the request is idempotent (the same worktree
-// is already open under the same label), or an error when the label or the
-// worktree is already in use by a different tunnel. Callers must hold c.mu.
-func (c *Connection) conflictForSpecLocked(spec TunnelSpec) (*TunnelStatus, error) {
+// It returns the open tunnel when the same worktree is already open under the
+// same label, or an error when the label or the worktree is already in use by a
+// different tunnel. Callers must hold c.mu.
+func (c *Connection) conflictForSpecLocked(spec TunnelSpec) (*tunnelRuntime, error) {
 	for label, running := range c.tunnels {
 		if label == spec.Label {
 			if !running.spec.Equal(spec.Identifier) {
 				return nil, fmt.Errorf("label %s already in use by %s", spec.Label, running.spec.Identifier)
 			}
-			status := c.toStatusLocked(running)
-			return &status, nil
+			return running, nil
 		}
 		if running.spec.Equal(spec.Identifier) {
 			return nil, fmt.Errorf("slug %s already has label %s", spec.Slug, label)
@@ -138,8 +137,13 @@ func (c *Connection) Open(spec TunnelSpec, requestHandler TunnelRequestHandler) 
 		c.mu.Unlock()
 		return TunnelStatus{}, err
 	} else if existing != nil {
+		// A re-share keeps the connection and replaces the access settings, so
+		// `dev share --no-auth` removes the basic auth of an earlier share.
+		existing.spec.AuthUsername = spec.AuthUsername
+		existing.spec.AuthPassword = spec.AuthPassword
+		status := c.toStatusLocked(existing)
 		c.mu.Unlock()
-		return *existing, nil
+		return status, nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	rt := &tunnelRuntime{
