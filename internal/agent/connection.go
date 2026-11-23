@@ -172,35 +172,35 @@ func (c *Connection) Open(spec TunnelSpec, requestHandler TunnelRequestHandler) 
 		OnConnected: func() {
 			c.mu.Lock()
 			defer c.mu.Unlock()
-			if cur, ok := c.tunnels[spec.Label]; ok {
-				cur.status = "connected"
-				cur.lastError = ""
+			if c.isCurrentLocked(rt) {
+				rt.status = "connected"
+				rt.lastError = ""
 			}
 		},
 		OnRegistered: func(publicHost string) {
 			c.mu.Lock()
 			defer c.mu.Unlock()
-			if cur, ok := c.tunnels[spec.Label]; ok {
-				cur.publicHost = strings.TrimSpace(publicHost)
-				cur.registerStage = "register_complete"
-				cur.registerMsg = "gateway registration complete"
+			if c.isCurrentLocked(rt) {
+				rt.publicHost = strings.TrimSpace(publicHost)
+				rt.registerStage = "register_complete"
+				rt.registerMsg = "gateway registration complete"
 			}
 		},
 		OnRegisterProgress: func(stage, message string) {
 			c.mu.Lock()
 			defer c.mu.Unlock()
-			if cur, ok := c.tunnels[spec.Label]; ok {
-				cur.registerStage = strings.TrimSpace(stage)
-				cur.registerMsg = strings.TrimSpace(message)
+			if c.isCurrentLocked(rt) {
+				rt.registerStage = strings.TrimSpace(stage)
+				rt.registerMsg = strings.TrimSpace(message)
 			}
 		},
 		OnDisconnected: func(err error) {
 			c.mu.Lock()
 			defer c.mu.Unlock()
-			if cur, ok := c.tunnels[spec.Label]; ok {
-				cur.status = "connecting"
+			if c.isCurrentLocked(rt) {
+				rt.status = "connecting"
 				if err != nil {
-					cur.lastError = err.Error()
+					rt.lastError = err.Error()
 				}
 			}
 		},
@@ -210,21 +210,28 @@ func (c *Connection) Open(spec TunnelSpec, requestHandler TunnelRequestHandler) 
 		err := runner.Run(ctx)
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		cur, ok := c.tunnels[spec.Label]
-		if !ok {
+		if !c.isCurrentLocked(rt) {
 			return
 		}
 		if err != nil {
-			cur.status = "error"
-			cur.lastError = err.Error()
+			rt.status = "error"
+			rt.lastError = err.Error()
 			return
 		}
-		cur.status = "stopped"
+		rt.status = "stopped"
 	}()
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.toStatusLocked(rt), nil
+}
+
+// isCurrentLocked reports whether rt is still the open tunnel for its label.
+// A closed tunnel's runner can outlive it, and a re-share reuses the label, so
+// runner callbacks must not update the tunnel that now holds the label.
+// Callers must hold c.mu.
+func (c *Connection) isCurrentLocked(rt *tunnelRuntime) bool {
+	return c.tunnels[rt.spec.Label] == rt
 }
 
 // SeedTunnel is for daemon-side bootstrap/testing when no live gateway session

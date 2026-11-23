@@ -1,8 +1,13 @@
 package agent
 
 import (
+	"context"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"dev/internal/worktree"
 )
@@ -73,5 +78,97 @@ func TestConnectionDisambiguatesSameSlugAcrossProjects(t *testing.T) {
 	}
 	if gone := conn.Status(worktree.Identifier{Project: "cabinet", Slug: "main"}); gone != nil {
 		t.Fatalf("cabinet tunnel should be closed, got %+v", gone)
+	}
+}
+
+// fakeTunnelGateway accepts registrations and holds each tunnel connection
+// open until the test drops it.
+type fakeTunnelGateway struct {
+	*httptest.Server
+	tunnels chan net.Conn
+}
+
+func newFakeTunnelGateway(t *testing.T) *fakeTunnelGateway {
+	t.Helper()
+	gw := &fakeTunnelGateway{tunnels: make(chan net.Conn, 8)}
+	gw.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/_agent/register":
+			_, _ = w.Write([]byte(`{"type":"result","status":"ok","public_host":"example.dev"}`))
+		case r.Method == http.MethodConnect && strings.HasPrefix(r.URL.Path, "/_agent/tunnel/"):
+			conn, buf, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				return
+			}
+			_, _ = buf.WriteString("HTTP/1.1 200 OK\r\n\r\n")
+			_ = buf.Flush()
+			gw.tunnels <- conn
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(gw.Close)
+	return gw
+}
+
+func (gw *fakeTunnelGateway) nextTunnel(t *testing.T) net.Conn {
+	t.Helper()
+	select {
+	case conn := <-gw.tunnels:
+		t.Cleanup(func() { _ = conn.Close() })
+		return conn
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for tunnel connection")
+		return nil
+	}
+}
+
+func waitForTunnelStatus(t *testing.T, conn *Connection, label, want string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		status, ok := conn.TunnelForLabel(label)
+		if ok && status.Status == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected tunnel %s to be %q, got %q (found=%v)", label, want, status.Status, ok)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A re-share closes the old tunnel and opens a new one under the same label.
+// The old tunnel's runner exits only when the gateway drops its session, which
+// can be after the new tunnel connected. Its exit must not change the status
+// of the new tunnel.
+func TestConnectionReopenKeepsNewTunnelStatusWhenOldRunnerExits(t *testing.T) {
+	gw := newFakeTunnelGateway(t)
+	conn := NewConnection(gw.URL, "")
+	spec := TunnelSpec{Identifier: worktree.Identifier{Project: "cabinet", Slug: "main"}, Label: "shared", GatewayURL: gw.URL}
+	handler := func(context.Context, TunnelStatus, *http.Request, net.Conn) error { return nil }
+
+	if _, err := conn.Open(spec, handler); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	oldTunnel := gw.nextTunnel(t)
+	waitForTunnelStatus(t, conn, "shared", "connected")
+
+	if _, err := conn.Close("shared", spec.Identifier); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if _, err := conn.Open(spec, handler); err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	gw.nextTunnel(t)
+	waitForTunnelStatus(t, conn, "shared", "connected")
+
+	// The gateway drops the old session after the new one connected.
+	_ = oldTunnel.Close()
+	time.Sleep(200 * time.Millisecond)
+
+	status, _ := conn.TunnelForLabel("shared")
+	if status.Status != "connected" {
+		t.Fatalf("expected new tunnel to stay connected, got %q (last error %q)", status.Status, status.LastError)
 	}
 }
