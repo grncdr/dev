@@ -104,6 +104,39 @@ func TestRunWorktreeEnv_LinkedWorktreeUsesRegisteredSlug(t *testing.T) {
 	}
 }
 
+func TestRunWorktreeEnv_InsideHookReemitsHookEnvironment(t *testing.T) {
+	repoDir, _, opts := setupWorktreeLifecycleRepo(t)
+	opts.WorkingDir = repoDir
+
+	t.Setenv("DEV_HOOK_NAME", "post_worktree_cleanup")
+	t.Setenv("DEV_PROJECT", "demo")
+	t.Setenv("DEV_WORKTREE_SLUG", "feature/removed")
+	t.Setenv("DEV_WORKTREE_DNS_NAME", "removed.localhost")
+	t.Setenv("DEV_WORKTREE_PATH", filepath.Join(filepath.Dir(repoDir), "removed"))
+	t.Setenv("DEV_WORKTREE_BRANCH", "feature/removed")
+
+	var out bytes.Buffer
+	if err := runWorktreeEnv(opts, "json", &out); err != nil {
+		t.Fatalf("runWorktreeEnv: %v", err)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	want := map[string]string{
+		"DEV_PROJECT":           "demo",
+		"DEV_WORKTREE_SLUG":     "feature/removed",
+		"DEV_WORKTREE_DNS_NAME": "removed.localhost",
+		"DEV_WORKTREE_PATH":     filepath.Join(filepath.Dir(repoDir), "removed"),
+		"DEV_WORKTREE_BRANCH":   "feature/removed",
+	}
+	for key, value := range want {
+		if got[key] != value {
+			t.Fatalf("expected %s=%q from hook environment, got %q", key, value, got[key])
+		}
+	}
+}
+
 func TestShellQuote(t *testing.T) {
 	value := "it's $(not-executed); safe\nnext line"
 	quoted := shellQuote(value)

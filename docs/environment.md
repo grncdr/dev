@@ -82,6 +82,12 @@ above. It resolves the current main or registered linked worktree and reads loca
 project and daemon configuration directly; the daemon does not need to be
 running. For structured output, use `dev worktree env --output json`.
 
+Inside a dev hook (`DEV_HOOK_NAME` is set), the command prints the variables the
+hook already received instead of resolving from the working directory. Hooks can
+run outside the target worktree: `post_worktree_cleanup` runs in the main worktree
+after the target is removed. A shell initialization hook that runs
+`eval "$(dev worktree env)"` therefore keeps the hook's worktree identity.
+
 ## Adding more runtime variables for managed processes
 
 Use process config env blocks:

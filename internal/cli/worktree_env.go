@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -45,35 +46,14 @@ func runWorktreeEnv(opts *config.GlobalFlags, output string, out io.Writer) erro
 		return fmt.Errorf("missing options")
 	}
 
-	daemonCfg, err := loadDaemonConfig(opts)
-	if err != nil {
-		return err
+	env, ok := inheritedHookEnvironment()
+	if !ok {
+		resolved, err := resolveWorktreeEnvironment(opts)
+		if err != nil {
+			return err
+		}
+		env = resolved
 	}
-	slug, err := worktree.ResolveDefaultSlug(workingDir(opts), daemonCfg)
-	if err != nil {
-		return err
-	}
-	path, err := worktree.ResolvePathFromSlugWithRegistry(slug, workingDir(opts), daemonCfg)
-	if err != nil {
-		return err
-	}
-	projectConfigPath := opts.ResolvedPaths.ProjectConfig
-	if opts.ConfigPath == "" || opts.ConfigPath == config.DefaultProjectConfig {
-		projectConfigPath = filepath.Join(path, config.DefaultProjectConfig)
-	}
-	projectCfg, _, err := config.LoadProjectConfig(projectConfigPath)
-	if err != nil {
-		return err
-	}
-	project, err := worktree.NormalizeIdentifierSegment(projectCfg.Project.Name)
-	if err != nil {
-		return fmt.Errorf("resolve project identifier: %w", err)
-	}
-	branch, err := worktree.ResolveBranch(path)
-	if err != nil {
-		return err
-	}
-	env := worktree.RuntimeEnvironment(projectCfg, project, slug, path, branch, proxyApexZone(daemonCfg))
 
 	if output == "json" {
 		encoder := json.NewEncoder(out)
@@ -86,6 +66,53 @@ func runWorktreeEnv(opts *config.GlobalFlags, output string, out io.Writer) erro
 		}
 	}
 	return nil
+}
+
+// inheritedHookEnvironment returns the worktree variables already set by a dev
+// lifecycle hook. Hooks can run outside the target worktree (post_worktree_cleanup
+// runs in the main worktree), so resolving from the working directory would
+// report the wrong worktree.
+func inheritedHookEnvironment() (map[string]string, bool) {
+	if strings.TrimSpace(os.Getenv("DEV_HOOK_NAME")) == "" {
+		return nil, false
+	}
+	env := make(map[string]string, len(worktreeEnvironmentKeys))
+	for _, key := range worktreeEnvironmentKeys {
+		env[key] = os.Getenv(key)
+	}
+	return env, true
+}
+
+func resolveWorktreeEnvironment(opts *config.GlobalFlags) (map[string]string, error) {
+	daemonCfg, err := loadDaemonConfig(opts)
+	if err != nil {
+		return nil, err
+	}
+	slug, err := worktree.ResolveDefaultSlug(workingDir(opts), daemonCfg)
+	if err != nil {
+		return nil, err
+	}
+	path, err := worktree.ResolvePathFromSlugWithRegistry(slug, workingDir(opts), daemonCfg)
+	if err != nil {
+		return nil, err
+	}
+	projectConfigPath := opts.ResolvedPaths.ProjectConfig
+	if opts.ConfigPath == "" || opts.ConfigPath == config.DefaultProjectConfig {
+		projectConfigPath = filepath.Join(path, config.DefaultProjectConfig)
+	}
+	projectCfg, _, err := config.LoadProjectConfig(projectConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	project, err := worktree.NormalizeIdentifierSegment(projectCfg.Project.Name)
+	if err != nil {
+		return nil, fmt.Errorf("resolve project identifier: %w", err)
+	}
+	branch, err := worktree.ResolveBranch(path)
+	if err != nil {
+		return nil, err
+	}
+	return worktree.RuntimeEnvironment(projectCfg, project, slug, path, branch, proxyApexZone(daemonCfg)), nil
 }
 
 func shellQuote(value string) string {
