@@ -18,7 +18,8 @@ func (s *Server) routingStatusForWorktree(slug, project, dirHint string) Worktre
 	}
 
 	routeSlug := localProxyRouteSlug(slug, cfg)
-	localByProcess := localProxyRoutesByProcess(router.ParseMatchers(cfg), routeSlug, s.projectApexZone())
+	matchers := router.ParseMatchers(cfg)
+	localByProcess := localProxyRoutesByProcess(matchers, routeSlug, s.projectApexZone())
 	if strings.TrimSpace(project) == "" {
 		project = cfg.Project.Name
 	}
@@ -33,7 +34,7 @@ func (s *Server) routingStatusForWorktree(slug, project, dirHint string) Worktre
 
 	routing := WorktreeRouting{
 		Local:         localByProcess,
-		Gateway:       gatewayRoutesByProcess(localByProcess, processGatewayExposure(cfg), tunnel),
+		Gateway:       gatewayRoutesByProcess(matchers, processGatewayExposure(cfg), tunnel),
 		GatewayURL:    gatewayURL,
 		GatewayStatus: gatewayStatus,
 	}
@@ -101,45 +102,24 @@ func processGatewayExposure(cfg *config.ProjectConfig) map[string]bool {
 	return out
 }
 
-func gatewayRoutesByProcess(localByProcess map[string][]string, exposedByProcess map[string]bool, tunnel *TunnelStatus) map[string][]string {
-	out := map[string][]string{}
+// gatewayRoutesByProcess lists the public URLs of the exposed processes. They
+// are the local routes with "<label>.<public host>" in place of "<slug>.<apex>".
+func gatewayRoutesByProcess(matchers []router.Matcher, exposedByProcess map[string]bool, tunnel *TunnelStatus) map[string][]string {
 	if tunnel == nil || tunnel.Status != "connected" {
-		return out
+		return map[string][]string{}
 	}
 	gatewayHost := strings.TrimSpace(tunnel.PublicHost)
 	label := strings.TrimSpace(tunnel.Label)
 	if gatewayHost == "" || label == "" {
-		return out
+		return map[string][]string{}
 	}
-	for process, routes := range localByProcess {
-		if !exposedByProcess[process] {
-			continue
+	exposed := make([]router.Matcher, 0, len(matchers))
+	for _, matcher := range matchers {
+		if exposedByProcess[matcher.Process] && matcher.TCPListen == 0 {
+			exposed = append(exposed, matcher)
 		}
-		for _, route := range routes {
-			if !strings.HasPrefix(route, "https://") {
-				continue
-			}
-			hostPath := strings.TrimPrefix(route, "https://")
-			host, path, found := strings.Cut(hostPath, "/")
-			if !found {
-				continue
-			}
-			parts := strings.Split(host, ".")
-			switch {
-			case len(parts) == 2:
-				host = label + "." + gatewayHost
-			case len(parts) >= 3:
-				sub := strings.Join(parts[:len(parts)-2], ".")
-				host = sub + "." + label + "." + gatewayHost
-			default:
-				continue
-			}
-			out[process] = append(out[process], "https://"+host+"/"+path)
-		}
-		sort.Strings(out[process])
-		out[process] = dedupeStrings(out[process])
 	}
-	return out
+	return localProxyRoutesByProcess(exposed, label, gatewayHost)
 }
 
 func (s *Server) tunnelStatusForWorktree(target worktree.Identifier) *TunnelStatus {

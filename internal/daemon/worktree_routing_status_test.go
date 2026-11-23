@@ -28,9 +28,10 @@ func TestLocalProxyRoutesByProcess(t *testing.T) {
 }
 
 func TestGatewayRoutesByProcess_OnlyExposedProcesses(t *testing.T) {
-	localByProcess := map[string][]string{
-		"rails":   {"https://main.localhost/", "https://app.main.localhost/admin"},
-		"webpack": {"https://assets.main.localhost/"},
+	matchers := []router.Matcher{
+		{Process: "rails", Kind: router.SubdomainBase, Path: "/"},
+		{Process: "rails", Kind: router.SubdomainExplicit, Subdomain: "app", Path: "/admin"},
+		{Process: "webpack", Kind: router.SubdomainExplicit, Subdomain: "assets", Path: "/"},
 	}
 	exposed := map[string]bool{"rails": true}
 	tunnel := &TunnelStatus{
@@ -38,7 +39,7 @@ func TestGatewayRoutesByProcess_OnlyExposedProcesses(t *testing.T) {
 		PublicHost: "wip.foocorp.dev",
 		Status:     "connected",
 	}
-	got := gatewayRoutesByProcess(localByProcess, exposed, tunnel)
+	got := gatewayRoutesByProcess(matchers, exposed, tunnel)
 	want := map[string][]string{
 		"rails": {"https://app.xyzz.wip.foocorp.dev/admin", "https://xyzz.wip.foocorp.dev/"},
 	}
@@ -97,5 +98,21 @@ port = "unix"
 	}
 	if len(routing.Gateway["web"]) == 0 {
 		t.Fatalf("expected gateway routes for web, got %#v", routing.Gateway)
+	}
+}
+
+// The local apex zone can have more than one label (e.g. "stephen.test").
+func TestGatewayRoutesByProcess_MultiLabelApexZone(t *testing.T) {
+	matchers := []router.Matcher{
+		{Process: "rails", Kind: router.SubdomainBase, Path: "/"},
+		{Process: "rails", Kind: router.SubdomainExplicit, Subdomain: "api", Path: "/"},
+	}
+	tunnel := &TunnelStatus{Label: "mcp-server", PublicHost: "dropscan.dev", Status: "connected"}
+	got := gatewayRoutesByProcess(matchers, map[string]bool{"rails": true}, tunnel)
+	want := map[string][]string{
+		"rails": {"https://api.mcp-server.dropscan.dev/", "https://mcp-server.dropscan.dev/"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("gatewayRoutesByProcess mismatch:\nwant: %#v\ngot:  %#v", want, got)
 	}
 }
