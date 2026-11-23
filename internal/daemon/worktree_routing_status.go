@@ -19,6 +19,9 @@ func (s *Server) routingStatusForWorktree(slug, project, dirHint string) Worktre
 
 	routeSlug := localProxyRouteSlug(slug, cfg)
 	localByProcess := localProxyRoutesByProcess(router.ParseMatchers(cfg), routeSlug, s.projectApexZone())
+	if strings.TrimSpace(project) == "" {
+		project = cfg.Project.Name
+	}
 	tunnel := s.tunnelStatusForWorktree(worktree.Identifier{Project: project, Slug: slug})
 
 	gatewayURL := strings.TrimSpace(gatewayURLFromConfig(cfg))
