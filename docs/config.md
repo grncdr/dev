@@ -159,7 +159,7 @@ Notes:
 - Proxy routing uses per-process matchers. Requests are matched by subdomain first (explicit beats `*` wildcard), then longest path match, then highest `priority`, then process name.
 - `gateway.expose` controls which processes accept gateway-tunneled requests.
   - Only processes listed in `gateway.expose` are reachable from the gateway.
-  - `mode = "reverse_proxy"`: sends `X-Forwarded-*` headers and does not rewrite response headers/body.
+  - `mode = "reverse_proxy"`: sends `X-Forwarded-Proto` and `X-Forwarded-Host` (the public host) and does not rewrite response headers/body.
   - `mode = "rewrite"`: sends `X-Forwarded-Proto`, omits `X-Forwarded-Host`/`X-Forwarded-For`, rewrites `Location`, rewrites `Set-Cookie Domain`, rewrites RFC cookie `$Domain` on incoming requests, and rewrites text response bodies for local/public host mapping.
   - `rewrite_peer_subdomains = ["minio"]`: when `mode = "rewrite"`, also rewrites peer local hosts that match listed subdomains (for example `minio.main.localhost` -> `minio.<share-label>.<gateway-dns-zone>`).
   - `rewrite_peer_subdomains = ["*"]`: wildcard that rewrites all peer local hosts under the local apex.

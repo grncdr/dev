@@ -204,9 +204,9 @@ This gives "tunnels restored on startup" semantics while still requiring live ag
   - Configured per shared label by `dev share --auth` (or project `gateway.auth` defaults).
   - Enforced by the local daemon before forwarding to exposed processes.
   - Uses constant-time credential comparison.
-- Gateway strips/sets forwarding headers to prevent spoofing:
-  - Preserve canonical `X-Forwarded-For`
-  - Set `X-Forwarded-Proto`, `X-Forwarded-Host`
+- The gateway passes client headers through unchanged. The local agent sets
+  `X-Forwarded-Proto` and, in `reverse_proxy` mode, overwrites `X-Forwarded-Host`
+  with the public host. `X-Forwarded-For` is not set.
 - Label claim operations are authenticated and audited.
 - Gateway TLS certificates are provisioned via ACME (Let’s Encrypt) using DNS-01 with Route53:
   - startup: `*.{dns_zone}`

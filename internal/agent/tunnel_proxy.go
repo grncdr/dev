@@ -342,7 +342,7 @@ func buildTunnelUpstreamRequest(ctx context.Context, req *http.Request, resolved
 	outReq.Host = resolvedLocalHost
 
 	rewriteMode := resolved.GatewayMode == config.GatewayModeRewrite
-	applyForwardedHeaders(outReq, rewriteMode)
+	applyForwardedHeaders(outReq, req.Host, rewriteMode)
 	if rewriteMode && hasPublicApex {
 		RewriteRequestCookieDomainForTunnel(outReq.Header, publicHost, resolvedLocalHost, publicApex, localApex)
 		RewriteRequestOriginForTunnel(outReq.Header, publicHost, resolvedLocalHost, publicApex, localApex)
@@ -411,9 +411,13 @@ func isUpgradeHTTPRequest(req *http.Request) bool {
 	return strings.Contains(connection, "upgrade") && upgrade != ""
 }
 
-func applyForwardedHeaders(req *http.Request, rewriteMode bool) {
+// applyForwardedHeaders sets the forwarded headers on a request whose Host was
+// replaced with the local host. publicHost is the Host the gateway received.
+func applyForwardedHeaders(req *http.Request, publicHost string, rewriteMode bool) {
 	req.Header.Set("X-Forwarded-Proto", "https")
 	if !rewriteMode {
+		// Overwrite any client value: the gateway passes clients' headers through.
+		req.Header.Set("X-Forwarded-Host", publicHost)
 		return
 	}
 	req.Header.Del("X-Forwarded-Host")

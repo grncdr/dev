@@ -174,14 +174,16 @@ func TestHandleTunnelRequest_RewriteMode_RewritesSingletonPeerHostToMainLabel(t 
 	}
 }
 
-func TestHandleTunnelRequest_ReverseProxyMode_SetsGatewayModeHeader(t *testing.T) {
+func TestHandleTunnelRequest_ReverseProxyMode_SetsGatewayModeAndForwardedHostHeaders(t *testing.T) {
 	t.Parallel()
 
 	var upstreamHost string
 	var gatewayMode string
+	var forwardedHost string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upstreamHost = r.Host
 		gatewayMode = r.Header.Get("Dev-Gateway-Mode")
+		forwardedHost = r.Header.Get("X-Forwarded-Host")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -213,6 +215,7 @@ func TestHandleTunnelRequest_ReverseProxyMode_SetsGatewayModeHeader(t *testing.T
 		ProjectApexZone: func() string { return ".localhost" },
 	}
 
+	// The gateway forwards the public Host and adds no X-Forwarded-* headers.
 	req := httptest.NewRequest(http.MethodGet, "https://app.feature.public.example.com/", nil)
 	req.Host = "app.feature.public.example.com"
 
@@ -251,6 +254,9 @@ func TestHandleTunnelRequest_ReverseProxyMode_SetsGatewayModeHeader(t *testing.T
 	}
 	if gatewayMode != config.GatewayModeReverseProxy {
 		t.Fatalf("expected Dev-Gateway-Mode=%q, got %q", config.GatewayModeReverseProxy, gatewayMode)
+	}
+	if forwardedHost != "app.feature.public.example.com" {
+		t.Fatalf("expected X-Forwarded-Host app.feature.public.example.com, got %q", forwardedHost)
 	}
 }
 
@@ -797,7 +803,7 @@ func TestHandleTunnelRequest_RewriteMode_TranslatesUpgradeRequestHeaders(t *test
 	}
 }
 
-func TestHandleTunnelRequest_ReverseProxyMode_LeavesUpgradeRequestHeadersUntouched(t *testing.T) {
+func TestHandleTunnelRequest_ReverseProxyMode_SetsForwardedHostOnUpgrade(t *testing.T) {
 	t.Parallel()
 
 	upstream, handshakes := startCapturingWebSocketServer(t)
@@ -818,7 +824,7 @@ func TestHandleTunnelRequest_ReverseProxyMode_LeavesUpgradeRequestHeadersUntouch
 	req := newWebSocketUpgradeRequest("https://rails.my-feature.wip.example.com/cable")
 	req.Header.Set("Origin", "https://rails.my-feature.wip.example.com")
 	req.Header.Set("Referer", "https://rails.my-feature.wip.example.com/chat")
-	req.Header.Set("X-Forwarded-Host", "rails.my-feature.wip.example.com")
+	req.Header.Set("X-Forwarded-Host", "spoofed.example.com")
 	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "my-feature"}, Label: "my-feature", LocalBaseHost: "my-feature.localhost"}
 
 	resp, _ := runTunnelUpgrade(t, opts, tunnel, req)
@@ -835,7 +841,7 @@ func TestHandleTunnelRequest_ReverseProxyMode_LeavesUpgradeRequestHeadersUntouch
 		t.Fatalf("expected Referer untouched in reverse-proxy mode, got %q", got)
 	}
 	if got := handshake.Header.Get("X-Forwarded-Host"); got != "rails.my-feature.wip.example.com" {
-		t.Fatalf("expected X-Forwarded-Host preserved in reverse-proxy mode, got %q", got)
+		t.Fatalf("expected X-Forwarded-Host set to the public host in reverse-proxy mode, got %q", got)
 	}
 	if got := handshake.Header.Get("Dev-Gateway-Mode"); got != config.GatewayModeReverseProxy {
 		t.Fatalf("expected Dev-Gateway-Mode %q, got %q", config.GatewayModeReverseProxy, got)

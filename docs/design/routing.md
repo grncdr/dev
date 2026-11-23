@@ -148,7 +148,7 @@ If matcher sets `tcp_listen`, daemon opens `127.0.0.1:<tcp_listen>` and forwards
 `gateway.expose` controls which processes accept gateway-tunneled traffic and how request/response handling behaves:
 
 - `gateway.expose.<process>.mode = "reverse_proxy"`:
-  - sets `X-Forwarded-Proto: https`
+  - sets `X-Forwarded-Proto: https` and `X-Forwarded-Host: <public host>` (replacing any client value)
   - does not rewrite response headers/body
 - `gateway.expose.<process>.mode = "rewrite"`:
   - keeps `X-Forwarded-Proto=https` and omits `X-Forwarded-Host` / `X-Forwarded-For`
