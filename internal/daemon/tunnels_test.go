@@ -459,3 +459,47 @@ func TestOpenTunnel_ResolvesSameSlugAcrossProjectsWithoutDir(t *testing.T) {
 		t.Fatalf("expected route to beta.localhost, got %+v ok=%v", route, ok)
 	}
 }
+
+// Running `dev share` again on a shared worktree applies the current
+// [gateway.expose] rules, like it applies the current auth settings.
+func TestOpenTunnel_ReshareAppliesEditedGatewayExpose(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repo := t.TempDir()
+	if err := runGit(repo, "init"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	writeConfig := func(expose string) {
+		t.Helper()
+		cfg := "[project]\nname = \"app\"\n\n[gateway.expose]\n" + expose + "\n\n[process.web]\ncommand = \"echo web\"\nproxy = { path = \"/\" }\nport = \"unix\"\n"
+		if err := os.WriteFile(filepath.Join(repo, ".dev.toml"), []byte(cfg), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeConfig(`web = { mode = "reverse_proxy" }`)
+	slug := defaultSlugForRepo(t, repo)
+	req := TunnelRequest{Identifier: worktree.Identifier{Project: "app", Slug: slug}, Path: repo, Label: "app", GatewayURL: "http://127.0.0.1:1"}
+
+	s := &Server{
+		manager:      NewManager(),
+		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
+	}
+	t.Cleanup(s.stopAllTunnels)
+	if _, err := s.manager.StatusWorktreeFromRef(slug, "app", repo); err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if _, err := s.openTunnel(req); err != nil {
+		t.Fatalf("share: %v", err)
+	}
+	runtimeKey := runtimeKeyForPath(repo)
+	if got := s.manager.gatewayExposeRuleForRuntimeProcess(runtimeKey, "web").Mode; got != config.GatewayModeReverseProxy {
+		t.Fatalf("expected reverse_proxy before the edit, got %q", got)
+	}
+
+	writeConfig(`web = { mode = "rewrite" }`)
+	if _, err := s.openTunnel(req); err != nil {
+		t.Fatalf("reshare: %v", err)
+	}
+	if got := s.manager.gatewayExposeRuleForRuntimeProcess(runtimeKey, "web").Mode; got != config.GatewayModeRewrite {
+		t.Fatalf("expected rewrite after reshare, got %q", got)
+	}
+}

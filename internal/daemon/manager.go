@@ -1205,17 +1205,39 @@ func (m *Manager) StatusWorktreeFromDir(slug, dirHint string) (*WorktreeStatus, 
 	return m.StatusWorktreeFromRef(slug, "", dirHint)
 }
 
+// refreshWorktree resolves a worktree, rereads its .dev.toml, and updates the
+// daemon's record of it (DNS label, [gateway.expose] rules), so config edits
+// apply without restarting its processes.
+func (m *Manager) refreshWorktree(slug, project, dirHint string) (string, *config.ProjectConfig, error) {
+	path, err := m.resolveWorktreePath(slug, project, dirHint)
+	if err != nil {
+		return "", nil, err
+	}
+	cfg, _, err := config.LoadProjectConfig(filepath.Join(path, config.DefaultProjectConfig))
+	if err != nil {
+		return "", nil, err
+	}
+	projectID, err := resolveProjectIdentifier(cfg)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve project identifier: %w", err)
+	}
+	m.mu.Lock()
+	m.registerWorktreeLocked(runtimeKeyForPath(path), runtimeWorktree{
+		Identifier:    worktree.Identifier{Project: projectID, Slug: slug},
+		Path:          path,
+		DNSLabel:      worktree.ProxyDNSLabelForSlug(cfg, slug),
+		GatewayExpose: gatewayExposeRulesForConfig(cfg),
+	})
+	m.mu.Unlock()
+	return path, cfg, nil
+}
+
 func (m *Manager) StatusWorktreeFromRef(slug, project, dirHint string) (*WorktreeStatus, error) {
 	if slug == "" {
 		return nil, errors.New("slug is required")
 	}
 
-	path, err := m.resolveWorktreePath(slug, project, dirHint)
-	if err != nil {
-		return nil, err
-	}
-	cfgPath := filepath.Join(path, config.DefaultProjectConfig)
-	cfg, _, err := config.LoadProjectConfig(cfgPath)
+	path, cfg, err := m.refreshWorktree(slug, project, dirHint)
 	if err != nil {
 		return nil, err
 	}
@@ -1223,17 +1245,7 @@ func (m *Manager) StatusWorktreeFromRef(slug, project, dirHint string) (*Worktre
 	if err != nil {
 		return nil, fmt.Errorf("resolve project identifier: %w", err)
 	}
-
 	runtimeKey := runtimeKeyForPath(path)
-	dnsLabel := worktree.ProxyDNSLabelForSlug(cfg, slug)
-	m.mu.Lock()
-	m.registerWorktreeLocked(runtimeKey, runtimeWorktree{
-		Identifier:    worktree.Identifier{Project: projectID, Slug: slug},
-		Path:          path,
-		DNSLabel:      dnsLabel,
-		GatewayExpose: gatewayExposeRulesForConfig(cfg),
-	})
-	m.mu.Unlock()
 
 	m.mu.Lock()
 	procs, ok := m.processes[runtimeKey]

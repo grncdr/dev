@@ -158,6 +158,7 @@ Notes:
 - `idle_timeout` is optional per proxied process (decimal seconds); default is `300` seconds (5 minutes). Set `idle_timeout = 0` to disable idle shutdown.
 - Proxy routing uses per-process matchers. Requests are matched by subdomain first (explicit beats `*` wildcard), then longest path match, then highest `priority`, then process name.
 - `gateway.expose` controls which processes accept gateway-tunneled requests.
+  - Edits apply on the next `dev share`, `dev start` or `dev status` for the worktree. Processes and the tunnel keep running.
   - Only processes listed in `gateway.expose` are reachable from the gateway.
   - `mode = "reverse_proxy"`: sends `X-Forwarded-Proto` and `X-Forwarded-Host` (the public host) and does not rewrite response headers/body.
   - `mode = "rewrite"`: sends `X-Forwarded-Proto`, omits `X-Forwarded-Host`/`X-Forwarded-For`, rewrites `Location`, rewrites `Set-Cookie Domain`, rewrites RFC cookie `$Domain` on incoming requests, rewrites URLs of the share in incoming query strings and form bodies to the local host, and rewrites the hosts of the shared worktree (`<subdomain>.<slug>.<apex_zone>`) to public hosts in text response bodies and in the `WWW-Authenticate`, `Link` and `Content-Location` response headers.

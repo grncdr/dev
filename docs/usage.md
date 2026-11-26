@@ -105,7 +105,7 @@ Gateway URL comes from project `gateway.url` unless overridden with `--gateway-u
 `--auth` sets Basic Auth credentials enforced by your local daemon for this shared tunnel.
 When `--auth` is omitted, defaults come from project `gateway.auth` if set.
 `--no-auth` disables project `gateway.auth` defaults for this command.
-Running `dev share` again on a shared worktree keeps the tunnel connected and replaces its Basic Auth settings.
+Running `dev share` again on a shared worktree keeps the tunnel connected, replaces its Basic Auth settings, and applies the current `[gateway.expose]` rules from `.dev.toml`.
 
 ### `dev unshare [slug] [--label <label>] [--gateway-url <url>]`
 Stops sharing the worktree.

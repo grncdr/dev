@@ -178,7 +178,8 @@ func (s *Server) runningTunnelsForResume() []TunnelRequest {
 
 func (s *Server) resolveTunnelLocalBaseHost(target worktree.Identifier, dirHint string) (string, error) {
 	slug := target.Slug
-	cfg, repoPath, err := s.projectConfigForWorktree(slug, target.Project, dirHint)
+	// Reread the config so a re-share applies edited [gateway.expose] rules.
+	repoPath, cfg, err := s.manager.refreshWorktree(slug, target.Project, dirHint)
 	if err != nil {
 		return "", err
 	}
