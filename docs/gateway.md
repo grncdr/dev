@@ -103,7 +103,7 @@ Only listed processes accept gateway-tunneled traffic
 
 - `mode = "reverse_proxy"`: standard reverse proxy headers, no host/cookie/body rewrites. Local processes receive `X-Forwarded-Host` (the public hostname) and `X-Forwarded-Proto: https`. `X-Forwarded-For` is not set.
 - `mode = "rewrite"`: rewrites local apex hosts/cookies to the gateway public apex for browser-facing compatibility. Use this when your app cannot easily support both local `.localhost` hostnames and your public gateway DNS zone at the same time.
-- `rewrite_peer_subdomains = ["minio"]`: in rewrite mode, also rewrites peer local hosts for matching subdomains to the active share label hostname (for example `minio.main.localhost` -> `minio.my-feature.wip.example.com`).
+- `rewrite_peer_subdomains = ["minio"]`: in rewrite mode, also rewrites peer local hosts (hosts of other worktrees; hosts of the shared worktree are always rewritten) for matching subdomains to the active share label hostname (for example `minio.main.localhost` -> `minio.my-feature.wip.example.com`).
 - `rewrite_peer_subdomains = ["*"]`: wildcard that rewrites all peer local hosts under the local apex.
 - `debug_log = "<path>"`: appends full HTTP request/response transcripts for traffic tunneled to the process.
 

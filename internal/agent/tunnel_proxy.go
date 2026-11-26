@@ -198,6 +198,7 @@ func HandleTunnelRequest(ctx context.Context, opts TunnelProxyOptions, tunnel Tu
 		if localApex != "" && hasPublicApex {
 			RewriteSetCookieDomainForTunnelWithPeerSubdomains(resp.Header, resolvedLocalHost, publicHost, localApex, publicApex, resolved.RewritePeerSubdomains)
 		}
+		RewriteURLHeadersForTunnel(resp.Header, resolvedLocalHost, rewriteDomain, localApex, publicApex, resolved.RewritePeerSubdomains)
 		if err := RewriteResponseBodyForTunnel(resp, resolvedLocalHost, rewriteDomain, localApex, publicApex, resolved.RewritePeerSubdomains); err != nil {
 			return err
 		}
@@ -400,6 +401,7 @@ func forwardTunnelUpgrade(outReq *http.Request, resolved TunnelResolveResult, pu
 			if localApex != "" && hasPublicApex {
 				RewriteSetCookieDomainForTunnelWithPeerSubdomains(resp.Header, resolvedLocalHost, publicHost, localApex, publicApex, resolved.RewritePeerSubdomains)
 			}
+			RewriteURLHeadersForTunnel(resp.Header, resolvedLocalHost, publicHost, localApex, publicApex, resolved.RewritePeerSubdomains)
 		}
 		return resp.Write(stream)
 	}

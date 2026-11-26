@@ -379,6 +379,37 @@ func replaceHostLocalToPublicWithPeerSubdomains(hostPort, localHost, publicHost,
 	return rewritten, true
 }
 
+// replaceHostLocalSiblingToPublic maps a local host of the shared worktree
+// (any subdomain of its route label under the local apex) to its public host,
+// e.g. secure.feature.localhost -> secure.feature.example.dev.
+func replaceHostLocalSiblingToPublic(hostPort, localHost, publicHost, localApex, publicApex string) (string, bool) {
+	localLabel, publicLabel, ok := gatewayLabelPair(localHost, publicHost, localApex, publicApex)
+	if !ok {
+		return hostPort, false
+	}
+	domain, ok := parseDomainWithApex(normalizeProxyHost(hostPort), localApex)
+	if !ok || !strings.EqualFold(domain.routeLabel, localLabel) {
+		return hostPort, false
+	}
+	rewritten, ok := replaceHostApex(hostPort, localApex, publicApex)
+	if !ok {
+		return hostPort, false
+	}
+	return replaceHostGatewayLabelForApex(rewritten, publicApex, localLabel, publicLabel)
+}
+
+// RewriteURLHeadersForTunnel rewrites local hosts in response headers that
+// carry URLs inside a larger value (WWW-Authenticate resource_metadata, Link,
+// Content-Location) the same way as response bodies.
+func RewriteURLHeadersForTunnel(header http.Header, localHost, publicHost, localApex, publicApex string, rewritePeerSubdomains []string) {
+	for _, name := range []string{"WWW-Authenticate", "Link", "Content-Location"} {
+		values := header[http.CanonicalHeaderKey(name)]
+		for i, value := range values {
+			values[i] = string(rewriteBodyContentForTunnel([]byte(value), localHost, publicHost, localApex, publicApex, rewritePeerSubdomains))
+		}
+	}
+}
+
 func replaceHostLocalPeerToPublic(hostPort, localHost, publicHost, localApex, publicApex string, rewritePeerSubdomains []string) (string, bool) {
 	localLabel, publicLabel, labelOK := gatewayLabelPair(localHost, publicHost, localApex, publicApex)
 	if !labelOK || !shouldRewritePeerHost(hostPort, localApex, localLabel, rewritePeerSubdomains) {
@@ -1000,6 +1031,9 @@ var (
 func rewriteBodyContentForTunnel(decoded []byte, localHost, publicHost, localApex, publicApex string, rewritePeerSubdomains []string) []byte {
 	out := string(rewriteBodyContent(decoded, localHost, publicHost))
 	replaceHost := func(hostPort string) string {
+		if rewritten, ok := replaceHostLocalSiblingToPublic(hostPort, localHost, publicHost, localApex, publicApex); ok {
+			return rewritten
+		}
 		rewritten, ok := replaceHostLocalPeerToPublic(hostPort, localHost, publicHost, localApex, publicApex, rewritePeerSubdomains)
 		if !ok {
 			return hostPort

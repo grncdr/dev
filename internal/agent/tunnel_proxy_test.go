@@ -922,37 +922,39 @@ func TestHandleTunnelRequest_DoesNotRedirectWhenSubdomainPresent(t *testing.T) {
 	}
 }
 
-// runRewriteModeRequest sends req through HandleTunnelRequest in rewrite mode
-// and returns the request the upstream received, with its body.
-func runRewriteModeRequest(t *testing.T, req *http.Request) (*http.Request, string) {
+// rewriteModeShare describes a rewrite-mode share for runRewriteModeTunnel.
+type rewriteModeShare struct {
+	localHost string   // local host of the requested process, e.g. "api.feature.localhost"
+	localBase string   // local base host of the worktree, e.g. "feature.localhost"
+	localApex string   // daemon apex zone, e.g. ".localhost"
+	peers     []string // rewrite_peer_subdomains
+}
+
+// runRewriteModeTunnel sends req through HandleTunnelRequest in rewrite mode to
+// upstream and returns the response the gateway receives, with its body.
+func runRewriteModeTunnel(t *testing.T, share rewriteModeShare, req *http.Request, upstream http.Handler) (*http.Response, string) {
 	t.Helper()
-	received := make(chan *http.Request, 1)
-	bodies := make(chan string, 1)
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		received <- r
-		bodies <- string(body)
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	t.Cleanup(upstream.Close)
-	upstreamURL, err := url.Parse(upstream.URL)
+	server := httptest.NewServer(upstream)
+	t.Cleanup(server.Close)
+	upstreamURL, err := url.Parse(server.URL)
 	if err != nil {
 		t.Fatalf("parse upstream url: %v", err)
 	}
 	opts := TunnelProxyOptions{
 		ResolveRouting: func(host, path string) (TunnelResolveResult, error) {
 			return TunnelResolveResult{
-				ProxyTarget: ProxyTarget{Slug: "feature", Path: "/repo/feature", Process: "rails"},
-				GatewayMode: config.GatewayModeRewrite,
+				ProxyTarget:           ProxyTarget{Slug: "feature", Path: "/repo/feature", Process: "rails"},
+				GatewayMode:           config.GatewayModeRewrite,
+				RewritePeerSubdomains: share.peers,
 			}, nil
 		},
 		EnsureTarget: func(host string, resolved TunnelResolveResult) (ProxyTarget, string, error) {
-			return ProxyTarget{Network: "tcp", Address: upstreamURL.Host, Slug: "feature", Path: "/repo/feature", Process: "rails"}, "api.feature.localhost", nil
+			return ProxyTarget{Network: "tcp", Address: upstreamURL.Host, Slug: "feature", Path: "/repo/feature", Process: "rails"}, share.localHost, nil
 		},
 		EndProxySession: func(targetSlug, targetPath, process string) {},
-		ProjectApexZone: func() string { return ".localhost" },
+		ProjectApexZone: func() string { return share.localApex },
 	}
-	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "feature"}, Label: "feature", LocalBaseHost: "feature.localhost"}
+	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "feature"}, Label: "feature", LocalBaseHost: share.localBase}
 
 	serverSide, clientSide := net.Pipe()
 	defer clientSide.Close()
@@ -965,11 +967,27 @@ func runRewriteModeRequest(t *testing.T, req *http.Request) (*http.Request, stri
 	if err != nil {
 		t.Fatalf("read tunneled response: %v", err)
 	}
-	_, _ = io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if err := <-errCh; err != nil {
 		t.Fatalf("handle tunnel request: %v", err)
 	}
+	return resp, string(body)
+}
+
+// runRewriteModeRequest sends req through a rewrite-mode share and returns the
+// request the upstream received, with its body.
+func runRewriteModeRequest(t *testing.T, req *http.Request) (*http.Request, string) {
+	t.Helper()
+	received := make(chan *http.Request, 1)
+	bodies := make(chan string, 1)
+	share := rewriteModeShare{localHost: "api.feature.localhost", localBase: "feature.localhost", localApex: ".localhost"}
+	runRewriteModeTunnel(t, share, req, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		received <- r
+		bodies <- string(body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
 	return <-received, <-bodies
 }
 
@@ -1004,4 +1022,63 @@ func TestHandleTunnelRequest_RewriteMode_RewritesShareURLsInQueryAndForm(t *test
 	if got.ContentLength != int64(len(wantQuery)) {
 		t.Fatalf("expected Content-Length %d, got %d", len(wantQuery), got.ContentLength)
 	}
+}
+
+// A rewrite-mode share with a two-label local apex and peer subdomains, as in
+// `rewrite_peer_subdomains = ["s3", "secure"]`. The app builds local URLs for
+// itself and its peers; the client must only see public ones.
+func TestHandleTunnelRequest_RewriteMode_RewritesPeerHostsInBodyAndHeaders(t *testing.T) {
+	t.Parallel()
+
+	share := rewriteModeShare{
+		localHost: "api.feature.stephen.test",
+		localBase: "feature.stephen.test",
+		localApex: ".stephen.test",
+		peers:     []string{"s3", "secure"},
+	}
+	newRequest := func(method, path string) *http.Request {
+		req := httptest.NewRequest(method, "https://api.feature.dropscan.dev"+path, nil)
+		req.Host = "api.feature.dropscan.dev"
+		return req
+	}
+
+	t.Run("JSON body", func(t *testing.T) {
+		_, body := runRewriteModeTunnel(t, share, newRequest(http.MethodGet, "/.well-known/oauth-protected-resource/mcp"),
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				_, _ = w.Write([]byte(`{"resource":"https://api.feature.stephen.test/mcp",` +
+					`"authorization_servers":["https://secure.feature.stephen.test"],` +
+					`"download_url":"https://s3.feature.stephen.test/bucket/key?X-Amz-Signature=abc"}`))
+			}))
+		want := `{"resource":"https://api.feature.dropscan.dev/mcp",` +
+			`"authorization_servers":["https://secure.feature.dropscan.dev"],` +
+			`"download_url":"https://s3.feature.dropscan.dev/bucket/key?X-Amz-Signature=abc"}`
+		if body != want {
+			t.Fatalf("body mismatch:\nwant: %s\ngot:  %s", want, body)
+		}
+	})
+
+	t.Run("WWW-Authenticate", func(t *testing.T) {
+		resp, _ := runRewriteModeTunnel(t, share, newRequest(http.MethodPost, "/mcp"),
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="https://api.feature.stephen.test/.well-known/oauth-protected-resource/mcp"`)
+				w.WriteHeader(http.StatusUnauthorized)
+			}))
+		want := `Bearer resource_metadata="https://api.feature.dropscan.dev/.well-known/oauth-protected-resource/mcp"`
+		if got := resp.Header.Get("WWW-Authenticate"); got != want {
+			t.Fatalf("WWW-Authenticate mismatch:\nwant: %s\ngot:  %s", want, got)
+		}
+	})
+
+	t.Run("Location to peer", func(t *testing.T) {
+		resp, _ := runRewriteModeTunnel(t, share, newRequest(http.MethodGet, "/login"),
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Location", "https://secure.feature.stephen.test/oauth/authorize?client_id=x")
+				w.WriteHeader(http.StatusFound)
+			}))
+		want := "https://secure.feature.dropscan.dev/oauth/authorize?client_id=x"
+		if got := resp.Header.Get("Location"); got != want {
+			t.Fatalf("Location mismatch:\nwant: %s\ngot:  %s", want, got)
+		}
+	})
 }
