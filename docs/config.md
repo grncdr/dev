@@ -160,7 +160,7 @@ Notes:
 - `gateway.expose` controls which processes accept gateway-tunneled requests.
   - Only processes listed in `gateway.expose` are reachable from the gateway.
   - `mode = "reverse_proxy"`: sends `X-Forwarded-Proto` and `X-Forwarded-Host` (the public host) and does not rewrite response headers/body.
-  - `mode = "rewrite"`: sends `X-Forwarded-Proto`, omits `X-Forwarded-Host`/`X-Forwarded-For`, rewrites `Location`, rewrites `Set-Cookie Domain`, rewrites RFC cookie `$Domain` on incoming requests, and rewrites text response bodies for local/public host mapping.
+  - `mode = "rewrite"`: sends `X-Forwarded-Proto`, omits `X-Forwarded-Host`/`X-Forwarded-For`, rewrites `Location`, rewrites `Set-Cookie Domain`, rewrites RFC cookie `$Domain` on incoming requests, rewrites URLs of the share in incoming query strings and form bodies to the local host, and rewrites text response bodies for local/public host mapping.
   - `rewrite_peer_subdomains = ["minio"]`: when `mode = "rewrite"`, also rewrites peer local hosts that match listed subdomains (for example `minio.main.localhost` -> `minio.<share-label>.<gateway-dns-zone>`).
   - `rewrite_peer_subdomains = ["*"]`: wildcard that rewrites all peer local hosts under the local apex.
   - `debug_log = "<path>"`: appends full gateway HTTP request/response transcripts to a log file. Relative paths are resolved from the matched process worktree directory. Response bodies are logged after rewrite handling.

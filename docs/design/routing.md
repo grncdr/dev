@@ -155,6 +155,7 @@ If matcher sets `tcp_listen`, daemon opens `127.0.0.1:<tcp_listen>` and forwards
   - rewrites absolute `Location` headers by replacing local apex with gateway public apex
   - rewrites `Set-Cookie` `Domain` values by replacing local apex with gateway public apex
   - rewrites incoming RFC cookie `$Domain` values from public apex back to local apex
+  - rewrites URLs of the share (its label under the public apex) in incoming query strings and `application/x-www-form-urlencoded` bodies to the local host, so values like the OAuth `resource` parameter match the app's local URLs
   - rewrites text response bodies for local/public host mapping
 - `gateway.expose.<process>.debug_log = "<path>"`:
   - appends full tunneled HTTP request/response transcripts to a file (response logging happens after rewrite handling)

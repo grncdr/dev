@@ -409,6 +409,57 @@ func replaceHostPublicToLocal(hostPort, publicHost, localHost, publicApex, local
 	return rewritten, true
 }
 
+// replaceShareHostPublicToLocal maps a public host of this share (its gateway
+// label under the public apex, with any subdomain) to the local host. Unlike
+// replaceHostPublicToLocal it leaves other hosts under the public apex alone.
+func replaceShareHostPublicToLocal(hostPort, publicHost, localHost, publicApex, localApex string) (string, bool) {
+	localLabel, publicLabel, ok := gatewayLabelPair(localHost, publicHost, localApex, publicApex)
+	if !ok {
+		return hostPort, false
+	}
+	withLabel, ok := replaceHostGatewayLabelForApex(hostPort, publicApex, publicLabel, localLabel)
+	if !ok {
+		return hostPort, false
+	}
+	return replaceHostApex(withLabel, publicApex, localApex)
+}
+
+// rewriteFormURLsForTunnel rewrites values of a query string or form body that
+// are absolute URLs of this share to the local host. Pairs that do not change
+// keep their original encoding and order.
+func rewriteFormURLsForTunnel(raw, publicHost, localHost, publicApex, localApex string) (string, bool) {
+	if raw == "" {
+		return raw, false
+	}
+	pairs := strings.Split(raw, "&")
+	changed := false
+	for i, pair := range pairs {
+		key, value, found := strings.Cut(pair, "=")
+		if !found {
+			continue
+		}
+		decoded, err := url.QueryUnescape(value)
+		if err != nil {
+			continue
+		}
+		parsed, err := url.Parse(decoded)
+		if err != nil || !parsed.IsAbs() || parsed.Host == "" {
+			continue
+		}
+		host, ok := replaceShareHostPublicToLocal(parsed.Host, publicHost, localHost, publicApex, localApex)
+		if !ok {
+			continue
+		}
+		parsed.Host = host
+		pairs[i] = key + "=" + url.QueryEscape(parsed.String())
+		changed = true
+	}
+	if !changed {
+		return raw, false
+	}
+	return strings.Join(pairs, "&"), true
+}
+
 func replaceDomainLocalToPublic(domain, localHost, publicHost, localApex, publicApex string) (string, bool) {
 	rewritten, ok := replaceDomainApex(domain, localApex, publicApex)
 	if !ok {

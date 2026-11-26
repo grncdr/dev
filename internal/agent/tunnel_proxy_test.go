@@ -921,3 +921,87 @@ func TestHandleTunnelRequest_DoesNotRedirectWhenSubdomainPresent(t *testing.T) {
 		t.Fatalf("expected resolve error to propagate, got %v", err)
 	}
 }
+
+// runRewriteModeRequest sends req through HandleTunnelRequest in rewrite mode
+// and returns the request the upstream received, with its body.
+func runRewriteModeRequest(t *testing.T, req *http.Request) (*http.Request, string) {
+	t.Helper()
+	received := make(chan *http.Request, 1)
+	bodies := make(chan string, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		received <- r
+		bodies <- string(body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(upstream.Close)
+	upstreamURL, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatalf("parse upstream url: %v", err)
+	}
+	opts := TunnelProxyOptions{
+		ResolveRouting: func(host, path string) (TunnelResolveResult, error) {
+			return TunnelResolveResult{
+				ProxyTarget: ProxyTarget{Slug: "feature", Path: "/repo/feature", Process: "rails"},
+				GatewayMode: config.GatewayModeRewrite,
+			}, nil
+		},
+		EnsureTarget: func(host string, resolved TunnelResolveResult) (ProxyTarget, string, error) {
+			return ProxyTarget{Network: "tcp", Address: upstreamURL.Host, Slug: "feature", Path: "/repo/feature", Process: "rails"}, "api.feature.localhost", nil
+		},
+		EndProxySession: func(targetSlug, targetPath, process string) {},
+		ProjectApexZone: func() string { return ".localhost" },
+	}
+	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "feature"}, Label: "feature", LocalBaseHost: "feature.localhost"}
+
+	serverSide, clientSide := net.Pipe()
+	defer clientSide.Close()
+	errCh := make(chan error, 1)
+	go func() {
+		defer serverSide.Close()
+		errCh <- HandleTunnelRequest(context.Background(), opts, tunnel, req, serverSide)
+	}()
+	resp, err := http.ReadResponse(bufio.NewReader(clientSide), req)
+	if err != nil {
+		t.Fatalf("read tunneled response: %v", err)
+	}
+	_, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err := <-errCh; err != nil {
+		t.Fatalf("handle tunnel request: %v", err)
+	}
+	return <-received, <-bodies
+}
+
+// In rewrite mode the app only knows its local hosts. URLs of this share that
+// the client sends in the query string or a form body (e.g. the OAuth
+// "resource" parameter) must reach it with the local host. Other URLs, even
+// under the public apex, are left alone.
+func TestHandleTunnelRequest_RewriteMode_RewritesShareURLsInQueryAndForm(t *testing.T) {
+	t.Parallel()
+
+	const query = "resource=https%3A%2F%2Fapi.feature.public.example.com%2Fmcp" +
+		"&redirect_uri=https%3A%2F%2Fclaude.ai%2Fapi%2Fmcp%2Fauth_callback" +
+		"&site=https%3A%2F%2Fwww.public.example.com%2F&state=a%2Bb"
+	const wantQuery = "resource=https%3A%2F%2Fapi.feature.localhost%2Fmcp" +
+		"&redirect_uri=https%3A%2F%2Fclaude.ai%2Fapi%2Fmcp%2Fauth_callback" +
+		"&site=https%3A%2F%2Fwww.public.example.com%2F&state=a%2Bb"
+
+	authorize := httptest.NewRequest(http.MethodGet, "https://api.feature.public.example.com/oauth/authorize?"+query, nil)
+	authorize.Host = "api.feature.public.example.com"
+	got, _ := runRewriteModeRequest(t, authorize)
+	if got.URL.RawQuery != wantQuery {
+		t.Fatalf("query mismatch:\nwant: %s\ngot:  %s", wantQuery, got.URL.RawQuery)
+	}
+
+	token := httptest.NewRequest(http.MethodPost, "https://api.feature.public.example.com/oauth/token", strings.NewReader(query))
+	token.Host = "api.feature.public.example.com"
+	token.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	got, body := runRewriteModeRequest(t, token)
+	if body != wantQuery {
+		t.Fatalf("form body mismatch:\nwant: %s\ngot:  %s", wantQuery, body)
+	}
+	if got.ContentLength != int64(len(wantQuery)) {
+		t.Fatalf("expected Content-Length %d, got %d", len(wantQuery), got.ContentLength)
+	}
+}

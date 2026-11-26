@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -158,6 +159,11 @@ func HandleTunnelRequest(ctx context.Context, opts TunnelProxyOptions, tunnel Tu
 	reqBody, err := snapshotRequestBody(req)
 	if err != nil {
 		return err
+	}
+	if rewriteMode && hasPublicApex && isFormRequest(req) {
+		if form, ok := rewriteFormURLsForTunnel(string(reqBody), publicHost, resolvedLocalHost, publicApex, localApex); ok {
+			reqBody = []byte(form)
+		}
 	}
 	if reqBody != nil {
 		outReq.Body = io.NopCloser(bytes.NewReader(reqBody))
@@ -347,6 +353,9 @@ func buildTunnelUpstreamRequest(ctx context.Context, req *http.Request, resolved
 		RewriteRequestCookieDomainForTunnel(outReq.Header, publicHost, resolvedLocalHost, publicApex, localApex)
 		RewriteRequestOriginForTunnel(outReq.Header, publicHost, resolvedLocalHost, publicApex, localApex)
 		RewriteRequestRefererForTunnel(outReq.Header, publicHost, resolvedLocalHost, publicApex, localApex)
+		if query, ok := rewriteFormURLsForTunnel(outReq.URL.RawQuery, publicHost, resolvedLocalHost, publicApex, localApex); ok {
+			outReq.URL.RawQuery = query
+		}
 	}
 	if resolved.GatewayMode != "" {
 		outReq.Header.Set("Dev-Gateway-Mode", resolved.GatewayMode)
@@ -400,6 +409,11 @@ func forwardTunnelUpgrade(outReq *http.Request, resolved TunnelResolveResult, pu
 	}
 	_ = resp.Body.Close()
 	return utils.ProxyBidirectional(stream, nil, upstream, upstreamReader)
+}
+
+func isFormRequest(req *http.Request) bool {
+	mediaType, _, err := mime.ParseMediaType(req.Header.Get("Content-Type"))
+	return err == nil && mediaType == "application/x-www-form-urlencoded"
 }
 
 func isUpgradeHTTPRequest(req *http.Request) bool {
