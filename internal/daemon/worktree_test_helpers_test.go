@@ -14,6 +14,7 @@ type managedTunnel struct {
 	req             TunnelRequest
 	status          string
 	publicHost      string
+	localBaseHost   string
 	lastError       string
 	registerStage   string
 	registerMessage string
@@ -59,6 +60,7 @@ func seededAgentsForTunnels(tunnels map[string]*managedTunnel) map[string]*agent
 			Label:           mt.req.Label,
 			GatewayURL:      gatewayURL,
 			PublicHost:      mt.publicHost,
+			LocalBaseHost:   mt.localBaseHost,
 			Status:          mt.status,
 			LastError:       mt.lastError,
 			RegisterStage:   mt.registerStage,

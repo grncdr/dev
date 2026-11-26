@@ -30,7 +30,7 @@ func (s *Server) openTunnel(req TunnelRequest) (*TunnelStatus, error) {
 		}
 	}
 
-	localBaseHost, err := s.resolveTunnelLocalBaseHost(req.Slug, req.Path)
+	localBaseHost, err := s.resolveTunnelLocalBaseHost(req.Identifier, req.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -176,8 +176,9 @@ func (s *Server) runningTunnelsForResume() []TunnelRequest {
 	return out
 }
 
-func (s *Server) resolveTunnelLocalBaseHost(slug, dirHint string) (string, error) {
-	cfg, repoPath, err := s.projectConfigForSlugFromDir(slug, dirHint)
+func (s *Server) resolveTunnelLocalBaseHost(target worktree.Identifier, dirHint string) (string, error) {
+	slug := target.Slug
+	cfg, repoPath, err := s.projectConfigForWorktree(slug, target.Project, dirHint)
 	if err != nil {
 		return "", err
 	}

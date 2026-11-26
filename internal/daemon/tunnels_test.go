@@ -387,7 +387,8 @@ func TestOpenTunnel_ReshareReplacesAuth(t *testing.T) {
 					AuthUsername: "alice",
 					AuthPassword: "secret",
 				},
-				status: "connected",
+				localBaseHost: "main.localhost",
+				status:        "connected",
 			},
 		}),
 	}
@@ -407,5 +408,54 @@ func TestOpenTunnel_ReshareReplacesAuth(t *testing.T) {
 	}
 	if route.AuthUsername != "" || route.AuthPassword != "" {
 		t.Fatalf("expected no basic auth after --no-auth reshare, got user=%q", route.AuthUsername)
+	}
+}
+
+// On daemon restart, tunnels are reopened from the resume state without a
+// directory. Two projects can each run a "main" worktree; the tunnel must
+// still resolve through its project.
+func TestOpenTunnel_ResolvesSameSlugAcrossProjectsWithoutDir(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	mgr := NewManager()
+	repos := map[string]string{}
+	for _, project := range []string{"alpha", "beta"} {
+		repo := t.TempDir()
+		if err := runGit(repo, "init"); err != nil {
+			t.Fatalf("git init: %v", err)
+		}
+		cfg := "[project]\nname = \"" + project + "\"\n\n[local-dns]\noverrides = { main = \"" + project + "\" }\n"
+		if err := os.WriteFile(filepath.Join(repo, ".dev.toml"), []byte(cfg), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		repos[project] = repo
+		mgr.mu.Lock()
+		mgr.registerWorktreeLocked(runtimeKeyForPath(repo), runtimeWorktree{
+			Identifier: worktree.Identifier{Project: project, Slug: "main"},
+			Path:       repo,
+			DNSLabel:   project,
+		})
+		mgr.mu.Unlock()
+	}
+
+	s := &Server{
+		manager:      mgr,
+		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
+	}
+	t.Cleanup(s.stopAllTunnels)
+
+	status, err := s.openTunnel(TunnelRequest{
+		Identifier: worktree.Identifier{Project: "beta", Slug: "main"},
+		Label:      "beta-share",
+		GatewayURL: "http://127.0.0.1:1",
+	})
+	if err != nil {
+		t.Fatalf("open tunnel without dir: %v", err)
+	}
+	if !status.Identifier.Equal(worktree.Identifier{Project: "beta", Slug: "main"}) {
+		t.Fatalf("expected beta:main tunnel, got %s", status.Identifier)
+	}
+	route, ok := s.localProxyRouteForTunnelRequest("beta-share.example.dev")
+	if !ok || route.LocalHost != "beta.localhost" {
+		t.Fatalf("expected route to beta.localhost, got %+v ok=%v", route, ok)
 	}
 }

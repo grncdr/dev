@@ -54,14 +54,16 @@ func TestLocalProxyHostForTunnelRequest(t *testing.T) {
 					Identifier: worktree.Identifier{Slug: "feature-branch"},
 					Label:      "xyzz",
 				},
-				status: "connected",
+				localBaseHost: "feature-branch.localhost",
+				status:        "connected",
 			},
 			"app": {
 				req: TunnelRequest{
 					Identifier: worktree.Identifier{Slug: "app-slug"},
 					Label:      "app",
 				},
-				status: "connected",
+				localBaseHost: "app-slug.localhost",
+				status:        "connected",
 			},
 		}),
 	}
@@ -93,7 +95,8 @@ func TestLocalProxyRouteForTunnelRequest_IncludesAuthCredentials(t *testing.T) {
 					AuthUsername: "alice",
 					AuthPassword: "secret",
 				},
-				status: "connected",
+				localBaseHost: "feature-branch.localhost",
+				status:        "connected",
 			},
 		}),
 	}
@@ -126,68 +129,6 @@ func TestLocalProxyRouteForTunnelRequest_DoesNotRewriteLocalApexHost(t *testing.
 
 	if _, ok := s.localProxyRouteForTunnelRequest("app.some-other-worktree.localhost"); ok {
 		t.Fatalf("expected no tunnel rewrite for local apex host")
-	}
-}
-
-func TestLocalProxyHostForTunnelRequest_UsesDNSRemap(t *testing.T) {
-	base := t.TempDir()
-	repo := filepath.Join(base, "monorepo")
-	if err := os.MkdirAll(repo, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := runGit(repo, "init"); err != nil {
-		t.Fatalf("git init: %v", err)
-	}
-	cfgBody := `
-[project]
-name = "foocorp"
-
-[local-dns]
-overrides = { main = "foocorp" }
-`
-	cfgPath := filepath.Join(repo, ".dev.toml")
-	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("demo"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := runGit(repo, "add", "."); err != nil {
-		t.Fatalf("git add: %v", err)
-	}
-	if err := runGit(repo, "commit", "-m", "init"); err != nil {
-		t.Fatalf("git commit: %v", err)
-	}
-	cfg, _, err := config.LoadProjectConfig(cfgPath)
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-
-	s := &Server{
-		mainPath:     repo,
-		config:       cfg,
-		daemonConfig: &config.DaemonConfig{LocalProxy: config.DaemonLocalProxyBlock{ApexZone: ".localhost"}},
-		agents: seededAgentsForTunnels(map[string]*managedTunnel{
-			"foocorp": {
-				req: TunnelRequest{
-					Identifier: worktree.Identifier{Slug: "main"},
-					Label:      "foocorp",
-				},
-				status: "connected",
-			},
-		}),
-	}
-	got, ok := s.localProxyHostForTunnelRequest("app.foocorp.foocorp.dev")
-	if !ok || got != "app.foocorp.localhost" {
-		t.Fatalf("expected remapped host rewrite, got %q ok=%v", got, ok)
-	}
-
-	route, ok := s.localProxyRouteForTunnelRequest("app.foocorp.foocorp.dev")
-	if !ok {
-		t.Fatalf("expected route")
-	}
-	if route.LocalHost != "app.foocorp.localhost" {
-		t.Fatalf("expected remapped local host, got %q", route.LocalHost)
 	}
 }
 

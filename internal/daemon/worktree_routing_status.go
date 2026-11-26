@@ -12,7 +12,7 @@ import (
 )
 
 func (s *Server) routingStatusForWorktree(slug, project, dirHint string) WorktreeRouting {
-	cfg, _, err := s.projectConfigForWorktreeStatus(slug, project, dirHint)
+	cfg, _, err := s.projectConfigForWorktree(slug, project, dirHint)
 	if err != nil || cfg == nil {
 		return WorktreeRouting{}
 	}
@@ -41,7 +41,7 @@ func (s *Server) routingStatusForWorktree(slug, project, dirHint string) Worktre
 	return routing
 }
 
-func (s *Server) projectConfigForWorktreeStatus(slug, project, dirHint string) (*config.ProjectConfig, string, error) {
+func (s *Server) projectConfigForWorktree(slug, project, dirHint string) (*config.ProjectConfig, string, error) {
 	path, err := s.manager.resolveWorktreePath(slug, project, dirHint)
 	if err != nil {
 		return nil, "", err

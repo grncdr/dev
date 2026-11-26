@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"dev/internal/agent"
-	"dev/internal/config"
 	"dev/internal/worktree"
 )
 
@@ -83,23 +82,21 @@ func (s *Server) localProxyRouteForTunnelRequest(host string) (tunnelProxyRoute,
 		if !ok {
 			continue
 		}
-		routeSlug, ok := s.tunnelRouteSlug(mt)
-		if !ok {
+		// LocalBaseHost was resolved from the tunnel's project:slug when it was
+		// opened. A slug alone can name worktrees of several projects.
+		localBaseHost := strings.TrimSpace(mt.LocalBaseHost)
+		if localBaseHost == "" {
 			continue
-		}
-		apex := strings.TrimPrefix(strings.ToLower(s.projectApexZone()), ".")
-		if apex == "" {
-			apex = "localhost"
 		}
 		route := tunnelProxyRoute{
 			AuthUsername: mt.AuthUsername,
 			AuthPassword: mt.AuthPassword,
 		}
 		if idx == 0 {
-			route.LocalHost = routeSlug + "." + apex
+			route.LocalHost = localBaseHost
 			return route, true
 		}
-		route.LocalHost = labels[0] + "." + routeSlug + "." + apex
+		route.LocalHost = labels[0] + "." + localBaseHost
 		return route, true
 	}
 	return tunnelProxyRoute{}, false
@@ -148,21 +145,6 @@ func (s *Server) activeTunnelForLabel(label string) (*agent.TunnelStatus, bool) 
 	return nil, false
 }
 
-func (s *Server) tunnelRouteSlug(mt *agent.TunnelStatus) (string, bool) {
-	if mt == nil {
-		return "", false
-	}
-	slug := strings.TrimSpace(mt.Slug)
-	if slug == "" {
-		return "", false
-	}
-	cfg, _, err := s.projectConfigForSlug(slug)
-	if err != nil || cfg == nil {
-		return slug, true
-	}
-	return worktree.ProxyDNSLabelForSlug(cfg, slug), true
-}
-
 func sameResolvedPath(a, b string) bool {
 	if filepath.Clean(a) == filepath.Clean(b) {
 		return true
@@ -196,44 +178,4 @@ func resolveMainWorktreeSlug(mainPath string) (string, error) {
 		return configured, nil
 	}
 	return "main", nil
-}
-
-func (s *Server) projectConfigForSlug(slug string) (*config.ProjectConfig, string, error) {
-	return s.projectConfigForSlugFromDir(slug, "")
-}
-
-func (s *Server) projectConfigForSlugFromDir(slug, dirHint string) (*config.ProjectConfig, string, error) {
-	repoPath := ""
-	ok := false
-	if s.manager != nil {
-		repoPath, ok = s.manager.WorktreePathFromDir(slug, dirHint)
-	}
-	if !ok || repoPath == "" {
-		repoPath = strings.TrimSpace(dirHint)
-		ok = repoPath != ""
-	}
-	if !ok || repoPath == "" {
-		var err error
-		repoPath, err = worktree.ResolvePathFromSlugInDir(slug, s.mainPath)
-		if err != nil {
-			if s == nil || s.config == nil || strings.TrimSpace(s.mainPath) == "" {
-				return nil, "", err
-			}
-			mainSlug := "main"
-			if configured, normalizeErr := worktree.NormalizeIdentifierSegment(s.config.Project.MainSlug); normalizeErr == nil && configured != "" {
-				mainSlug = configured
-			}
-			candidate := strings.TrimSpace(strings.ToLower(slug))
-			if candidate == "main" || candidate == mainSlug {
-				return s.config, s.mainPath, nil
-			}
-			return nil, "", err
-		}
-	}
-	cfgPath := filepath.Join(repoPath, config.DefaultProjectConfig)
-	cfg, _, err := config.LoadProjectConfig(cfgPath)
-	if err != nil {
-		return nil, "", err
-	}
-	return cfg, repoPath, nil
 }
