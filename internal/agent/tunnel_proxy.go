@@ -47,11 +47,10 @@ type TunnelResolveResult struct {
 	// service opts out of share auth. Used only on the base-host redirect path
 	// to decide whether the redirect itself requires auth.
 	DefaultSubdomainNoAuth bool
-	// WebSocketPaths lists request path prefixes whose WebSocket upgrade
-	// requests are exempted from share auth. Browsers cannot attach Basic Auth
-	// to a WebSocket handshake; this is the opt-in escape hatch. Match is
-	// segment-boundary prefix and applies only to upgrade requests.
-	WebSocketPaths []string
+	// PublicPaths lists the request paths and methods that skip share auth
+	// (`public_paths`). Browsers cannot attach Basic Auth to a WebSocket
+	// handshake, and third-party clients have no share credentials.
+	PublicPaths config.PublicPaths
 }
 
 // TunnelProxyOptions holds the callbacks needed by HandleTunnelRequest to
@@ -126,10 +125,11 @@ func HandleTunnelRequest(ctx context.Context, opts TunnelProxyOptions, tunnel Tu
 		return err
 	}
 
-	authExempt := resolved.NoAuth || (isUpgrade && pathMatchesWebSocketExempt(req.URL.Path, resolved.WebSocketPaths))
+	isWebSocket := isUpgrade && strings.EqualFold(req.Header.Get("Upgrade"), "websocket")
+	authExempt := resolved.NoAuth || resolved.PublicPaths.Allows(req.URL.Path, req.Method, isWebSocket)
 	if isUpgrade {
-		logf("tunnel upgrade resolved host=%s path=%s process=%s websocket_paths=%v auth_exempt=%t no_auth=%t",
-			publicHost, req.URL.Path, resolved.Process, resolved.WebSocketPaths, authExempt, resolved.NoAuth)
+		logf("tunnel upgrade resolved host=%s path=%s process=%s auth_exempt=%t no_auth=%t",
+			publicHost, req.URL.Path, resolved.Process, authExempt, resolved.NoAuth)
 	}
 	if !authExempt && !authenticated() {
 		return authRequired("service-protected")
@@ -309,27 +309,6 @@ func localHostForTunnelRequest(publicHost string, tunnel TunnelStatus) string {
 		return strings.Join(append(prefix, baseLabels...), ".")
 	}
 	return localBaseHost
-}
-
-// pathMatchesWebSocketExempt reports whether reqPath falls under one of the
-// configured WebSocket exempt prefixes, using segment-boundary prefix match.
-// "/cable" matches "/cable" and "/cable/x" but not "/cablecar".
-func pathMatchesWebSocketExempt(reqPath string, exempt []string) bool {
-	if reqPath == "" {
-		reqPath = "/"
-	}
-	for _, prefix := range exempt {
-		if prefix == "" {
-			continue
-		}
-		if reqPath == prefix {
-			return true
-		}
-		if strings.HasPrefix(reqPath, prefix+"/") {
-			return true
-		}
-	}
-	return false
 }
 
 // buildTunnelUpstreamRequest clones an inbound tunnel request for the local

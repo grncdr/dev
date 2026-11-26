@@ -502,9 +502,9 @@ func TestHandleTunnelRequest_WebSocketUpgradeOnExemptPathSkipsAuth(t *testing.T)
 	opts := TunnelProxyOptions{
 		ResolveRouting: func(host, path string) (TunnelResolveResult, error) {
 			return TunnelResolveResult{
-				ProxyTarget:    ProxyTarget{Slug: "feature", Path: "/repo/feature", Process: "rails"},
-				GatewayMode:    config.GatewayModeReverseProxy,
-				WebSocketPaths: []string{"/cable"},
+				ProxyTarget: ProxyTarget{Slug: "feature", Path: "/repo/feature", Process: "rails"},
+				GatewayMode: config.GatewayModeReverseProxy,
+				PublicPaths: config.PublicPaths{"/cable": {WebSocket: true}},
 			}, nil
 		},
 		EnsureTarget: func(host string, resolved TunnelResolveResult) (ProxyTarget, string, error) {
@@ -531,9 +531,9 @@ func TestHandleTunnelRequest_WebSocketUpgradeOnNonExemptPathRequiresAuth(t *test
 	opts := TunnelProxyOptions{
 		ResolveRouting: func(host, path string) (TunnelResolveResult, error) {
 			return TunnelResolveResult{
-				ProxyTarget:    ProxyTarget{Slug: "feature", Path: "/repo/feature", Process: "rails"},
-				GatewayMode:    config.GatewayModeReverseProxy,
-				WebSocketPaths: []string{"/cable"},
+				ProxyTarget: ProxyTarget{Slug: "feature", Path: "/repo/feature", Process: "rails"},
+				GatewayMode: config.GatewayModeReverseProxy,
+				PublicPaths: config.PublicPaths{"/cable": {WebSocket: true}},
 			}, nil
 		},
 		EnsureTarget: func(host string, resolved TunnelResolveResult) (ProxyTarget, string, error) {
@@ -561,9 +561,9 @@ func TestHandleTunnelRequest_LogsUpgradeAndAuthDecisions(t *testing.T) {
 	opts := TunnelProxyOptions{
 		ResolveRouting: func(host, path string) (TunnelResolveResult, error) {
 			return TunnelResolveResult{
-				ProxyTarget:    ProxyTarget{Slug: "feature", Path: "/repo/feature", Process: "rails"},
-				GatewayMode:    config.GatewayModeReverseProxy,
-				WebSocketPaths: []string{"/cable"},
+				ProxyTarget: ProxyTarget{Slug: "feature", Path: "/repo/feature", Process: "rails"},
+				GatewayMode: config.GatewayModeReverseProxy,
+				PublicPaths: config.PublicPaths{"/cable": {WebSocket: true}},
 			}, nil
 		},
 		EnsureTarget: func(host string, resolved TunnelResolveResult) (ProxyTarget, string, error) {
@@ -609,9 +609,9 @@ func TestHandleTunnelRequest_PlainHTTPOnWebSocketPathStillRequiresAuth(t *testin
 	opts := TunnelProxyOptions{
 		ResolveRouting: func(host, path string) (TunnelResolveResult, error) {
 			return TunnelResolveResult{
-				ProxyTarget:    ProxyTarget{Slug: "feature", Path: "/repo/feature", Process: "rails"},
-				GatewayMode:    config.GatewayModeReverseProxy,
-				WebSocketPaths: []string{"/cable"},
+				ProxyTarget: ProxyTarget{Slug: "feature", Path: "/repo/feature", Process: "rails"},
+				GatewayMode: config.GatewayModeReverseProxy,
+				PublicPaths: config.PublicPaths{"/cable": {WebSocket: true}},
 			}, nil
 		},
 		EnsureTarget: func(host string, resolved TunnelResolveResult) (ProxyTarget, string, error) {
@@ -673,7 +673,7 @@ func TestHandleTunnelRequest_AuthenticatedWebSocketUpgradeWithoutExemptList(t *t
 	resp, _ := runTunnelUpgrade(t, opts, tunnel, req)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusSwitchingProtocols {
-		t.Fatalf("expected 101 for authenticated WS upgrade with no WebSocketPaths config, got %d", resp.StatusCode)
+		t.Fatalf("expected 101 for authenticated WS upgrade with no PublicPaths config, got %d", resp.StatusCode)
 	}
 }
 
@@ -924,10 +924,12 @@ func TestHandleTunnelRequest_DoesNotRedirectWhenSubdomainPresent(t *testing.T) {
 
 // rewriteModeShare describes a rewrite-mode share for runRewriteModeTunnel.
 type rewriteModeShare struct {
-	localHost string   // local host of the requested process, e.g. "api.feature.localhost"
-	localBase string   // local base host of the worktree, e.g. "feature.localhost"
-	localApex string   // daemon apex zone, e.g. ".localhost"
-	peers     []string // rewrite_peer_subdomains
+	localHost string    // local host of the requested process, e.g. "api.feature.localhost"
+	localBase string    // local base host of the worktree, e.g. "feature.localhost"
+	localApex string    // daemon apex zone, e.g. ".localhost"
+	peers     []string  // rewrite_peer_subdomains
+	auth      [2]string // share basic auth username and password
+	public    config.PublicPaths
 }
 
 // runRewriteModeTunnel sends req through HandleTunnelRequest in rewrite mode to
@@ -946,6 +948,7 @@ func runRewriteModeTunnel(t *testing.T, share rewriteModeShare, req *http.Reques
 				ProxyTarget:           ProxyTarget{Slug: "feature", Path: "/repo/feature", Process: "rails"},
 				GatewayMode:           config.GatewayModeRewrite,
 				RewritePeerSubdomains: share.peers,
+				PublicPaths:           share.public,
 			}, nil
 		},
 		EnsureTarget: func(host string, resolved TunnelResolveResult) (ProxyTarget, string, error) {
@@ -954,7 +957,7 @@ func runRewriteModeTunnel(t *testing.T, share rewriteModeShare, req *http.Reques
 		EndProxySession: func(targetSlug, targetPath, process string) {},
 		ProjectApexZone: func() string { return share.localApex },
 	}
-	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "feature"}, Label: "feature", LocalBaseHost: share.localBase}
+	tunnel := TunnelStatus{Identifier: worktree.Identifier{Slug: "feature"}, Label: "feature", LocalBaseHost: share.localBase, AuthUsername: share.auth[0], AuthPassword: share.auth[1]}
 
 	serverSide, clientSide := net.Pipe()
 	defer clientSide.Close()
@@ -1081,4 +1084,40 @@ func TestHandleTunnelRequest_RewriteMode_RewritesPeerHostsInBodyAndHeaders(t *te
 			t.Fatalf("Location mismatch:\nwant: %s\ngot:  %s", want, got)
 		}
 	})
+}
+
+// A share keeps basic auth and lets third-party clients (e.g. an MCP client)
+// reach only the requests listed in public_paths.
+func TestHandleTunnelRequest_PublicPathsSkipShareAuth(t *testing.T) {
+	t.Parallel()
+
+	share := rewriteModeShare{
+		localHost: "api.feature.localhost",
+		localBase: "feature.localhost",
+		localApex: ".localhost",
+		auth:      [2]string{"alice", "secret"},
+		public: config.PublicPaths{
+			"/mcp":         {Any: true},
+			"/oauth/token": {Methods: map[string]bool{"POST": true}},
+		},
+	}
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	cases := []struct {
+		method, path string
+		want         int
+	}{
+		{http.MethodPost, "/mcp", http.StatusNoContent},
+		{http.MethodPost, "/oauth/token", http.StatusNoContent},
+		{http.MethodGet, "/oauth/token", http.StatusUnauthorized},
+		{http.MethodPost, "/mcpx", http.StatusUnauthorized},
+		{http.MethodGet, "/dev_login", http.StatusUnauthorized},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(tc.method, "https://api.feature.public.example.com"+tc.path, nil)
+		req.Host = "api.feature.public.example.com"
+		resp, _ := runRewriteModeTunnel(t, share, req, upstream)
+		if resp.StatusCode != tc.want {
+			t.Errorf("%s %s: expected %d, got %d", tc.method, tc.path, tc.want, resp.StatusCode)
+		}
+	}
 }

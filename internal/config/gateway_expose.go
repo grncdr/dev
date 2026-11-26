@@ -26,11 +26,10 @@ type GatewayExposeRule struct {
 	// NoAuth disables share auth for this process when set via `auth = false`.
 	// The zero value keeps share auth required, so opting out is explicit.
 	NoAuth bool
-	// WebSocketPaths lists request path prefixes whose WebSocket upgrade
-	// requests are exempted from share auth. Match is segment-boundary prefix
-	// (e.g. "/cable" covers "/cable" and "/cable/x" but not "/cablecar").
-	// The exemption applies only when the request is a WebSocket upgrade.
-	WebSocketPaths []string
+	// PublicPaths lists request path prefixes, and the requests under them, that
+	// skip share auth (`public_paths`, plus `websocket_paths` as an alias for
+	// entries that allow only WebSocket upgrades).
+	PublicPaths PublicPaths
 }
 
 // GatewayExposeModes returns gateway-exposed process modes keyed by process name.
@@ -93,7 +92,8 @@ func parseGatewayExposeRule(raw any) GatewayExposeRule {
 		noAuth = true
 	}
 	rewritePeerSubdomains := normalizeGatewayRewritePeerSubdomains(m["rewrite_peer_subdomains"])
-	webSocketPaths := normalizeGatewayWebSocketPaths(m["websocket_paths"])
+	publicPaths, _ := parseGatewayPublicPaths(m["public_paths"])
+	publicPaths = publicPaths.withWebSocketPaths(normalizeGatewayWebSocketPaths(m["websocket_paths"]))
 	modeRaw, ok := m["mode"]
 	if !ok || modeRaw == nil {
 		return GatewayExposeRule{
@@ -101,7 +101,7 @@ func parseGatewayExposeRule(raw any) GatewayExposeRule {
 			DebugLog:              debugLog,
 			RewritePeerSubdomains: rewritePeerSubdomains,
 			NoAuth:                noAuth,
-			WebSocketPaths:        webSocketPaths,
+			PublicPaths:           publicPaths,
 		}
 	}
 	mode, ok := normalizeGatewayModeValue(modeRaw)
@@ -113,7 +113,7 @@ func parseGatewayExposeRule(raw any) GatewayExposeRule {
 		DebugLog:              debugLog,
 		RewritePeerSubdomains: rewritePeerSubdomains,
 		NoAuth:                noAuth,
-		WebSocketPaths:        webSocketPaths,
+		PublicPaths:           publicPaths,
 	}
 }
 

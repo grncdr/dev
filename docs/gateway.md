@@ -106,6 +106,7 @@ Only listed processes accept gateway-tunneled traffic
 - `rewrite_peer_subdomains = ["minio"]`: in rewrite mode, also rewrites peer local hosts (hosts of other worktrees; hosts of the shared worktree are always rewritten) for matching subdomains to the active share label hostname (for example `minio.main.localhost` -> `minio.my-feature.wip.example.com`).
 - `rewrite_peer_subdomains = ["*"]`: wildcard that rewrites all peer local hosts under the local apex.
 - `debug_log = "<path>"`: appends full HTTP request/response transcripts for traffic tunneled to the process.
+- `public_paths = { "/mcp" = "*", "/oauth/token" = ["POST"] }`: these requests skip share Basic Auth, so third-party clients can reach them while the rest of the share stays protected. See [config.md](config.md) for the matching rules.
 
 To share your locally running server via the gateway:
 

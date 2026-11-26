@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -205,7 +207,7 @@ expose = { rails = { mode = "rewrite", rewrite_peer_subdomains = [" minio ", "AP
 	}
 }
 
-func TestGatewayExposeRules_ParsesWebSocketPaths(t *testing.T) {
+func TestGatewayExposeRules_ParsesWebSocketPathsAsPublicPaths(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -225,21 +227,16 @@ expose = { rails = { mode = "rewrite", websocket_paths = ["/cable", "cable/v2", 
 		t.Fatalf("load config: %v", err)
 	}
 	got := GatewayExposeRules(cfg)
-	want := []string{"/cable", "/cable/v2", "/live"}
-	if len(got["rails"].WebSocketPaths) != len(want) {
-		t.Fatalf("unexpected websocket paths: got %v want %v", got["rails"].WebSocketPaths, want)
+	want := PublicPaths{"/cable": {WebSocket: true}, "/cable/v2": {WebSocket: true}, "/live": {WebSocket: true}}
+	if !reflect.DeepEqual(got["rails"].PublicPaths, want) {
+		t.Fatalf("unexpected public paths: got %#v want %#v", got["rails"].PublicPaths, want)
 	}
-	for i := range want {
-		if got["rails"].WebSocketPaths[i] != want[i] {
-			t.Fatalf("unexpected websocket paths: got %v want %v", got["rails"].WebSocketPaths, want)
-		}
-	}
-	if got["web"].WebSocketPaths != nil {
-		t.Fatalf("expected web WebSocketPaths nil when omitted, got %v", got["web"].WebSocketPaths)
+	if got["web"].PublicPaths != nil {
+		t.Fatalf("expected web PublicPaths nil when omitted, got %#v", got["web"].PublicPaths)
 	}
 }
 
-func TestGatewayExposeRules_BareStringModeHasNoWebSocketPaths(t *testing.T) {
+func TestGatewayExposeRules_BareStringModeHasNoPublicPaths(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -258,7 +255,120 @@ expose = { rails = "rewrite" }
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if got := GatewayExposeRules(cfg)["rails"].WebSocketPaths; got != nil {
-		t.Fatalf("expected bare-string rule WebSocketPaths nil, got %v", got)
+	if got := GatewayExposeRules(cfg)["rails"].PublicPaths; got != nil {
+		t.Fatalf("expected bare-string rule PublicPaths nil, got %#v", got)
+	}
+}
+
+func loadExposeConfig(t *testing.T, expose string) (*ProjectConfig, error) {
+	t.Helper()
+	cfgPath := filepath.Join(t.TempDir(), ".dev.toml")
+	body := "[project]\nname = \"foocorp\"\n\n" + expose + "\n"
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := LoadProjectConfig(cfgPath)
+	return cfg, err
+}
+
+func TestGatewayExposeRules_ParsesPublicPaths(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := loadExposeConfig(t, `
+[gateway.expose.rails]
+mode = "rewrite"
+websocket_paths = ["/cable"]
+
+[gateway.expose.rails.public_paths]
+"/mcp" = "*"
+"/oauth/token" = ["post"]
+"/.well-known/oauth-protected-resource/" = ["GET"]
+"/live" = ["websocket", "GET"]
+`)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	got := GatewayExposeRules(cfg)["rails"].PublicPaths
+	want := PublicPaths{
+		"/mcp":                                  {Any: true},
+		"/oauth/token":                          {Methods: map[string]bool{"POST": true}},
+		"/.well-known/oauth-protected-resource": {Methods: map[string]bool{"GET": true}},
+		"/live":                                 {WebSocket: true, Methods: map[string]bool{"GET": true}},
+		"/cable":                                {WebSocket: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("public paths mismatch:\nwant: %#v\ngot:  %#v", want, got)
+	}
+}
+
+func TestGatewayExposeRules_WebSocketPathsMergeIntoPublicPaths(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := loadExposeConfig(t, `
+[gateway.expose.rails]
+websocket_paths = ["/cable"]
+
+[gateway.expose.rails.public_paths]
+"/cable" = ["GET"]
+`)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	want := PublicPaths{"/cable": {WebSocket: true, Methods: map[string]bool{"GET": true}}}
+	if got := GatewayExposeRules(cfg)["rails"].PublicPaths; !reflect.DeepEqual(got, want) {
+		t.Fatalf("public paths mismatch:\nwant: %#v\ngot:  %#v", want, got)
+	}
+}
+
+func TestLoadProjectConfig_RejectsInvalidPublicPaths(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"relative path":  `"mcp" = "*"`,
+		"empty list":     `"/mcp" = []`,
+		"unknown method": `"/mcp" = ["FETCH"]`,
+		"bad value":      `"/mcp" = true`,
+	}
+	for name, entry := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := loadExposeConfig(t, "[gateway.expose.rails.public_paths]\n"+entry)
+			if err == nil || !strings.Contains(err.Error(), "gateway.expose.rails.public_paths") {
+				t.Fatalf("expected public_paths error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestPublicPathsAllows(t *testing.T) {
+	t.Parallel()
+
+	paths := PublicPaths{
+		"/":            {WebSocket: true},
+		"/mcp":         {Any: true},
+		"/oauth/token": {Methods: map[string]bool{"POST": true}},
+		"/status":      {Methods: map[string]bool{"GET": true}},
+	}
+	cases := []struct {
+		path      string
+		method    string
+		websocket bool
+		want      bool
+	}{
+		{"/mcp", "POST", false, true},
+		{"/mcp/sessions/1", "DELETE", false, true},
+		{"/mcp", "GET", true, true},
+		{"/mcpx", "POST", false, false},
+		{"/oauth/token", "POST", false, true},
+		{"/oauth/token", "GET", false, false},
+		{"/status", "HEAD", false, true},
+		{"/status", "GET", true, true},
+		{"/dev_login", "GET", false, false},
+		{"/dev_login", "GET", true, true},
+		{"", "GET", false, false},
+	}
+	for _, tc := range cases {
+		if got := paths.Allows(tc.path, tc.method, tc.websocket); got != tc.want {
+			t.Errorf("Allows(%q, %q, websocket=%t) = %t, want %t", tc.path, tc.method, tc.websocket, got, tc.want)
+		}
 	}
 }

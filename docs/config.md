@@ -46,7 +46,11 @@ auth = false # publicly reachable with no Basic Auth, even when gateway.auth is 
 
 [gateway.expose.rails]
 mode = "rewrite"
-websocket_paths = ["/cable"] # WS upgrade requests on these paths skip share auth
+
+[gateway.expose.rails.public_paths] # these requests skip share auth
+"/cable" = ["websocket"]          # WebSocket upgrades only
+"/mcp" = "*"                      # every request
+"/oauth/token" = ["POST"]
 
 [process.postgres]
 singleton = true
@@ -166,7 +170,8 @@ Notes:
   - `rewrite_peer_subdomains = ["*"]`: wildcard that rewrites all peer local hosts under the local apex.
   - `debug_log = "<path>"`: appends full gateway HTTP request/response transcripts to a log file. Relative paths are resolved from the matched process worktree directory. Response bodies are logged after rewrite handling.
   - `auth = false`: opts this process out of share auth, making it publicly reachable with no Basic Auth even when `gateway.auth` (or `--auth`) protects the rest of the tunnel. Defaults to `true`; requires the table form (not the bare-string `mode` shorthand). If the worktree's default-subdomain service opts out, the bare `<label>.<zone>` URL also redirects without auth.
-  - `websocket_paths = ["/cable", ...]`: WebSocket upgrade requests whose URL path falls under one of the listed prefixes skip share auth. Match is segment-boundary prefix (`"/cable"` covers `/cable` and `/cable/v2` but not `/cablecar`). The exemption applies only to upgrade requests; plain HTTP requests to the same paths still require auth. Browsers cannot attach Basic Auth to a `WebSocket` handshake, so this is the opt-in escape hatch for Action Cable, Vite HMR, Phoenix LiveView, and the like. Requires the table form.
+  - `public_paths = { "/mcp" = "*", "/oauth/token" = ["POST"], "/cable" = ["websocket"] }`: requests that skip share auth, so third-party clients (an MCP client, a webhook sender) can reach these paths while the rest of the share keeps Basic Auth. Keys are path prefixes that must start with `/`, matched on segment boundaries (`"/mcp"` covers `/mcp` and `/mcp/x` but not `/mcpx`; `"/"` covers every path). Values are `"*"` (every request), or a list of HTTP methods and `"websocket"` (WebSocket upgrade requests). Methods match only plain requests, and `GET` also covers `HEAD`. A request is public when any matching prefix allows it. Browsers cannot attach Basic Auth to a `WebSocket` handshake, so use `"websocket"` for Action Cable, Vite HMR, Phoenix LiveView, and the like. Invalid entries make the config fail to load. Requires the table form.
+  - `websocket_paths = ["/cable", ...]`: alias for `public_paths` entries with `["websocket"]`.
 - `subdomain = null` matches `<slug>.<apex_zone>`. `subdomain = "app"` matches `app.<slug>.<apex_zone>`. `subdomain = "*"` matches any subdomain under `<slug>.<apex_zone>`.
 - `subdomains = [...]` is also supported in a matcher to map multiple subdomains in one block.
 - `path` defaults to `/`, `match` defaults to `prefix`, and `priority` defaults to `0`.

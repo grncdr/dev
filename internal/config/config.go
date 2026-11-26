@@ -449,6 +449,9 @@ func validateProjectConfig(cfg *ProjectConfig) error {
 	if cfg.Project.Name == "" {
 		return errors.New("project.name is required")
 	}
+	if err := validateGatewayPublicPaths(cfg); err != nil {
+		return err
+	}
 	names := make([]string, 0, len(cfg.Processes))
 	for name := range cfg.Processes {
 		names = append(names, name)
